@@ -9,6 +9,7 @@ import {
 import { AudioOutputDevice, SongMetadata, MediaSessionItem } from '../../types/island';
 
 import { useSkillStore } from '../../skills/store';
+import { useSystemHardware } from '../../hooks/useSystemHardware';
 import { listen } from '@tauri-apps/api/event';
 import {
   NativeSearchDrawer,
@@ -237,6 +238,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
   const currentSessionId = propSessionId || song.session_id || '';
   const activeSessions: MediaSessionItem[] = propActiveSessions || song.active_sessions || [];
   const activeSession = activeSessions.find((s) => s.session_id === currentSessionId) || activeSessions[0];
+  const { telemetry: systemTelemetry, toggleMute: toggleSystemMute } = useSystemHardware();
   const [isSessionPopoverOpen, setIsSessionPopoverOpen] = useState(false);
 
   // CASA Native Player & Playback Source Switcher State
@@ -1866,6 +1868,15 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           isShuffle={isShuffle}
           isSmartShuffle={isSmartShuffle}
           audioOutput={audioOutput}
+          audioDeviceType={systemTelemetry.audio_device_type}
+          audioDeviceName={systemTelemetry.audio_device_name}
+          masterVolume={systemTelemetry.master_volume}
+          isMuted={systemTelemetry.is_muted}
+          batteryPercentage={systemTelemetry.battery_percentage}
+          isCharging={systemTelemetry.is_charging}
+          hasBattery={systemTelemetry.has_battery}
+          isCapsLocked={systemTelemetry.is_caps_locked}
+          onToggleMute={toggleSystemMute}
           activeAppName={activeSession?.app_name}
           sessionCount={activeSessions.length}
           onOpenSpotify={async () => {
@@ -1923,6 +1934,15 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           effectiveTitle={effectiveTitle}
           effectiveArtist={effectiveArtist}
           audioOutput={audioOutput}
+          audioDeviceType={systemTelemetry.audio_device_type}
+          audioDeviceName={systemTelemetry.audio_device_name}
+          masterVolume={systemTelemetry.master_volume}
+          isMuted={systemTelemetry.is_muted}
+          batteryPercentage={systemTelemetry.battery_percentage}
+          isCharging={systemTelemetry.is_charging}
+          hasBattery={systemTelemetry.has_battery}
+          isCapsLocked={systemTelemetry.is_caps_locked}
+          onToggleMute={toggleSystemMute}
           activeAppName={activeSession?.app_name}
           sessionCount={activeSessions.length}
           currentTimeSeconds={playbackSource === 'native' ? nativeProgressMs / 1000 : preciseTimeMs / 1000}
