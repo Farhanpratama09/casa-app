@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { CasaAudioProvider } from './context/CasaAudioContext';
 import { CasaIsland } from './components/CasaIsland';
 import { DevTriggerBar } from './components/views/DevTriggerBar';
 import { IslandMode, CompactSubtype } from './types/island';
@@ -52,29 +53,31 @@ export function App() {
   };
 
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-transparent flex flex-col items-center pointer-events-none">
-      {/* Dynamic Floating Island Centered at Top */}
-      <CasaIsland
-        mode={mode}
-        compactSubtype={compactSubtype}
-        onChangeMode={handleSetMode}
-        isGamingMode={isGamingMode}
-        showDevTrigger={showDevTrigger}
-        onToggleDevTrigger={handleToggleDevTrigger}
-      />
-
-      {/* Developer Trigger Bar flowing naturally under Island with clean flexbox */}
-      {showDevTrigger && (
-        <DevTriggerBar
-          currentMode={mode}
+    <CasaAudioProvider>
+      <main className="relative w-screen h-screen overflow-hidden bg-transparent flex flex-col items-center pointer-events-none">
+        {/* Dynamic Floating Island Centered at Top */}
+        <CasaIsland
+          mode={mode}
           compactSubtype={compactSubtype}
-          onSetMode={handleSetMode}
+          onChangeMode={handleSetMode}
           isGamingMode={isGamingMode}
-          onToggleGaming={handleToggleGaming}
-          onClose={handleToggleDevTrigger}
+          showDevTrigger={showDevTrigger}
+          onToggleDevTrigger={handleToggleDevTrigger}
         />
-      )}
-    </main>
+
+        {/* Developer Trigger Bar flowing naturally under Island with clean flexbox */}
+        {showDevTrigger && (
+          <DevTriggerBar
+            currentMode={mode}
+            compactSubtype={compactSubtype}
+            onSetMode={handleSetMode}
+            isGamingMode={isGamingMode}
+            onToggleGaming={handleToggleGaming}
+            onClose={handleToggleDevTrigger}
+          />
+        )}
+      </main>
+    </CasaAudioProvider>
   );
 }
 

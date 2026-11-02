@@ -1,8 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Zap } from 'lucide-react';
 import { useSkillStore } from '../../skills/store';
+import { useSystemHardware } from '../../hooks/useSystemHardware';
 import { SashaEyes } from '@/components/views/SashaEyes';
 import { MoonRabbitEmblem } from '@/components/MoonRabbitEmblem';
 import { TimerPillSlot } from '@/features/timer/TimerPillSlot';
+import {
+  BunnyHeadphonesWired,
+  BunnyHeadphonesBluetooth,
+  MoonCraterSpeaker,
+} from '../system/LunarIcons';
 
 interface IdlePillViewProps {
   isDualBubble?: boolean;
@@ -11,6 +19,86 @@ interface IdlePillViewProps {
   isTuckedPeek?: boolean;
   onExpandSkill?: (skillId: string) => void;
 }
+
+/**
+ * Pure Circle Battery Ring (Mode Compact / Idle)
+ * Cincin melingkar murni (Circle Only) tanpa teks angka persentase.
+ * Arc melingkar proporsional (0–100%):
+ * - Charging: Hijau Emerald (#34D399) + ikon petir mikro di tengah.
+ * - Non-charging: Lunar Cyan (#38BDF8) bersih tanpa teks/ikon di dalamnya.
+ */
+export const PureCircleBattery: React.FC<{
+  percentage: number;
+  isCharging: boolean;
+  hasBattery?: boolean;
+  size?: number;
+  className?: string;
+}> = ({ percentage, isCharging, hasBattery = true, size = 18, className = '' }) => {
+  if (!hasBattery) return null;
+
+  const center = size / 2;
+  const radius = center - 1.8;
+  const circumference = 2 * Math.PI * radius;
+  const clamped = Math.max(0, Math.min(100, Math.round(percentage)));
+  const offset = circumference - (clamped / 100) * circumference;
+
+  const strokeColor = isCharging
+    ? '#34D399' // Emerald charging
+    : clamped <= 20
+    ? '#F43F5E' // Rose low
+    : '#38BDF8'; // Lunar Cyan normal
+
+  const glowStyle = isCharging
+    ? { filter: 'drop-shadow(0 0 3px rgba(52, 211, 153, 0.75))' }
+    : clamped <= 20
+    ? { filter: 'drop-shadow(0 0 3px rgba(244, 63, 94, 0.75))' }
+    : { filter: 'drop-shadow(0 0 3px rgba(56, 189, 248, 0.65))' };
+
+  return (
+    <div
+      className={`relative flex items-center justify-center shrink-0 select-none ${className}`}
+      style={{ width: size, height: size }}
+      title={`Baterai: ${clamped}%${isCharging ? ' (Charging)' : ''}`}
+    >
+      <svg
+        className="w-full h-full -rotate-90 transform"
+        viewBox={`0 0 ${size} ${size}`}
+      >
+        {/* Track orbit redup */}
+        <circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          className="text-white/[0.08]"
+        />
+        {/* Arc baterai terisi proporsional */}
+        <circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          style={glowStyle}
+          className="transition-all duration-500 ease-out"
+        />
+      </svg>
+
+      {/* Pusat Cincin: Petir mikro saat charging, bersih tanpa teks saat normal */}
+      {isCharging && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <Zap className="w-2.5 h-2.5 text-[#34D399] animate-pulse fill-[#34D399]/40" />
+        </div>
+      )}
+    </div>
+  );
+};
 
 // Visualizer Gelombang Mikro (Equalizer)
 const MiniEqualizerGlyph: React.FC<{ active?: boolean }> = ({ active = true }) => (
@@ -126,6 +214,127 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
   const [timeStr, setTimeStr] = useState('');
   const [dateStr, setDateStr] = useState('');
 
+  // Hardware Telemetry & Dynamic Morphing Alert
+  const { telemetry } = useSystemHardware();
+  const [activeAlert, setActiveAlert] = useState<{
+    id: number;
+    icon: React.ReactNode;
+    text: string;
+    colorClass: string;
+    bgClass: string;
+    borderClass: string;
+  } | null>(null);
+  const alertTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const prevCapsRef = useRef(telemetry.is_caps_locked);
+  const prevChargingRef = useRef(telemetry.is_charging);
+  const prevDeviceRef = useRef(telemetry.audio_device_name);
+  const isInitialMount = useRef(true);
+
+  useEffect(() => {
+    // 0. Cold boot guard: Jangan picu false alert pada inisialisasi awal
+    if (isInitialMount.current) {
+      prevCapsRef.current = telemetry.is_caps_locked;
+      prevChargingRef.current = telemetry.is_charging;
+      prevDeviceRef.current = telemetry.audio_device_name;
+
+      // Baseline terbentuk setelah telemetry OS pertama kali diterima (bukan placeholder default)
+      if (telemetry.audio_device_name && telemetry.audio_device_name !== 'Default Audio Device') {
+        isInitialMount.current = false;
+      }
+      return;
+    }
+
+    let triggeredAlert: {
+      id: number;
+      icon: React.ReactNode;
+      text: string;
+      colorClass: string;
+      bgClass: string;
+      borderClass: string;
+    } | null = null;
+
+    // 1. Caps Lock State Change
+    if (prevCapsRef.current !== telemetry.is_caps_locked) {
+      prevCapsRef.current = telemetry.is_caps_locked;
+      triggeredAlert = {
+        id: Date.now(),
+        icon: (
+          <span
+            className={`w-2 h-2 rounded-full shrink-0 ${
+              telemetry.is_caps_locked
+                ? 'bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.9)]'
+                : 'bg-white/40'
+            }`}
+          />
+        ),
+        text: telemetry.is_caps_locked ? 'CAPS LOCK AKTIF' : 'CAPS LOCK NONAKTIF',
+        colorClass: telemetry.is_caps_locked ? 'text-rose-300' : 'text-white/70',
+        borderClass: telemetry.is_caps_locked ? 'border-rose-500/40' : 'border-white/20',
+        bgClass: telemetry.is_caps_locked
+          ? 'bg-rose-500/15 shadow-[0_0_12px_rgba(244,63,94,0.35)]'
+          : 'bg-white/[0.08]',
+      };
+    }
+    // 2. Charger Connect / Disconnect
+    else if (prevChargingRef.current !== telemetry.is_charging) {
+      prevChargingRef.current = telemetry.is_charging;
+      triggeredAlert = {
+        id: Date.now(),
+        icon: (
+          <Zap className="w-3 h-3 text-[#34D399] shrink-0 animate-pulse fill-[#34D399]/30" />
+        ),
+        text: telemetry.is_charging
+          ? `CHARGING • ${telemetry.battery_percentage}%`
+          : `BATTERY • ${telemetry.battery_percentage}%`,
+        colorClass: telemetry.is_charging ? 'text-emerald-300' : 'text-sky-300',
+        borderClass: telemetry.is_charging ? 'border-emerald-500/40' : 'border-sky-500/40',
+        bgClass: telemetry.is_charging
+          ? 'bg-emerald-500/15 shadow-[0_0_12px_rgba(52,211,153,0.35)]'
+          : 'bg-sky-500/15 shadow-[0_0_12px_rgba(56,189,248,0.25)]',
+      };
+    }
+    // 3. Audio Endpoint Connect / Switch (hanya picu saat berpindah perangkat riil, bukan transisi dari placeholder default)
+    else if (
+      prevDeviceRef.current &&
+      prevDeviceRef.current !== 'Default Audio Device' &&
+      prevDeviceRef.current !== telemetry.audio_device_name
+    ) {
+      prevDeviceRef.current = telemetry.audio_device_name;
+      const IconComp =
+        telemetry.audio_device_type === 'headphone_bluetooth'
+          ? BunnyHeadphonesBluetooth
+          : telemetry.audio_device_type === 'headphone_wired'
+          ? BunnyHeadphonesWired
+          : MoonCraterSpeaker;
+      triggeredAlert = {
+        id: Date.now(),
+        icon: <IconComp size={13} className="w-3.5 h-3.5 shrink-0 text-sky-400" />,
+        text: `AUDIO: ${telemetry.audio_device_name}`,
+        colorClass: 'text-sky-300',
+        borderClass: 'border-sky-500/40',
+        bgClass: 'bg-sky-500/15 shadow-[0_0_12px_rgba(56,189,248,0.35)]',
+      };
+    } else {
+      prevDeviceRef.current = telemetry.audio_device_name;
+    }
+
+    if (triggeredAlert) {
+      if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+      setActiveAlert(triggeredAlert);
+      alertTimerRef.current = setTimeout(() => {
+        setActiveAlert(null);
+        alertTimerRef.current = null;
+      }, 2500); // 2.5s auto-dismiss
+    }
+  }, [
+    telemetry.is_caps_locked,
+    telemetry.is_charging,
+    telemetry.audio_device_name,
+    telemetry.battery_percentage,
+    telemetry.audio_device_type,
+  ]);
+
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -181,18 +390,47 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
         {/* Separator 1 */}
         <span className="h-3 w-[1px] bg-white/[0.08] mx-2.5 shrink-0" aria-hidden="true" />
 
-        {/* Tengah: Jam Digital & Tanggal */}
+        {/* Tengah: Jam Digital & Tanggal / Dynamic Morphing Alert */}
         <div
           data-idle-clock-date="true"
           className="flex items-center shrink-0 tabular-nums select-none"
         >
-          <span className="font-sans font-bold text-white/95 text-[12.5px] tracking-tight">
-            {timeStr || '19.13'}
-          </span>
-          <span className="text-white/25 mx-1.5">•</span>
-          <span className="font-sans font-medium text-white/45 text-[11px]">
-            {dateStr}
-          </span>
+          <AnimatePresence mode="wait">
+            {activeAlert ? (
+              <motion.div
+                key={`playing-alert-${activeAlert.id}`}
+                initial={{ opacity: 0, y: 5, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -5, scale: 0.95 }}
+                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                className={`h-[22px] px-2 rounded-full border flex items-center gap-1 select-none ${activeAlert.bgClass} ${activeAlert.borderClass}`}
+              >
+                {activeAlert.icon}
+                <span
+                  className={`font-sans text-[8.5px] tracking-[0.12em] uppercase font-bold truncate max-w-[130px] ${activeAlert.colorClass}`}
+                >
+                  {activeAlert.text}
+                </span>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="playing-clock"
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 5 }}
+                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                className="flex items-center tabular-nums"
+              >
+                <span className="font-mono font-bold text-white/95 text-[12px] tracking-tight tabular-nums">
+                  {timeStr || '19.13'}
+                </span>
+                <span className="text-white/25 mx-1.5">•</span>
+                <span className="font-sans font-medium text-white/45 text-[11px]">
+                  {dateStr}
+                </span>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Separator 2: Simetris dengan ml-2.5 */}
@@ -220,9 +458,17 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
             <MarqueeTrack title={trackTitle} artist={artistName} isPlaying={isPlaying} />
           </div>
 
-          {/* Equalizer Terkunci */}
-          <div className="shrink-0 flex items-center">
+          {/* Equalizer Terkunci & Pure Circle Battery Ring */}
+          <div className="shrink-0 flex items-center gap-2">
             <MiniEqualizerGlyph active={isPlaying} />
+            {telemetry.has_battery && (
+              <PureCircleBattery
+                percentage={telemetry.battery_percentage}
+                isCharging={telemetry.is_charging}
+                hasBattery={telemetry.has_battery}
+                size={18}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -252,25 +498,62 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
         {/* Separator */}
         <span className="h-3 w-[1px] bg-white/[0.08] shrink-0" aria-hidden="true" />
 
-        {/* Tengah: Jam Digital & Tanggal */}
+        {/* Tengah: Jam Digital & Tanggal / Dynamic Morphing Alert */}
         <div
           data-idle-clock-date="true"
           className="flex items-center shrink-0 tabular-nums select-none"
         >
-          <span className="font-sans font-bold text-white/95 text-[12.5px] tracking-tight">
-            {timeStr || '19.13'}
-          </span>
-          <span className="text-white/25 mx-1.5">•</span>
-          <span className="font-sans font-medium text-white/45 text-[11px]">
-            {dateStr}
-          </span>
+          <AnimatePresence mode="wait">
+            {activeAlert ? (
+              <motion.div
+                key={`playing-alert-${activeAlert.id}`}
+                initial={{ opacity: 0, y: 5, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -5, scale: 0.95 }}
+                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                className={`h-[22px] px-2 rounded-full border flex items-center gap-1 select-none ${activeAlert.bgClass} ${activeAlert.borderClass}`}
+              >
+                {activeAlert.icon}
+                <span
+                  className={`font-sans text-[8.5px] tracking-[0.12em] uppercase font-bold truncate max-w-[130px] ${activeAlert.colorClass}`}
+                >
+                  {activeAlert.text}
+                </span>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="playing-clock"
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 5 }}
+                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                className="flex items-center tabular-nums"
+              >
+                <span className="font-mono font-bold text-white/95 text-[12px] tracking-tight tabular-nums">
+                  {timeStr || '19.13'}
+                </span>
+                <span className="text-white/25 mx-1.5">•</span>
+                <span className="font-sans font-medium text-white/45 text-[11px]">
+                  {dateStr}
+                </span>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Separator */}
         <span className="h-3 w-[1px] bg-white/[0.08] shrink-0" aria-hidden="true" />
 
         {/* Sisi Kanan: Countdown Timer Slot */}
-        <div className={`shrink-0 flex items-center justify-end ${isExpanded ? 'pointer-events-none' : ''}`}>
+        <div className={`shrink-0 flex items-center gap-2 justify-end ${isExpanded ? 'pointer-events-none' : ''}`}>
+          {telemetry.has_battery && (
+            <PureCircleBattery
+              percentage={telemetry.battery_percentage}
+              isCharging={telemetry.is_charging}
+              hasBattery={telemetry.has_battery}
+              size={18}
+            />
+          )}
           <TimerPillSlot
             state={timerState}
             onClick={() => {
@@ -307,9 +590,9 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
         <SashaEyes />
       </div>
 
-      {/* Sub-layer 2: Jam Digital & Hari Tanggal (Awake 290px) */}
+      {/* Sub-layer 2: Jam Digital & Hari Tanggal + Mini Circular Battery Ring (Awake 290px) */}
       <div
-        className={`absolute inset-0 w-[290px] px-4 py-1.5 mx-auto flex items-center justify-between transition-opacity duration-300 ${
+        className={`absolute inset-0 w-[290px] px-3.5 py-1.5 mx-auto flex items-center justify-between transition-opacity duration-300 ${
           isExpanded || isRestingSleep
             ? 'opacity-0 pointer-events-none'
             : 'opacity-100 pointer-events-auto'
@@ -326,18 +609,60 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
         {/* Separator Tengah */}
         <span className="h-3 w-[1px] bg-white/[0.08] shrink-0" aria-hidden="true" />
 
-        {/* Sisi Kanan: Jam Digital & Hari Tanggal (Rata Kanan Proporsional) */}
+        {/* Sisi Kanan: Dynamic Morphing Pill (Jam + Baterai vs Hardware Alert) */}
         <div
           data-idle-clock-date="true"
-          className="flex items-center justify-end shrink-0 tabular-nums select-none"
+          className="flex items-center justify-end shrink-0 select-none min-w-0"
         >
-          <span className="font-sans font-bold text-white/95 text-[12.5px] tracking-tight">
-            {timeStr || '19.13'}
-          </span>
-          <span className="text-white/25 mx-1.5">•</span>
-          <span className="font-sans font-medium text-white/45 text-[11px]">
-            {dateStr}
-          </span>
+          <AnimatePresence mode="wait">
+            {activeAlert ? (
+              <motion.div
+                key={`compact-alert-${activeAlert.id}`}
+                initial={{ opacity: 0, y: 6, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.95 }}
+                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                className={`h-[24px] px-2.5 rounded-full border flex items-center gap-1.5 select-none ${activeAlert.bgClass} ${activeAlert.borderClass}`}
+              >
+                {activeAlert.icon}
+                <span
+                  className={`font-sans text-[9px] tracking-[0.14em] uppercase font-bold truncate max-w-[170px] ${activeAlert.colorClass}`}
+                >
+                  {activeAlert.text}
+                </span>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="compact-clock-battery"
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 6 }}
+                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                className="flex items-center gap-2 select-none"
+              >
+                {/* Jam Digital & Hari Tanggal */}
+                <div className="flex items-center tabular-nums">
+                  <span className="font-mono font-bold text-white/95 text-[12px] tracking-tight tabular-nums">
+                    {timeStr || '19.38'}
+                  </span>
+                  <span className="text-white/25 mx-1.5">•</span>
+                  <span className="font-sans font-medium text-white/45 text-[11px]">
+                    {dateStr}
+                  </span>
+                </div>
+
+                {/* Pure Circle Battery Ring (No Text) */}
+                {telemetry.has_battery && (
+                  <PureCircleBattery
+                    percentage={telemetry.battery_percentage}
+                    isCharging={telemetry.is_charging}
+                    hasBattery={telemetry.has_battery}
+                    size={18}
+                  />
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>

@@ -137,7 +137,9 @@ pub fn read_display_brightness_wmi() -> (u8, bool) {
     unsafe {
         use windows::core::{w, BSTR};
         use windows::Win32::System::Com::{
-            CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+            CoCreateInstance, CoInitializeEx, CoInitializeSecurity, CoSetProxyBlanket,
+            CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL,
+            RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
         };
         use windows::Win32::System::Variant::VARIANT;
         use windows::Win32::System::Wmi::{
@@ -145,38 +147,80 @@ pub fn read_display_brightness_wmi() -> (u8, bool) {
             WBEM_INFINITE,
         };
 
+        const RPC_C_AUTHN_WINNT: u32 = 10;
+        const RPC_C_AUTHZ_NONE: u32 = 0;
+
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        if let Ok(locator) =
-            CoCreateInstance::<_, IWbemLocator>(&WbemLocator, None, CLSCTX_INPROC_SERVER)
-        {
-            let namespace = BSTR::from("root\\wmi");
-            let empty = BSTR::new();
-            if let Ok(services) =
-                locator.ConnectServer(&namespace, &empty, &empty, &empty, 0, &empty, None)
-            {
-                let query = BSTR::from("SELECT CurrentBrightness FROM WmiMonitorBrightness");
-                let lang = BSTR::from("WQL");
-                if let Ok(enumerator) = services.ExecQuery(
-                    &lang,
-                    &query,
-                    WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
-                    None,
-                ) {
-                    let mut count = 0u32;
-                    let mut class_obj = [None];
-                    let hr = enumerator.Next(WBEM_INFINITE, &mut class_obj, &mut count);
-                    if hr.is_ok() && count > 0 {
-                        if let Some(obj) = &class_obj[0] {
-                            let mut val = VARIANT::default();
-                            if obj
-                                .Get(w!("CurrentBrightness"), 0, &mut val, None, None)
-                                .is_ok()
-                            {
-                                if let Some(b) = extract_u8_from_variant(&val) {
-                                    return (b.min(100), true);
-                                }
-                            }
-                        }
+        let _ = CoInitializeSecurity(
+            None,
+            -1,
+            None,
+            None,
+            RPC_C_AUTHN_LEVEL_DEFAULT,
+            RPC_C_IMP_LEVEL_IMPERSONATE,
+            None,
+            EOAC_NONE,
+            None,
+        );
+
+        let locator = match CoCreateInstance::<_, IWbemLocator>(&WbemLocator, None, CLSCTX_INPROC_SERVER) {
+            Ok(loc) => loc,
+            Err(_) => return (0, false),
+        };
+
+        let namespace = BSTR::from("root\\wmi");
+        let empty = BSTR::new();
+        let services = match locator.ConnectServer(&namespace, &empty, &empty, &empty, 0, &empty, None) {
+            Ok(s) => s,
+            Err(_) => return (0, false),
+        };
+
+        let _ = CoSetProxyBlanket(
+            &services,
+            RPC_C_AUTHN_WINNT,
+            RPC_C_AUTHZ_NONE,
+            None,
+            RPC_C_AUTHN_LEVEL_CALL,
+            RPC_C_IMP_LEVEL_IMPERSONATE,
+            None,
+            EOAC_NONE,
+        );
+
+        let query = BSTR::from("SELECT CurrentBrightness FROM WmiMonitorBrightness");
+        let lang = BSTR::from("WQL");
+        let enumerator = match services.ExecQuery(
+            &lang,
+            &query,
+            WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+            None,
+        ) {
+            Ok(en) => en,
+            Err(_) => return (0, false),
+        };
+
+        let _ = CoSetProxyBlanket(
+            &enumerator,
+            RPC_C_AUTHN_WINNT,
+            RPC_C_AUTHZ_NONE,
+            None,
+            RPC_C_AUTHN_LEVEL_CALL,
+            RPC_C_IMP_LEVEL_IMPERSONATE,
+            None,
+            EOAC_NONE,
+        );
+
+        let mut count = 0u32;
+        let mut class_obj = [None];
+        let hr = enumerator.Next(WBEM_INFINITE, &mut class_obj, &mut count);
+        if hr.is_ok() && count > 0 {
+            if let Some(obj) = &class_obj[0] {
+                let mut val = VARIANT::default();
+                if obj
+                    .Get(w!("CurrentBrightness"), 0, &mut val, None, None)
+                    .is_ok()
+                {
+                    if let Some(b) = extract_u8_from_variant(&val) {
+                        return (b.min(100), true);
                     }
                 }
             }
@@ -190,16 +234,18 @@ pub fn set_display_brightness_native(val: u8) {
     {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         let clamped = val.min(100);
-        tokio::task::spawn_blocking(move || {
-            let cmd = format!(
-                "(Get-WmiObject -Namespace root/wmi -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, {})",
-                clamped
-            );
-            let _ = std::process::Command::new("powershell")
-                .args(["-NoProfile", "-NonInteractive", "-Command", &cmd])
-                .creation_flags(CREATE_NO_WINDOW)
-                .status();
-        });
+        let _ = std::thread::Builder::new()
+            .name("casa-set-brightness".into())
+            .spawn(move || {
+                let cmd = format!(
+                    "$m = Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightnessMethods; if ($m) {{ Invoke-CimMethod -InputObject $m -MethodName WmiSetBrightness -Arguments @{{Timeout=1; Brightness={}}} }}",
+                    clamped
+                );
+                let _ = std::process::Command::new("powershell")
+                    .args(["-NoProfile", "-NonInteractive", "-Command", &cmd])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .status();
+            });
     }
 }
 
@@ -408,48 +454,61 @@ pub fn toggle_audio_mute_native() -> Result<bool, String> {
 // 5. Background Poller & Event Emission
 // =========================================================================
 pub fn start_hardware_telemetry_daemon(app: AppHandle) {
-    tokio::spawn(async move {
-        let mut tick_counter: u64 = 0;
-        let mut last_telemetry = SystemTelemetry::default();
-        let mut last_battery = (100u8, true, false);
-        let mut last_brightness = (50u8, false);
-
-        loop {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            tick_counter = tick_counter.wrapping_add(1);
-
-            // Fast loop (500ms): Caps Lock & Audio Endpoint Volume/State
-            let is_caps_locked = read_caps_lock_status();
-            let audio_info = read_audio_endpoint_status();
-
-            // Slower loop (2000ms = every 4 ticks): Battery & Brightness
-            if tick_counter % 4 == 1 || tick_counter == 1 {
-                last_battery = read_power_status();
-                last_brightness = read_display_brightness_wmi();
+    std::thread::Builder::new()
+        .name("casa-hardware-telemetry".into())
+        .spawn(move || {
+            // Inisialisasi COM untuk dedicated thread ini (MTA)
+            #[cfg(windows)]
+            unsafe {
+                let _ = windows::Win32::System::Com::CoInitializeEx(
+                    None,
+                    windows::Win32::System::Com::COINIT_MULTITHREADED,
+                );
             }
 
-            let current_telemetry = SystemTelemetry {
-                battery_percentage: last_battery.0,
-                is_charging: last_battery.1,
-                has_battery: last_battery.2,
-                is_caps_locked,
-                brightness_percent: last_brightness.0,
-                is_brightness_supported: last_brightness.1,
-                master_volume: audio_info.master_volume,
-                is_muted: audio_info.is_muted,
-                audio_device_name: audio_info.audio_device_name,
-                audio_device_type: audio_info.audio_device_type,
-            };
+            let mut tick_counter: u64 = 0;
+            let mut last_telemetry = SystemTelemetry::default();
+            let mut last_battery = (100u8, true, false);
+            let mut last_brightness = (50u8, false);
 
-            // Emit if changed or every 10 ticks (5s) as a heartbeat
-            let changed = current_telemetry != last_telemetry;
-            if changed || tick_counter % 10 == 0 {
-                update_cached_telemetry(current_telemetry.clone());
-                let _ = app.emit("system-telemetry-update", &current_telemetry);
-                last_telemetry = current_telemetry;
+            loop {
+                tick_counter = tick_counter.wrapping_add(1);
+
+                // Fast loop (500ms): Caps Lock & Audio Endpoint Volume/State
+                let is_caps_locked = read_caps_lock_status();
+                let audio_info = read_audio_endpoint_status();
+
+                // Slower loop (2000ms = every 4 ticks): Battery & Brightness
+                if tick_counter % 4 == 1 || tick_counter == 1 {
+                    last_battery = read_power_status();
+                    last_brightness = read_display_brightness_wmi();
+                }
+
+                let current_telemetry = SystemTelemetry {
+                    battery_percentage: last_battery.0,
+                    is_charging: last_battery.1,
+                    has_battery: last_battery.2,
+                    is_caps_locked,
+                    brightness_percent: last_brightness.0,
+                    is_brightness_supported: last_brightness.1,
+                    master_volume: audio_info.master_volume,
+                    is_muted: audio_info.is_muted,
+                    audio_device_name: audio_info.audio_device_name,
+                    audio_device_type: audio_info.audio_device_type,
+                };
+
+                // Emit if changed, on tick 1 (immediate startup sync), or every 10 ticks (5s) as a heartbeat
+                let changed = current_telemetry != last_telemetry;
+                if tick_counter == 1 || changed || tick_counter % 10 == 0 {
+                    update_cached_telemetry(current_telemetry.clone());
+                    let _ = app.emit("system-telemetry-update", &current_telemetry);
+                    last_telemetry = current_telemetry;
+                }
+
+                std::thread::sleep(Duration::from_millis(500));
             }
-        }
-    });
+        })
+        .expect("Failed to spawn hardware telemetry thread");
 }
 
 // =========================================================================
@@ -491,4 +550,212 @@ pub fn set_display_brightness(brightness: u8) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct AudioDeviceItem {
+    pub id: String,
+    pub name: String,
+    pub device_type: AudioDeviceType,
+    pub is_default: bool,
+}
+
+pub fn enumerate_audio_output_devices() -> Result<Vec<AudioDeviceItem>, String> {
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::Media::Audio::{
+            eMultimedia, eRender, IMMDeviceCollection, IMMDeviceEnumerator,
+            MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
+        };
+        use windows::Win32::System::Com::{
+            CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED, STGM_READ,
+        };
+        use windows::Win32::Foundation::PROPERTYKEY;
+        use windows::Win32::System::Com::StructuredStorage::{
+            PropVariantToStringAlloc, PropVariantToUInt32,
+        };
+        use windows::core::GUID;
+
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let enumerator: IMMDeviceEnumerator =
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                .map_err(|e| format!("CoCreateInstance MMDeviceEnumerator failed: {e}"))?;
+
+        let default_id = if let Ok(def_dev) = enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia) {
+            if let Ok(pwstr) = def_dev.GetId() {
+                let id_str = pwstr.to_string().unwrap_or_default();
+                windows::Win32::System::Com::CoTaskMemFree(Some(pwstr.as_ptr() as _));
+                id_str
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        let collection: IMMDeviceCollection = enumerator
+            .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
+            .map_err(|e| format!("EnumAudioEndpoints failed: {e}"))?;
+
+        let count = collection
+            .GetCount()
+            .map_err(|e| format!("GetCount failed: {e}"))?;
+
+        let mut items = Vec::new();
+
+        for i in 0..count {
+            if let Ok(device) = collection.Item(i) {
+                let id = if let Ok(pwstr) = device.GetId() {
+                    let id_str = pwstr.to_string().unwrap_or_default();
+                    windows::Win32::System::Com::CoTaskMemFree(Some(pwstr.as_ptr() as _));
+                    id_str
+                } else {
+                    continue;
+                };
+
+                let mut name = "Speakers".to_string();
+                let mut form_factor = 1u32;
+
+                if let Ok(store) = device.OpenPropertyStore(STGM_READ) {
+                    let pkey_name = PROPERTYKEY {
+                        fmtid: GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0),
+                        pid: 14,
+                    };
+                    if let Ok(prop_val) = store.GetValue(&pkey_name) {
+                        if let Ok(pwstr) = PropVariantToStringAlloc(&prop_val) {
+                            let name_str = pwstr.to_string().unwrap_or_default();
+                            if !name_str.trim().is_empty() {
+                                name = name_str.trim().to_string();
+                            }
+                            windows::Win32::System::Com::CoTaskMemFree(Some(pwstr.as_ptr() as _));
+                        }
+                    }
+
+                    let pkey_form = PROPERTYKEY {
+                        fmtid: GUID::from_u128(0x1da5d803_d492_4edd_8c23_e0c0ffee7f0e),
+                        pid: 0,
+                    };
+                    if let Ok(prop_val) = store.GetValue(&pkey_form) {
+                        if let Ok(ff) = PropVariantToUInt32(&prop_val) {
+                            form_factor = ff;
+                        }
+                    }
+                }
+
+                let device_type = classify_audio_device(&name, form_factor);
+                let is_default = !default_id.is_empty() && id == default_id;
+
+                items.push(AudioDeviceItem {
+                    id,
+                    name,
+                    device_type,
+                    is_default,
+                });
+            }
+        }
+
+        return Ok(items);
+    }
+    #[cfg(not(windows))]
+    Ok(vec![])
+}
+
+pub fn set_default_audio_endpoint_native(device_id: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    unsafe {
+        use windows::core::{GUID, Interface};
+        use windows::Win32::System::Com::{
+            CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
+        };
+        use std::ffi::c_void;
+
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+
+        const CLSID_POLICY_CONFIG_CLIENT: GUID =
+            GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
+        const CLSID_POLICY_CONFIG_FALLBACK: GUID =
+            GUID::from_u128(0x294612b3_f092_4633_8a07_889b1ee9ee87);
+
+        let unk: windows::core::IUnknown = CoCreateInstance(&CLSID_POLICY_CONFIG_CLIENT, None, CLSCTX_ALL)
+            .or_else(|_| CoCreateInstance(&CLSID_POLICY_CONFIG_FALLBACK, None, CLSCTX_ALL))
+            .map_err(|e| format!("Failed to CoCreateInstance PolicyConfig: {e}"))?;
+
+        let raw = unk.as_raw();
+        let wide_id: Vec<u16> = device_id.encode_utf16().chain(std::iter::once(0)).collect();
+
+        let vtable = *(raw as *const *const usize);
+        let fn_set_default: unsafe extern "system" fn(*mut c_void, *const u16, u32) -> windows::core::HRESULT =
+            std::mem::transmute(*vtable.add(13));
+
+        let res0 = fn_set_default(raw, wide_id.as_ptr(), 0); // eConsole
+        let res1 = fn_set_default(raw, wide_id.as_ptr(), 1); // eMultimedia
+        let res2 = fn_set_default(raw, wide_id.as_ptr(), 2); // eCommunications
+
+        if res0.is_err() && res1.is_err() && res2.is_err() {
+            return Err(format!("SetDefaultEndpoint failed: hr={:?}", res0));
+        }
+
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_audio_output_devices() -> Result<Vec<AudioDeviceItem>, String> {
+    enumerate_audio_output_devices()
+}
+
+#[tauri::command]
+pub fn set_default_audio_endpoint(device_id: String) -> Result<(), String> {
+    set_default_audio_endpoint_native(&device_id)?;
+    // Trigger instant refresh of cached telemetry audio endpoint
+    let audio_info = read_audio_endpoint_status();
+    if let Ok(mut guard) = TELEMETRY_CACHE.lock() {
+        if let Some(t) = guard.as_mut() {
+            t.audio_device_name = audio_info.audio_device_name;
+            t.audio_device_type = audio_info.audio_device_type;
+            t.master_volume = audio_info.master_volume;
+            t.is_muted = audio_info.is_muted;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hardware_telemetry_reads() {
+        println!("Testing read_power_status...");
+        let power = read_power_status();
+        println!("Power: {:?}", power);
+
+        println!("Testing read_caps_lock_status...");
+        let caps = read_caps_lock_status();
+        println!("Caps Lock: {}", caps);
+
+        println!("Testing read_audio_endpoint_status...");
+        let audio = read_audio_endpoint_status();
+        println!("Audio: dev={}, vol={}, muted={}, type={:?}", audio.audio_device_name, audio.master_volume, audio.is_muted, audio.audio_device_type);
+
+        println!("Testing read_display_brightness_wmi...");
+        let bright = read_display_brightness_wmi();
+        println!("Brightness: {:?}", bright);
+
+        println!("Testing enumerate_audio_output_devices...");
+        let devices = enumerate_audio_output_devices().unwrap();
+        println!("Devices found: {}", devices.len());
+        for d in &devices {
+            println!("  -> [{}] {} (type={:?}, default={})", d.id, d.name, d.device_type, d.is_default);
+        }
+
+        if let Some(first) = devices.first() {
+            println!("Testing set_default_audio_endpoint_native with device: {}", first.name);
+            let res = set_default_audio_endpoint_native(&first.id);
+            println!("set_default_audio_endpoint_native result: {:?}", res);
+            assert!(res.is_ok());
+        }
+    }
 }

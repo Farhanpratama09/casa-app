@@ -73,13 +73,13 @@ export const EmptyMediaView: React.FC<EmptyMediaViewProps> = memo(({
       </div>
 
       {/* =================================================================== */}
-      {/* Left: Artwork Frame (56x56) + Polished Urbanist Typography          */}
+      {/* Left: Artwork Frame (56x56) + Polished Geometric Typography         */}
       {/* =================================================================== */}
       <div className="flex items-center gap-4 min-w-0 relative z-10">
         {/* Artwork Frame: w-14 h-14 with Lunar Ice-Blue Standby Scanner Glow */}
         <div
           onContextMenu={onQuitSpotify}
-          className="w-14 h-14 rounded-xl border border-white/10 bg-white/[0.03] flex items-center justify-center shrink-0 relative overflow-hidden group cursor-default shadow-[0_0_15px_rgba(0,0,0,0.5)]"
+          className="w-14 h-14 rounded-xl border border-white/[0.07] bg-white/[0.03] flex items-center justify-center shrink-0 relative overflow-hidden group cursor-default shadow-[0_0_15px_rgba(0,0,0,0.5)]"
           title="CASA Standby Radar (Klik Kanan: Keluar Spotify)"
         >
           {/* Subtle Lunar Ice-Blue Glow */}
@@ -102,40 +102,25 @@ export const EmptyMediaView: React.FC<EmptyMediaViewProps> = memo(({
           />
         </div>
 
-        {/* Text Area: Vertical rhythm gap-0.5 */}
-        <div className="flex flex-col gap-0.5 min-w-0" style={{ fontFamily: "'Urbanist', sans-serif" }}>
-          {/* Category Header */}
+        {/* Text Area */}
+        <div className="flex flex-col gap-0.5 min-w-0">
           <div className="flex items-center gap-2">
-            <span
-              className="text-[10px] tracking-[0.25em] text-white/40 uppercase font-semibold font-urbanist"
-              style={{ fontFamily: "'Urbanist', sans-serif" }}
-            >
+            <span className="font-sans text-[10px] tracking-[0.14em] uppercase font-semibold text-white/50">
               MEDIA
             </span>
             {isWakingSpotify && (
-              <span
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-sky-400/15 border border-sky-400/30 text-sky-300 text-[9px] font-urbanist animate-pulse"
-                style={{ fontFamily: "'Urbanist', sans-serif" }}
-              >
+              <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-sky-400/15 border border-sky-400/30 text-sky-300 text-[9px] font-sans font-semibold tracking-wider animate-pulse">
                 <Loader2 className="w-2.5 h-2.5 animate-spin" />
                 <span>CONNECTING...</span>
               </span>
             )}
           </div>
 
-          {/* Main Title */}
-          <h3
-            className="text-sm font-medium text-white/85 tracking-wide font-urbanist m-0 p-0 leading-snug truncate"
-            style={{ fontFamily: "'Urbanist', sans-serif" }}
-          >
+          <h3 className="font-sans text-sm font-medium text-white/85 tracking-wide m-0 p-0 leading-snug truncate">
             No Media Playing
           </h3>
 
-          {/* Subtext */}
-          <p
-            className="text-xs text-white/40 font-urbanist m-0 p-0 leading-normal truncate"
-            style={{ fontFamily: "'Urbanist', sans-serif" }}
-          >
+          <p className="font-sans text-xs text-white/40 m-0 p-0 leading-normal truncate">
             Putar audio di Spotify atau browser
           </p>
         </div>
@@ -165,8 +150,7 @@ export const EmptyMediaView: React.FC<EmptyMediaViewProps> = memo(({
           onClick={onOpenSpotify}
           onContextMenu={onQuitSpotify}
           disabled={isWakingSpotify}
-          className="px-3.5 py-1.5 rounded-full border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/20 transition-all flex items-center gap-2 text-xs text-white/70 hover:text-white active:scale-95 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed group shrink-0"
-          style={{ fontFamily: "'Urbanist', sans-serif" }}
+          className="px-3.5 py-1.5 rounded-full border border-white/[0.07] bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/20 transition-all flex items-center gap-2 text-xs font-sans text-white/70 hover:text-white active:scale-95 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed group shrink-0"
           title="Klik: Buka Spotify | Klik Kanan: Tutup Total"
         >
           {isWakingSpotify ? (
@@ -180,9 +164,7 @@ export const EmptyMediaView: React.FC<EmptyMediaViewProps> = memo(({
               <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424c-.18.295-.563.387-.857.207-2.35-1.435-5.308-1.76-8.792-.963-.335.077-.67-.133-.746-.468-.077-.334.132-.67.467-.746 3.808-.87 7.076-.496 9.721 1.115.294.18.387.562.207.855zm1.226-2.724c-.227.368-.711.485-1.08.258-2.69-1.653-6.79-2.134-9.97-1.168-.413.125-.852-.108-.977-.52-.125-.413.108-.852.52-.977 3.633-1.103 8.147-.568 11.249 1.328.368.226.485.71.258 1.079zm.106-2.835C14.692 8.95 9.375 8.775 6.297 9.71c-.495.15-1.022-.13-1.172-.625-.15-.496.13-1.022.626-1.172 3.535-1.073 9.404-.866 13.115 1.338.445.264.59.838.327 1.282-.264.444-.838.59-1.281.327z" />
             </svg>
           )}
-          <span className="font-urbanist" style={{ fontFamily: "'Urbanist', sans-serif" }}>
-            Buka Spotify
-          </span>
+          <span className="font-sans tracking-wide">Buka Spotify</span>
         </button>
       </div>
     </div>

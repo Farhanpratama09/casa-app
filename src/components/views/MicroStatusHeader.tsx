@@ -1,8 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ChevronLeft, ChevronRight, Zap } from 'lucide-react';
 import { IslandMode } from '../../types/island';
 import { MoonRabbitEmblem } from '../MoonRabbitEmblem';
 import { LunarBunnyGlyph } from '../LunarBunnyGlyph';
+import { useSystemHardware } from '../../hooks/useSystemHardware';
+import {
+  BunnyHeadphonesWired,
+  BunnyHeadphonesBluetooth,
+  MoonCraterSpeaker,
+  AlertBunnyCaps,
+} from '../system/LunarIcons';
+import { LunarControlNotch } from '../system/LunarControlNotch';
 
 interface MicroStatusHeaderProps {
   currentMode?: IslandMode;
@@ -17,6 +26,81 @@ interface MicroStatusHeaderProps {
   onHeaderClick?: (e: React.MouseEvent) => void;
   isPeekPreview?: boolean;
 }
+
+/**
+ * Mini Circular Battery Ring (Diameter ~20-22px)
+ * Orbit stardust tipis yang pas di dalam bar tinggi 28px dengan persentase di sampingnya
+ */
+export const MiniCircularBattery: React.FC<{
+  percentage: number;
+  isCharging: boolean;
+  hasBattery: boolean;
+  size?: number;
+}> = ({ percentage, isCharging, hasBattery, size = 20 }) => {
+  const radius = size / 2 - 1.5;
+  const circumference = 2 * Math.PI * radius;
+  const clamped = Math.max(0, Math.min(100, Math.round(percentage)));
+  const offset = circumference - (clamped / 100) * circumference;
+
+  const strokeColor = isCharging
+    ? '#34D399'
+    : clamped <= 20
+    ? '#F43F5E'
+    : '#38BDF8';
+
+  const glowStyle = isCharging
+    ? { filter: 'drop-shadow(0 0 3px rgba(52, 211, 153, 0.7))' }
+    : clamped <= 20
+    ? { filter: 'drop-shadow(0 0 3px rgba(244, 63, 94, 0.7))' }
+    : { filter: 'drop-shadow(0 0 3px rgba(56, 189, 248, 0.6))' };
+
+  return (
+    <div
+      className="flex items-center gap-1.5 select-none shrink-0"
+      title={`Baterai: ${hasBattery ? `${clamped}%` : 'AC'}${isCharging ? ' (Charging)' : ''}`}
+    >
+      <div
+        className="relative flex items-center justify-center shrink-0"
+        style={{ width: size, height: size }}
+      >
+        <svg className="w-full h-full -rotate-90 transform" viewBox={`0 0 ${size} ${size}`}>
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            className="text-white/[0.08]"
+          />
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke={strokeColor}
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+            style={glowStyle}
+            className="transition-all duration-500 ease-out"
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          {isCharging ? (
+            <Zap className="w-2.5 h-2.5 text-[#34D399] animate-pulse fill-[#34D399]/30" />
+          ) : (
+            <span className="w-1 h-1 rounded-full bg-white/40" />
+          )}
+        </div>
+      </div>
+      <span className="font-mono text-[10px] tabular-nums font-semibold leading-none text-white/80">
+        {hasBattery ? `${clamped}%` : 'AC'}
+      </span>
+    </div>
+  );
+};
 
 // 1. Modul Musik: Tactical Soundwave Glyph (4 Garis Batang Audio Harmonis)
 const TacticalSoundwaveGlyph: React.FC<{ className?: string }> = ({ className = 'w-3.5 h-3.5' }) => (
@@ -120,6 +204,22 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
   const [timeStr, setTimeStr] = useState('');
   const [dateStr, setDateStr] = useState('');
 
+  const {
+    telemetry,
+    audioDevices,
+    selectAudioDevice,
+    fetchAudioDevices,
+    setMasterVolume,
+    setBrightness,
+    toggleMute,
+  } = useSystemHardware();
+  const [isNotchOpen, setIsNotchOpen] = useState(false);
+
+  // Close notch on mode change
+  useEffect(() => {
+    setIsNotchOpen(false);
+  }, [currentMode]);
+
   useEffect(() => {
     const update = () => {
       const now = new Date();
@@ -154,6 +254,10 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
       return;
     }
     e.stopPropagation();
+    if (isNotchOpen) {
+      setIsNotchOpen(false);
+      return;
+    }
     if (onHeaderClick) {
       onHeaderClick(e);
     } else if (onCollapse) {
@@ -164,7 +268,9 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
   return (
     <div
       onClick={handleBarClick}
-      className="relative z-10 w-full h-[28px] px-4 flex items-center justify-between border-b border-white/[0.04] select-none text-[11px] font-medium leading-none shrink-0 bg-transparent cursor-pointer hover:bg-white/[0.04] transition-colors"
+      className={`relative w-full h-[28px] px-4 flex items-center justify-between border-b border-white/[0.04] select-none text-[11px] font-medium leading-none shrink-0 bg-transparent cursor-pointer hover:bg-white/[0.04] transition-colors ${
+        isNotchOpen ? 'z-40' : 'z-10'
+      }`}
       title={
         isPeekPreview
           ? 'Klik untuk mengunci CASA (Lock Expanded)'
@@ -194,7 +300,7 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
         >
           <span
             data-tauri-drag-region
-            className="font-sans font-bold text-white/95 text-[12.5px] tracking-tight tabular-nums"
+            className="font-mono font-bold text-white/95 text-[12px] tracking-tight tabular-nums"
           >
             {timeStr}
           </span>
@@ -304,8 +410,79 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
         )}
       </div>
 
-      {/* Right: Clean Dynamic Mini Audio Waveform in Ice Blue */}
-      <div className="flex items-center gap-2 shrink-0">
+      {/* Right: Hardware Telemetry Pills & Lunar Control Notch Trigger */}
+      <div className="flex items-center gap-1.5 shrink-0">
+        {/* Caps Lock Indicator: AlertBunnyCaps (Hanya muncul saat Caps Lock aktif) */}
+        {telemetry.is_caps_locked && (
+          <div
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8.5px] font-sans font-bold tracking-[0.14em] uppercase bg-rose-500/15 text-rose-300 border border-rose-500/30 select-none cursor-default drop-shadow-[0_0_6px_rgba(244,63,94,0.35)]"
+            title="Caps Lock Aktif (VK_CAPITAL)"
+          >
+            <AlertBunnyCaps isActive={true} size={13} className="w-3.5 h-3.5 shrink-0" />
+            <span>CAPS</span>
+          </div>
+        )}
+
+        {/* Battery Pill: Mini Circular Battery Ring + font-mono percentage */}
+        {telemetry.has_battery && (
+          <button
+            type="button"
+            data-interactive="true"
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsNotchOpen((prev) => !prev);
+            }}
+            className={`flex items-center px-1.5 py-0.5 rounded-full border transition-all cursor-pointer select-none ${
+              isNotchOpen
+                ? 'bg-[#98BBD6]/20 border-[#98BBD6]/40 text-[#98BBD6] shadow-[0_0_8px_rgba(152,187,214,0.3)]'
+                : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.07] text-white/80 hover:text-white'
+            }`}
+            title={`Baterai: ${telemetry.battery_percentage}%${telemetry.is_charging ? ' (Charging)' : ''} - Klik untuk Lunar Control Notch`}
+            aria-label="Lunar Battery Control"
+          >
+            <MiniCircularBattery
+              percentage={telemetry.battery_percentage}
+              isCharging={telemetry.is_charging}
+              hasBattery={telemetry.has_battery}
+            />
+          </button>
+        )}
+
+        {/* Audio Endpoint Pill: BunnyHeadphones / MoonCraterSpeaker + font-mono master volume */}
+        <button
+          type="button"
+          data-interactive="true"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          onMouseDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsNotchOpen((prev) => !prev);
+          }}
+          className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border transition-all cursor-pointer relative z-30 select-none ${
+            isNotchOpen
+              ? 'bg-[#98BBD6]/20 border-[#98BBD6]/40 text-[#98BBD6] shadow-[0_0_8px_rgba(152,187,214,0.3)]'
+              : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.07] text-white/80 hover:text-white'
+          }`}
+          title={`Endpoint: ${telemetry.audio_device_name} (Vol: ${telemetry.master_volume}%) - Klik untuk Lunar Control Notch`}
+          aria-label="Lunar Audio Control Notch"
+        >
+          {telemetry.audio_device_type === 'headphone_bluetooth' ? (
+            <BunnyHeadphonesBluetooth className="w-3.5 h-3.5 shrink-0 text-sky-400" />
+          ) : telemetry.audio_device_type === 'headphone_wired' ? (
+            <BunnyHeadphonesWired className="w-3.5 h-3.5 shrink-0 text-indigo-300" />
+          ) : (
+            <MoonCraterSpeaker className="w-3.5 h-3.5 shrink-0 text-[#98BBD6]" />
+          )}
+          <span className="font-mono text-[10px] tabular-nums font-semibold leading-none">
+            {telemetry.is_muted ? 'MUTED' : `${telemetry.master_volume}%`}
+          </span>
+        </button>
+
+        {/* Dynamic Mini Audio Waveform in Ice Blue */}
         <div
           className="w-[14px] h-[14px] flex items-end justify-center gap-[1.5px] pb-0.5 shrink-0"
           title="Audio Waveform"
@@ -330,6 +507,19 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
           />
         </div>
       </div>
+
+      {/* Expanding Lunar Notch (Docked Sheet Overlay) */}
+      <LunarControlNotch
+        isOpen={isNotchOpen}
+        onClose={() => setIsNotchOpen(false)}
+        telemetry={telemetry}
+        audioDevices={audioDevices}
+        selectAudioDevice={selectAudioDevice}
+        fetchAudioDevices={fetchAudioDevices}
+        setMasterVolume={setMasterVolume}
+        setBrightness={setBrightness}
+        toggleMute={toggleMute}
+      />
     </div>
   );
 };

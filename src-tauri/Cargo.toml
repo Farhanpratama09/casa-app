@@ -46,5 +46,6 @@ windows = { version = "0.62", features = [
     "Win32_System_Variant",
     "Win32_System_Ole",
     "Win32_System_Com_StructuredStorage",
+    "Win32_Security",
 ] }
 base64 = "0.22"

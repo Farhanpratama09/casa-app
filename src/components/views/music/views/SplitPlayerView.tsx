@@ -4,8 +4,6 @@ import {
   Headphones,
   Speaker,
   Bluetooth,
-  Battery,
-  BatteryCharging,
   VolumeX,
 } from 'lucide-react';
 import { VinylDiscFallback } from './VinylDiscFallback';
@@ -298,36 +296,6 @@ export const SplitPlayerView: React.FC<SplitPlayerViewProps> = memo(({
                   </span>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  {/* Caps Lock indicator badge */}
-                  {isCapsLocked && (
-                    <span
-                      className="px-1 py-0.2 rounded bg-amber-400/15 border border-amber-400/30 text-amber-300 text-[8px] font-mono font-bold tracking-wider select-none"
-                      title="Caps Lock Aktif"
-                    >
-                      CAPS
-                    </span>
-                  )}
-                  {/* Battery mini indicator */}
-                  {hasBattery && (
-                    <div
-                      className={`flex items-center gap-0.5 px-1 py-0.5 rounded-full border text-[8.5px] font-mono select-none ${
-                        isCharging
-                          ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
-                          : (batteryPercentage ?? 100) <= 20
-                          ? 'bg-rose-500/15 border-rose-500/30 text-rose-300'
-                          : 'bg-white/[0.04] border-white/10 text-white/50'
-                      }`}
-                      title={`Baterai: ${batteryPercentage}% ${isCharging ? '(Charging)' : ''}`}
-                    >
-                      {isCharging ? (
-                        <BatteryCharging className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
-                      ) : (
-                        <Battery className="w-2.5 h-2.5 text-white/60 shrink-0" />
-                      )}
-                      <span>{batteryPercentage}%</span>
-                    </div>
-                  )}
-
                   {/* Audio Endpoint Switcher with dynamic Hardware Telemetry */}
                   <button
                     onClick={onToggleMute || onToggleAudioOutput}
