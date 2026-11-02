@@ -252,6 +252,8 @@ pub fn run() {
             system_hardware::set_master_volume,
             system_hardware::toggle_audio_mute,
             system_hardware::set_display_brightness,
+            system_hardware::get_audio_output_devices,
+            system_hardware::set_default_audio_endpoint,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CASA application");

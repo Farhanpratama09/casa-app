@@ -4,6 +4,13 @@ import { invoke } from '@tauri-apps/api/core';
 
 export type AudioDeviceType = 'speaker' | 'headphone_wired' | 'headphone_bluetooth' | 'unknown';
 
+export interface AudioDeviceItem {
+  id: string;
+  name: string;
+  device_type: AudioDeviceType;
+  is_default: boolean;
+}
+
 export interface SystemTelemetry {
   // Power
   battery_percentage: number;
@@ -41,6 +48,38 @@ const isTauriEnv = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in win
 
 export function useSystemHardware() {
   const [telemetry, setTelemetry] = useState<SystemTelemetry>(DEFAULT_TELEMETRY);
+  const [audioDevices, setAudioDevices] = useState<AudioDeviceItem[]>([]);
+
+  const fetchAudioDevices = useCallback(async () => {
+    if (!isTauriEnv) return [];
+    try {
+      const devices = await invoke<AudioDeviceItem[]>('get_audio_output_devices');
+      setAudioDevices(devices);
+      return devices;
+    } catch (err) {
+      console.warn('[useSystemHardware] get_audio_output_devices error:', err);
+      return [];
+    }
+  }, []);
+
+  const selectAudioDevice = useCallback(
+    async (deviceId: string) => {
+      if (!isTauriEnv) return;
+      try {
+        await invoke('set_default_audio_endpoint', { deviceId });
+        setAudioDevices((prev) =>
+          prev.map((d) => ({
+            ...d,
+            is_default: d.id === deviceId,
+          }))
+        );
+        await fetchAudioDevices();
+      } catch (err) {
+        console.warn('[useSystemHardware] set_default_audio_endpoint error:', err);
+      }
+    },
+    [fetchAudioDevices]
+  );
 
   useEffect(() => {
     if (!isTauriEnv) return;
@@ -51,6 +90,7 @@ export function useSystemHardware() {
     invoke<SystemTelemetry>('get_system_telemetry')
       .then((data) => {
         if (isMounted && data) {
+          console.log('[Hardware Telemetry]', data);
           setTelemetry(data);
         }
       })
@@ -58,9 +98,13 @@ export function useSystemHardware() {
         console.warn('[useSystemHardware] Failed to fetch initial telemetry:', err);
       });
 
-    // 2. Event listener for real-time daemon updates
+    // 2. Fetch active audio devices
+    fetchAudioDevices();
+
+    // 3. Event listener for real-time daemon updates
     const unlistenPromise = listen<SystemTelemetry>('system-telemetry-update', (event) => {
       if (isMounted && event.payload) {
+        console.log('[Hardware Telemetry]', event.payload);
         setTelemetry(event.payload);
       }
     });
@@ -69,7 +113,7 @@ export function useSystemHardware() {
       isMounted = false;
       unlistenPromise.then((unlisten) => unlisten());
     };
-  }, []);
+  }, [fetchAudioDevices]);
 
   const setMasterVolume = useCallback(async (level: number) => {
     const clamped = Math.max(0, Math.min(100, Math.round(level)));
@@ -106,6 +150,9 @@ export function useSystemHardware() {
 
   return {
     telemetry,
+    audioDevices,
+    fetchAudioDevices,
+    selectAudioDevice,
     setMasterVolume,
     setBrightness,
     toggleMute,

@@ -10,6 +10,7 @@ import { AudioOutputDevice, SongMetadata, MediaSessionItem } from '../../types/i
 
 import { useSkillStore } from '../../skills/store';
 import { useSystemHardware } from '../../hooks/useSystemHardware';
+import { useCasaAudio } from '../../context/CasaAudioContext';
 import { listen } from '@tauri-apps/api/event';
 import {
   NativeSearchDrawer,
@@ -241,15 +242,41 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
   const { telemetry: systemTelemetry, toggleMute: toggleSystemMute } = useSystemHardware();
   const [isSessionPopoverOpen, setIsSessionPopoverOpen] = useState(false);
 
-  // CASA Native Player & Playback Source Switcher State
-  const [internalPlaybackSource, setInternalPlaybackSource] = useState<PlaybackSource>('companion');
-  const playbackSource = propPlaybackSource !== undefined ? propPlaybackSource : internalPlaybackSource;
+  // CASA Persistent Global Audio Engine (Context-Driven, Unmount-Immune)
+  const {
+    audioRef,
+    playbackSource: globalPlaybackSource,
+    setPlaybackSource: setGlobalPlaybackSource,
+    nativeTrack,
+    setNativeTrack,
+    isNativePlaying,
+    setIsNativePlaying,
+    isResolvingAudio,
+    nativeAudioError,
+    nativeQueue,
+    setNativeQueue,
+    currentTrackIndex: nativeQueueIndex,
+    setNativeQueueIndex,
+    addedNativeTrackId,
+    playTrackAtIndex,
+    toggleNativePlay: toggleNativePlayPause,
+    stopNativeAudioInstantly: stopNativeAudioHook,
+    handleNextTrack: handleNextNativeTrack,
+    handlePrevTrack: handlePrevNativeTrack,
+    handleSeekNative,
+    addToQueue: handleAddToNativeQueue,
+    removeFromQueue: handleRemoveFromNativeQueue,
+    clearQueue: handleClearNativeQueue,
+    setQueueAndPlay,
+  } = useCasaAudio();
+
+  const playbackSource = propPlaybackSource !== undefined ? propPlaybackSource : globalPlaybackSource;
   const setPlaybackSource = useCallback(
     (src: PlaybackSource) => {
-      setInternalPlaybackSource(src);
+      setGlobalPlaybackSource(src);
       onPlaybackSourceChange?.(src);
     },
-    [onPlaybackSourceChange]
+    [setGlobalPlaybackSource, onPlaybackSourceChange]
   );
 
   // Unified Single Source of Truth for SubPanels:
@@ -273,35 +300,6 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
   const [isNativeQueueOpen, setIsNativeQueueOpen] = useState<boolean>(false);
   const [isRefreshingSession, setIsRefreshingSession] = useState<boolean>(false);
   const resetLyricsSyncRef = useRef<(() => void) | null>(null);
-
-  // CASA Native Audio Player Engine (Custom Hook)
-  const {
-    audioRef,
-    nativeTrack,
-    setNativeTrack,
-    isNativePlaying,
-    setIsNativePlaying,
-    isResolvingAudio,
-    nativeAudioError,
-    nativeQueue,
-    setNativeQueue,
-    currentTrackIndex: nativeQueueIndex,
-    setNativeQueueIndex,
-    addedNativeTrackId,
-    playTrackAtIndex,
-    toggleNativePlay: toggleNativePlayPause,
-    stopNativeAudioInstantly: stopNativeAudioHook,
-    handleNextTrack: handleNextNativeTrack,
-    handlePrevTrack: handlePrevNativeTrack,
-    handleSeekNative,
-    addToQueue: handleAddToNativeQueue,
-    removeFromQueue: handleRemoveFromNativeQueue,
-    clearQueue: handleClearNativeQueue,
-    setQueueAndPlay,
-  } = useNativeAudioPlayer({
-    playbackSource,
-    onLyricsUpdated,
-  });
 
   const stopNativeAudioInstantly = useCallback(() => {
     stopNativeAudioHook();

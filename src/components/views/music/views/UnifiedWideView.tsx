@@ -4,9 +4,6 @@ import {
   Headphones,
   Speaker,
   Bluetooth,
-  Battery,
-  BatteryCharging,
-  BatteryWarning,
   VolumeX,
 } from 'lucide-react';
 import { VinylDiscFallback } from './VinylDiscFallback';
@@ -231,38 +228,6 @@ export const UnifiedWideView: React.FC<UnifiedWideViewProps> = memo(({
 
           {/* Quick Action Badges */}
           <div className="flex items-center gap-2 shrink-0 pl-3">
-            {/* Hardware Indicators: Caps Lock & Battery */}
-            {isCapsLocked && (
-              <span
-                className="px-1.5 py-0.5 rounded bg-amber-400/15 border border-amber-400/30 text-amber-300 text-[9px] font-mono font-bold tracking-wider select-none animate-pulse"
-                title="Caps Lock Aktif"
-              >
-                CAPS
-              </span>
-            )}
-
-            {hasBattery && (
-              <div
-                className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[9.5px] font-mono select-none ${
-                  isCharging
-                    ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
-                    : (batteryPercentage ?? 100) <= 20
-                    ? 'bg-rose-500/15 border-rose-500/30 text-rose-300 animate-pulse'
-                    : 'bg-white/[0.04] border-white/10 text-white/60'
-                }`}
-                title={`Baterai: ${batteryPercentage}% ${isCharging ? '(Mengisi Daya / Plugged in)' : ''}`}
-              >
-                {isCharging ? (
-                  <BatteryCharging className="w-3 h-3 text-emerald-400 shrink-0" />
-                ) : (batteryPercentage ?? 100) <= 20 ? (
-                  <BatteryWarning className="w-3 h-3 text-rose-400 shrink-0" />
-                ) : (
-                  <Battery className="w-3 h-3 text-white/60 shrink-0" />
-                )}
-                <span>{batteryPercentage}%</span>
-              </div>
-            )}
-
             <PlayerHeaderBar
               playbackSource={playbackSource}
               activeSubPanel={activeSubPanel}
