@@ -1,5 +1,13 @@
 import React, { memo } from 'react';
-import { Loader2, Headphones, Speaker } from 'lucide-react';
+import {
+  Loader2,
+  Headphones,
+  Speaker,
+  Bluetooth,
+  Battery,
+  BatteryCharging,
+  VolumeX,
+} from 'lucide-react';
 import { VinylDiscFallback } from './VinylDiscFallback';
 import { PlayerHeaderBar } from '../PlayerHeaderBar';
 import { PlayerControls } from '../PlayerControls';
@@ -8,6 +16,7 @@ import { SpotifyPanels } from '../SpotifyPanels';
 import type { MusicSubPanel } from '../constants';
 import type { LyricLine } from '../../../../utils/lyricsService';
 import type { SpotifyTrackItem, SpotifyPlaylistItem } from '../../../../utils/spotifyService';
+import type { AudioDeviceType } from '../../../../hooks/useSystemHardware';
 
 export interface SplitPlayerViewProps {
   // Session & Playback
@@ -30,8 +39,16 @@ export interface SplitPlayerViewProps {
   effectiveTitle: string;
   effectiveArtist: string;
 
-  // Audio output device status
-  audioOutput: 'headset' | 'speaker';
+  // Audio output device & System Hardware Telemetry
+  audioOutput?: 'headset' | 'speaker';
+  audioDeviceType?: AudioDeviceType;
+  audioDeviceName?: string;
+  masterVolume?: number;
+  isMuted?: boolean;
+  batteryPercentage?: number;
+  isCharging?: boolean;
+  hasBattery?: boolean;
+  isCapsLocked?: boolean;
   activeAppName?: string;
   sessionCount: number;
 
@@ -75,6 +92,7 @@ export interface SplitPlayerViewProps {
   onCoverImageError?: () => void;
   onToggleAudioOutput: () => void;
   onContextMenuAudioOutput?: (e: React.MouseEvent) => void;
+  onToggleMute?: () => void;
   onSeek: (seconds: number) => void;
   onToggleShuffle: () => void;
   onPrev: () => void;
@@ -118,7 +136,15 @@ export const SplitPlayerView: React.FC<SplitPlayerViewProps> = memo(({
   effectiveArtwork,
   effectiveTitle,
   effectiveArtist,
-  audioOutput,
+  audioOutput = 'speaker',
+  audioDeviceType = 'speaker',
+  audioDeviceName,
+  masterVolume,
+  isMuted = false,
+  batteryPercentage,
+  isCharging = false,
+  hasBattery = false,
+  isCapsLocked = false,
   activeAppName,
   sessionCount,
   currentTimeSeconds,
@@ -152,6 +178,7 @@ export const SplitPlayerView: React.FC<SplitPlayerViewProps> = memo(({
   onCoverImageError,
   onToggleAudioOutput,
   onContextMenuAudioOutput,
+  onToggleMute,
   onSeek,
   onToggleShuffle,
   onPrev,
@@ -271,22 +298,71 @@ export const SplitPlayerView: React.FC<SplitPlayerViewProps> = memo(({
                   </span>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  {/* Audio Output Switcher */}
+                  {/* Caps Lock indicator badge */}
+                  {isCapsLocked && (
+                    <span
+                      className="px-1 py-0.2 rounded bg-amber-400/15 border border-amber-400/30 text-amber-300 text-[8px] font-mono font-bold tracking-wider select-none"
+                      title="Caps Lock Aktif"
+                    >
+                      CAPS
+                    </span>
+                  )}
+                  {/* Battery mini indicator */}
+                  {hasBattery && (
+                    <div
+                      className={`flex items-center gap-0.5 px-1 py-0.5 rounded-full border text-[8.5px] font-mono select-none ${
+                        isCharging
+                          ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
+                          : (batteryPercentage ?? 100) <= 20
+                          ? 'bg-rose-500/15 border-rose-500/30 text-rose-300'
+                          : 'bg-white/[0.04] border-white/10 text-white/50'
+                      }`}
+                      title={`Baterai: ${batteryPercentage}% ${isCharging ? '(Charging)' : ''}`}
+                    >
+                      {isCharging ? (
+                        <BatteryCharging className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
+                      ) : (
+                        <Battery className="w-2.5 h-2.5 text-white/60 shrink-0" />
+                      )}
+                      <span>{batteryPercentage}%</span>
+                    </div>
+                  )}
+
+                  {/* Audio Endpoint Switcher with dynamic Hardware Telemetry */}
                   <button
-                    onClick={onToggleAudioOutput}
+                    onClick={onToggleMute || onToggleAudioOutput}
                     onContextMenu={onContextMenuAudioOutput}
-                    className="w-[20px] h-[20px] rounded-full flex items-center justify-center text-island-blue bg-island-blue/10 hover:bg-island-blue/20 transition-all border border-island-blue/20"
-                    title={`Output: ${audioOutput === 'headset' ? 'Headset/TWS' : 'Laptop Speaker'}${
+                    className={`w-[20px] h-[20px] rounded-full flex items-center justify-center transition-all border ${
+                      isMuted
+                        ? 'text-rose-400 bg-rose-500/15 border-rose-500/30 shadow-[0_0_6px_rgba(244,63,94,0.2)]'
+                        : audioDeviceType === 'headphone_bluetooth'
+                        ? 'text-sky-300 bg-sky-500/15 border-sky-400/30 shadow-[0_0_6px_rgba(56,189,248,0.2)]'
+                        : audioDeviceType === 'headphone_wired' || audioOutput === 'headset'
+                        ? 'text-indigo-300 bg-indigo-500/15 border-indigo-400/30'
+                        : 'text-island-blue bg-island-blue/10 border-island-blue/20 hover:bg-island-blue/20'
+                    }`}
+                    title={`${audioDeviceName || (audioOutput === 'headset' ? 'Headphones' : 'Speakers')} (${
+                      audioDeviceType === 'headphone_bluetooth'
+                        ? 'Bluetooth'
+                        : audioDeviceType === 'headphone_wired'
+                        ? 'Kabel / Wired'
+                        : 'Speaker'
+                    }) • Vol: ${masterVolume ?? 100}%${isMuted ? ' [MUTED - Klik Unmute]' : ' [Klik Mute]'}${
                       activeAppName ? ` • Sesi: ${activeAppName}` : ''
                     }${sessionCount > 1 ? ' (Klik kanan kelola sesi)' : ''}`}
                     aria-label="Audio Output Switcher"
                   >
-                    {audioOutput === 'headset' ? (
+                    {isMuted ? (
+                      <VolumeX className="w-2.5 h-2.5 shrink-0 text-rose-400" />
+                    ) : audioDeviceType === 'headphone_bluetooth' ? (
+                      <Bluetooth className="w-2.5 h-2.5 shrink-0" />
+                    ) : audioDeviceType === 'headphone_wired' || audioOutput === 'headset' ? (
                       <Headphones className="w-2.5 h-2.5 shrink-0" />
                     ) : (
                       <Speaker className="w-2.5 h-2.5 shrink-0" />
                     )}
                   </button>
+
                   <button
                     onClick={onOpenSpotify}
                     onContextMenu={onQuitSpotify}

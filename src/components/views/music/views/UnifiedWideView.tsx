@@ -1,9 +1,19 @@
 import React, { memo } from 'react';
-import { Loader2, Headphones, Speaker } from 'lucide-react';
+import {
+  Loader2,
+  Headphones,
+  Speaker,
+  Bluetooth,
+  Battery,
+  BatteryCharging,
+  BatteryWarning,
+  VolumeX,
+} from 'lucide-react';
 import { VinylDiscFallback } from './VinylDiscFallback';
 import { PlayerHeaderBar } from '../PlayerHeaderBar';
 import { PlayerControls } from '../PlayerControls';
 import type { MusicSubPanel } from '../constants';
+import type { AudioDeviceType } from '../../../../hooks/useSystemHardware';
 
 export interface UnifiedWideViewProps {
   // Playback & Session status
@@ -33,8 +43,16 @@ export interface UnifiedWideViewProps {
   isShuffle: boolean;
   isSmartShuffle: boolean;
 
-  // Audio output device status
-  audioOutput: 'headset' | 'speaker';
+  // Audio output device & System Hardware Telemetry
+  audioOutput?: 'headset' | 'speaker';
+  audioDeviceType?: AudioDeviceType;
+  audioDeviceName?: string;
+  masterVolume?: number;
+  isMuted?: boolean;
+  batteryPercentage?: number;
+  isCharging?: boolean;
+  hasBattery?: boolean;
+  isCapsLocked?: boolean;
   activeAppName?: string;
   sessionCount: number;
 
@@ -50,6 +68,7 @@ export interface UnifiedWideViewProps {
   onRefreshSession?: () => void;
   onToggleAudioOutput: () => void;
   onContextMenuAudioOutput?: (e: React.MouseEvent) => void;
+  onToggleMute?: () => void;
   onSeek: (seconds: number) => void;
   onToggleShuffle: () => void;
   onPrev: () => void;
@@ -80,7 +99,15 @@ export const UnifiedWideView: React.FC<UnifiedWideViewProps> = memo(({
   durationSeconds,
   isShuffle,
   isSmartShuffle,
-  audioOutput,
+  audioOutput = 'speaker',
+  audioDeviceType = 'speaker',
+  audioDeviceName,
+  masterVolume,
+  isMuted = false,
+  batteryPercentage,
+  isCharging = false,
+  hasBattery = false,
+  isCapsLocked = false,
   activeAppName,
   sessionCount,
   onOpenSpotify,
@@ -94,6 +121,7 @@ export const UnifiedWideView: React.FC<UnifiedWideViewProps> = memo(({
   onRefreshSession,
   onToggleAudioOutput,
   onContextMenuAudioOutput,
+  onToggleMute,
   onSeek,
   onToggleShuffle,
   onPrev,
@@ -203,6 +231,38 @@ export const UnifiedWideView: React.FC<UnifiedWideViewProps> = memo(({
 
           {/* Quick Action Badges */}
           <div className="flex items-center gap-2 shrink-0 pl-3">
+            {/* Hardware Indicators: Caps Lock & Battery */}
+            {isCapsLocked && (
+              <span
+                className="px-1.5 py-0.5 rounded bg-amber-400/15 border border-amber-400/30 text-amber-300 text-[9px] font-mono font-bold tracking-wider select-none animate-pulse"
+                title="Caps Lock Aktif"
+              >
+                CAPS
+              </span>
+            )}
+
+            {hasBattery && (
+              <div
+                className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[9.5px] font-mono select-none ${
+                  isCharging
+                    ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
+                    : (batteryPercentage ?? 100) <= 20
+                    ? 'bg-rose-500/15 border-rose-500/30 text-rose-300 animate-pulse'
+                    : 'bg-white/[0.04] border-white/10 text-white/60'
+                }`}
+                title={`Baterai: ${batteryPercentage}% ${isCharging ? '(Mengisi Daya / Plugged in)' : ''}`}
+              >
+                {isCharging ? (
+                  <BatteryCharging className="w-3 h-3 text-emerald-400 shrink-0" />
+                ) : (batteryPercentage ?? 100) <= 20 ? (
+                  <BatteryWarning className="w-3 h-3 text-rose-400 shrink-0" />
+                ) : (
+                  <Battery className="w-3 h-3 text-white/60 shrink-0" />
+                )}
+                <span>{batteryPercentage}%</span>
+              </div>
+            )}
+
             <PlayerHeaderBar
               playbackSource={playbackSource}
               activeSubPanel={activeSubPanel}
@@ -231,16 +291,35 @@ export const UnifiedWideView: React.FC<UnifiedWideViewProps> = memo(({
               </svg>
             </button>
 
+            {/* Audio Endpoint Switcher with dynamic Hardware Telemetry */}
             <button
-              onClick={onToggleAudioOutput}
+              onClick={onToggleMute || onToggleAudioOutput}
               onContextMenu={onContextMenuAudioOutput}
-              className="w-[26px] h-[26px] rounded-full flex items-center justify-center text-island-blue bg-island-blue/10 hover:bg-island-blue/20 transition-all border border-island-blue/20"
-              title={`Output: ${audioOutput === 'headset' ? 'Headset/TWS' : 'Laptop Speaker'}${
+              className={`w-[26px] h-[26px] rounded-full flex items-center justify-center transition-all border ${
+                isMuted
+                  ? 'text-rose-400 bg-rose-500/15 border-rose-500/30 shadow-[0_0_8px_rgba(244,63,94,0.2)]'
+                  : audioDeviceType === 'headphone_bluetooth'
+                  ? 'text-sky-300 bg-sky-500/15 border-sky-400/30 shadow-[0_0_8px_rgba(56,189,248,0.2)]'
+                  : audioDeviceType === 'headphone_wired' || audioOutput === 'headset'
+                  ? 'text-indigo-300 bg-indigo-500/15 border-indigo-400/30'
+                  : 'text-island-blue bg-island-blue/10 border-island-blue/20 hover:bg-island-blue/20'
+              }`}
+              title={`${audioDeviceName || (audioOutput === 'headset' ? 'Headphones' : 'Speakers')} (${
+                audioDeviceType === 'headphone_bluetooth'
+                  ? 'Bluetooth'
+                  : audioDeviceType === 'headphone_wired'
+                  ? 'Kabel / Wired'
+                  : 'Speaker'
+              }) • Vol: ${masterVolume ?? 100}%${isMuted ? ' [MUTED - Klik untuk Unmute]' : ' [Klik untuk Mute]'}${
                 activeAppName ? ` • Sesi: ${activeAppName}` : ''
               }${sessionCount > 1 ? ' (Klik kanan kelola sesi)' : ''}`}
               aria-label="Audio Output Switcher"
             >
-              {audioOutput === 'headset' ? (
+              {isMuted ? (
+                <VolumeX className="w-3.5 h-3.5 shrink-0 text-rose-400" />
+              ) : audioDeviceType === 'headphone_bluetooth' ? (
+                <Bluetooth className="w-3.5 h-3.5 shrink-0" />
+              ) : audioDeviceType === 'headphone_wired' || audioOutput === 'headset' ? (
                 <Headphones className="w-3.5 h-3.5 shrink-0" />
               ) : (
                 <Speaker className="w-3.5 h-3.5 shrink-0" />

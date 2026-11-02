@@ -9,6 +9,7 @@ mod hitbox;
 mod media;
 mod native_audio;
 mod spotify_oauth;
+mod system_hardware;
 
 /// Recalculates and sets the window's position to be precisely centered at top of the active monitor,
 /// properly factoring in display DPI scale factor (100%, 125%, 150%, 200%).
@@ -216,6 +217,9 @@ pub fn run() {
             // Start Windows GSMTC Media Telemetry Daemon
             media::windows_media::start_telemetry_daemon(app.handle().clone());
 
+            // Start Windows Hardware Telemetry Daemon (Power, Display, CapsLock, WASAPI)
+            system_hardware::start_hardware_telemetry_daemon(app.handle().clone());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -244,6 +248,10 @@ pub fn run() {
             spotify_oauth::refresh_spotify_user_token,
             native_audio::search_tracks_native,
             native_audio::resolve_track_stream,
+            system_hardware::get_system_telemetry,
+            system_hardware::set_master_volume,
+            system_hardware::toggle_audio_mute,
+            system_hardware::set_display_brightness,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CASA application");
