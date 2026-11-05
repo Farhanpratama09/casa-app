@@ -45,20 +45,20 @@ export const NativeQueueDrawer: React.FC<NativeQueueDrawerProps> = memo(({
   return (
     <div
       data-tauri-drag-region="false"
-      className="absolute inset-0 z-40 bg-[#0A0D15]/95 backdrop-blur-xl p-3 flex flex-col justify-between select-none animate-in fade-in duration-200"
+      className="absolute inset-0 z-40 bg-[#0e0e11] border border-[#2e2e34] rounded-2xl p-3 flex flex-col justify-between select-none animate-in fade-in duration-200"
       onClick={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
       {/* Top Header Row */}
-      <div className="flex items-center justify-between shrink-0 border-b border-white/[0.08] pb-1.5">
+      <div className="flex items-center justify-between shrink-0 border-b border-[#222226] pb-1.5">
         <div className="flex items-center gap-2">
-          <div className="w-5 h-5 rounded-full bg-sky-500/20 text-sky-300 flex items-center justify-center shrink-0">
+          <div className="w-5 h-5 rounded-full bg-cyan-500/10 text-cyan-400 flex items-center justify-center shrink-0 border border-cyan-500/20">
             <ListMusic className="w-3 h-3" />
           </div>
-          <span className="text-[12px] font-semibold text-white tracking-tight font-urbanist">
+          <span className="text-[12px] font-medium text-zinc-100 tracking-tight">
             Antrean CASA Native
           </span>
-          <span className="text-[10px] font-mono text-sky-400 bg-sky-500/10 border border-sky-400/20 rounded-full px-1.5 py-0.2">
+          <span className="font-sans font-medium text-[10px] tracking-tight text-cyan-300 bg-cyan-950/40 border border-cyan-500/30 px-2 py-0.5 rounded-full tabular-nums">
             {queue.length} lagu
           </span>
         </div>
@@ -67,21 +67,21 @@ export const NativeQueueDrawer: React.FC<NativeQueueDrawerProps> = memo(({
           {queue.length > 0 && (
             <button
               onClick={onClearQueue}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-medium bg-rose-500/10 hover:bg-rose-500/20 border border-rose-400/20 text-rose-300 hover:text-rose-200 transition-all cursor-pointer active:scale-95"
+              className="flex items-center gap-1 font-sans font-medium text-[10.5px] text-rose-300 hover:text-rose-200 bg-rose-950/25 hover:bg-rose-900/40 border border-rose-500/30 px-2 py-0.5 rounded-lg transition-all active:scale-[0.97] cursor-pointer"
               title="Kosongkan seluruh antrean"
             >
-              <Trash2 className="w-2.5 h-2.5" />
+              <X className="w-3 h-3 text-rose-400 shrink-0" />
               <span>Kosongkan</span>
             </button>
           )}
 
           <button
             onClick={handleClose}
-            className="w-6 h-6 rounded-full hover:bg-white/10 text-white/50 hover:text-white flex items-center justify-center transition-colors cursor-pointer shrink-0"
+            className="w-5 h-5 rounded-full bg-[#18181c] hover:bg-[#222226] border border-[#2e2e34] text-zinc-400 hover:text-zinc-100 flex items-center justify-center active:scale-[0.97] transition-all duration-100 ease-out cursor-pointer shrink-0"
             title="Tutup antrean"
             aria-label="Tutup antrean"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-3 h-3" />
           </button>
         </div>
       </div>
@@ -90,7 +90,7 @@ export const NativeQueueDrawer: React.FC<NativeQueueDrawerProps> = memo(({
       <div
         data-tauri-drag-region="false"
         onWheel={(e) => e.stopPropagation()}
-        className="flex-1 min-h-0 overflow-y-auto mt-1.5 pr-1 space-y-1 cosmic-music-scrollbar"
+        className="flex-1 min-h-0 overflow-y-auto mt-1.5 pr-1 space-y-1 cosmic-native-scrollbar"
       >
         {queue.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-white/30 text-center py-4 gap-1.5">
@@ -137,8 +137,8 @@ export const NativeQueueDrawer: React.FC<NativeQueueDrawerProps> = memo(({
                         <Pause className="w-2.5 h-2.5 text-sky-400/70" />
                       )
                     ) : (
-                      <span className="text-[10px] font-mono text-white/30 group-hover:text-white/60">
-                        {idx + 1}
+                      <span className="font-sans text-[10.5px] font-medium text-zinc-500 group-hover:text-zinc-300 tabular-nums">
+                        {String(idx + 1).padStart(2, '0')}
                       </span>
                     )}
                   </div>

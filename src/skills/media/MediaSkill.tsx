@@ -192,6 +192,7 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
       if (!isMounted) return;
       const current = getState();
       if (
+        current?.playbackSource === 'native' ||
         !current?.song?.isPlaying ||
         !current?.hasNativeMedia ||
         !isValidTrackMetadata(current?.song?.title, current?.song?.artist)
@@ -418,7 +419,8 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
               prev.song.title !== cleanTitle ||
               prev.song.artist !== payload.artist;
 
-            if (trackChanged && cleanTitle) {
+            const isNativeMode = prev.playbackSource === 'native';
+            if (trackChanged && cleanTitle && !isNativeMode) {
               setLastKnownPositionMs(0);
               clearPlayGuardWindow();
               if ((payload as any).uri || (payload as any).track_id) {
@@ -428,9 +430,18 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
               // Batalkan request lirik sebelumnya yang masih berjalan
               lyricsAbortControllerRef.current?.abort();
 
+              // Atomik Flush: Langsung kosongkan lirik lagu lama seketika agar tidak tertinggal
+              setState((s) =>
+                s.playbackSource === 'native'
+                  ? s
+                  : {
+                      ...s,
+                      lyricsData: { lines: [], isSynced: false, syncType: 'none', isInstrumental: false },
+                    }
+              );
+
               // Hanya fetch lirik jika bukan mode native dan status playback benar-benar Playing
               if (
-                prev.playbackSource !== 'native' &&
                 payload.is_playing &&
                 isValidTrackMetadata(cleanTitle, payload.artist)
               ) {
@@ -688,7 +699,7 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
       return (
         <div
           onClick={onClick}
-          className="w-[36px] h-[36px] rounded-full bg-neutral-950/80 backdrop-blur-2xl flex items-center justify-center border border-white/[0.12] cursor-pointer hover:border-emerald-500/50 transition-colors shadow-2xl"
+          className="w-[36px] h-[36px] rounded-full bg-[#09090b] border border-[#27272a] flex items-center justify-center cursor-pointer hover:border-zinc-700 active:scale-[0.97] transition-all duration-100 ease-out shadow-[0_4px_16px_rgba(0,0,0,0.85)]"
           title={`Playing: ${song.title} - ${song.artist}`}
           role="button"
           aria-label="Active Music Bubble"

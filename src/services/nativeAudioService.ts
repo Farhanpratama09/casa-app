@@ -146,6 +146,17 @@ export async function searchTracks(query: string): Promise<NativeTrack[]> {
  * directly from the Rust Dual-Tier Resolver (`resolve_track_stream`).
  */
 export async function resolveAudioCandidates(track: NativeTrack): Promise<string[]> {
+  // 0. Instant passthrough for local audio files or direct streams (0ms latency, no network)
+  if (track.candidates && track.candidates.length > 0) {
+    return track.candidates;
+  }
+  if (track.streamUrl && (track.streamUrl.startsWith('blob:') || track.streamUrl.startsWith('data:') || track.streamUrl.startsWith('http://127.0.0.1:'))) {
+    return [track.streamUrl];
+  }
+  if (track.id.startsWith('local-') && track.streamUrl) {
+    return [track.streamUrl];
+  }
+
   // 1. Check in-memory cache first (instant 0ms hit if pre-fetched by Queue Lookahead)
   const cached = streamCache.get(track.id);
   if (cached && cached.expiresAt > Date.now() && cached.candidates.length > 0) {

@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Zap } from 'lucide-react';
 import { IslandMode } from '../../types/island';
-import { MoonRabbitEmblem } from '../MoonRabbitEmblem';
-import { LunarBunnyGlyph } from '../LunarBunnyGlyph';
+import { CasaCompanionAvatar } from '../companion/CasaCompanionAvatar';
+import { FocusRabbitIcon, TwinEqualizerGlyph } from '../system/CosmicIcons';
 import { useSystemHardware } from '../../hooks/useSystemHardware';
+import { useSkillStore } from '../../skills/store';
 import {
   BunnyHeadphonesWired,
   BunnyHeadphonesBluetooth,
@@ -112,43 +113,15 @@ const TacticalSoundwaveGlyph: React.FC<{ className?: string }> = ({ className = 
   </svg>
 );
 
-// 2. Modul Timer: Eclipse Chrono (Eclipse Orbit Ring)
-const EclipseChronoIcon: React.FC<{ className?: string }> = ({ className = 'w-3.5 h-3.5' }) => (
+// 2. Modul Drop Shelf: Pocket / Shelf Glyph (Tas / Rak Penampung Berkas)
+const DropShelfGlyph: React.FC<{ className?: string }> = ({ className = 'w-3.5 h-3.5' }) => (
   <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
-    {/* Eclipse Chrono Orbital Ring */}
-    <circle cx="7" cy="7" r="5.2" stroke="currentColor" strokeWidth="1.2" fill="none" />
-    {/* Eclipse Moon Disc */}
-    <path
-      d="M7 2.2 A4.8 4.8 0 0 0 7 11.8 A3.5 3.5 0 0 1 7 2.2 Z"
-      fill="currentColor"
-    />
-    {/* Chrono Orbit Hand */}
-    <circle cx="7" cy="7" r="1" fill="currentColor" />
-    <line x1="7" y1="7" x2="9.6" y2="4.4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-  </svg>
-);
-
-// 3. Modul Tasks: Constellation Checklist Glyph (Tiga Titik Bintang Rasi Bertingkat)
-const ConstellationChecklistGlyph: React.FC<{ className?: string }> = ({ className = 'w-3.5 h-3.5' }) => (
-  <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
-    {/* Garis Rasi Penghubung Tipis Transparan */}
-    <path
-      d="M3 3.5 L6.5 7 L10 10.5"
-      stroke="currentColor"
-      strokeWidth="1.1"
-      strokeLinecap="round"
-      strokeDasharray="1.5 1.5"
-      opacity="0.4"
-    />
-    {/* 3 Titik Bintang Rasi (Stardust Nodes) Bertingkat */}
-    <circle cx="3" cy="3.5" r="1.3" fill="currentColor" />
-    <line x1="5.5" y1="3.5" x2="12.5" y2="3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.9" />
-
-    <circle cx="6.5" cy="7" r="1.3" fill="currentColor" />
-    <line x1="9" y1="7" x2="12.5" y2="7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.75" />
-
-    <circle cx="10" cy="10.5" r="1.3" fill="currentColor" />
-    <line x1="12" y1="10.5" x2="12.5" y2="10.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.5" />
+    {/* Outline Badan Tas / Pocket */}
+    <rect x="2" y="3.5" width="10" height="8" rx="2" stroke="currentColor" strokeWidth="1.2" />
+    {/* Pegangan / Handle Tas Atas */}
+    <path d="M4.5 3.5 V2.2 C4.5 1.7 5 1.2 5.6 1.2 H8.4 C9 1.2 9.5 1.7 9.5 2.2 V3.5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+    {/* Garis Aksen Kantong / Pocket Flap */}
+    <line x1="4.5" y1="6.8" x2="9.5" y2="6.8" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeDasharray="1.5 1.5" opacity="0.8" />
   </svg>
 );
 
@@ -160,33 +133,6 @@ interface ModuleItem {
   activeBorder: string;
   Icon: React.FC<{ className?: string }>;
 }
-
-const MODULES: ModuleItem[] = [
-  {
-    id: 'expanded_music',
-    name: 'Lunar Audio',
-    activeColor: 'text-[#98BBD6]',
-    activeBg: 'bg-[#98BBD6]/15',
-    activeBorder: 'border border-[#98BBD6]/30 shadow-[0_0_10px_rgba(152,187,214,0.35)]',
-    Icon: TacticalSoundwaveGlyph,
-  },
-  {
-    id: 'expanded_timer',
-    name: 'Lunar Orbit',
-    activeColor: 'text-[#7DD3FC]',
-    activeBg: 'bg-[#7DD3FC]/12',
-    activeBorder: 'border border-[#7DD3FC]/30 shadow-[0_0_10px_rgba(125,211,252,0.25)]',
-    Icon: LunarBunnyGlyph,
-  },
-  {
-    id: 'expanded_todo',
-    name: 'Tasks',
-    activeColor: 'text-[#818CF8]',
-    activeBg: 'bg-[#818CF8]/15',
-    activeBorder: 'border border-[#818CF8]/30 shadow-[0_0_10px_rgba(129,140,248,0.35)]',
-    Icon: ConstellationChecklistGlyph,
-  },
-];
 
 export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
   currentMode = 'expanded_music',
@@ -203,6 +149,39 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
 }) => {
   const [timeStr, setTimeStr] = useState('');
   const [dateStr, setDateStr] = useState('');
+
+  const mediaSkill = useSkillStore((s) => s.skillStates['core.media']);
+  const isSpotifyActive = Boolean(
+    mediaSkill?.playbackSource !== 'native' &&
+    (mediaSkill?.song?.is_spotify || (mediaSkill?.isSpotifyRunning && !mediaSkill?.is_browser))
+  );
+
+  const modules: ModuleItem[] = [
+    {
+      id: 'expanded_music',
+      name: 'Lunar Audio',
+      activeColor: isSpotifyActive ? 'text-[#10b981]' : 'text-cyan-400',
+      activeBg: isSpotifyActive ? 'bg-emerald-950/40' : 'bg-cyan-500/10',
+      activeBorder: isSpotifyActive ? 'border border-emerald-500/30' : 'border border-cyan-500/30',
+      Icon: TacticalSoundwaveGlyph,
+    },
+    {
+      id: 'expanded_timer',
+      name: 'Productivity',
+      activeColor: 'text-[#818cf8]',
+      activeBg: 'bg-[#818cf8]/15',
+      activeBorder: 'border border-[#818cf8]/30',
+      Icon: FocusRabbitIcon,
+    },
+    {
+      id: 'drop_zone',
+      name: 'Drop Shelf',
+      activeColor: 'text-[#c084fc]',
+      activeBg: 'bg-purple-950/40',
+      activeBorder: 'border border-purple-500/35',
+      Icon: DropShelfGlyph,
+    },
+  ];
 
   const {
     telemetry,
@@ -225,8 +204,7 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
       const now = new Date();
       const hours = String(now.getHours()).padStart(2, '0');
       const minutes = String(now.getMinutes()).padStart(2, '0');
-      const seconds = String(now.getSeconds()).padStart(2, '0');
-      setTimeStr(`${hours}.${minutes}.${seconds}`);
+      setTimeStr(`${hours}:${minutes}`);
       setDateStr(
         now.toLocaleDateString('en-US', {
           weekday: 'short',
@@ -240,11 +218,13 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
     return () => clearInterval(interval);
   }, []);
 
+  const normalizedMode =
+    currentMode === 'expanded_todo' ? 'expanded_timer' : currentMode;
   const currentIdx = Math.max(
     0,
-    MODULES.findIndex((m) => m.id === currentMode)
+    modules.findIndex((m) => m.id === normalizedMode)
   );
-  const activeModule = MODULES[currentIdx] || MODULES[0];
+  const activeModule = modules[currentIdx] || modules[0];
 
   const handleBarClick = (e: React.MouseEvent) => {
     // Klik pada header bar HANYA mengeksekusi onHeaderClick/onCollapse jika pengguna mengklik area kosong bar,
@@ -267,164 +247,196 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
 
   return (
     <div
-      onClick={handleBarClick}
-      className={`relative w-full h-[28px] px-4 flex items-center justify-between border-b border-white/[0.04] select-none text-[11px] font-medium leading-none shrink-0 bg-transparent cursor-pointer hover:bg-white/[0.04] transition-colors ${
+      className={`relative w-full h-[32px] shrink-0 select-none ${
         isNotchOpen ? 'z-40' : 'z-10'
       }`}
-      title={
-        isPeekPreview
-          ? 'Klik untuk mengunci CASA (Lock Expanded)'
-          : 'Klik header untuk menciutkan CASA (Collapse to Idle)'
-      }
     >
-      {/* Left: Moon Rabbit Brandmark & CASA Telemetry Wordmark */}
       <div
-        data-tauri-drag-region
-        className="flex items-center gap-1.5 shrink-0 cursor-default"
+        onClick={handleBarClick}
+        className="w-full h-full px-4 pt-1 flex items-center justify-between border-b border-[#27272a] overflow-visible text-[11px] font-medium leading-none bg-[#09090b] cursor-pointer hover:bg-[#121215] transition-colors"
+        title={
+          isPeekPreview
+            ? 'Klik untuk mengunci CASA (Lock Expanded)'
+            : 'Klik header untuk menciutkan CASA (Collapse to Idle)'
+        }
       >
-        <MoonRabbitEmblem size={16} />
-        <span
-          data-tauri-drag-region
-          className="tracking-[0.25em] text-[10px] font-bold text-white/90"
-        >
-          C Λ S Λ
-        </span>
-      </div>
-
-      {/* Middle: Telemetry Clock (HH.mm.ss) + Tactile Segmented Lunar Astronomy Module Switcher */}
-      <div className="flex items-center gap-2.5 shrink-0">
+        {/* Left: Interactive Vibing Companion Mascot + Divider Rapat (Anti-Kopong) */}
         <div
           data-tauri-drag-region
-          data-idle-clock-date="true"
-          className="flex items-center shrink-0 tabular-nums select-none cursor-default"
+          className="flex items-center gap-2.5 shrink-0 cursor-default overflow-visible"
         >
-          <span
-            data-tauri-drag-region
-            className="font-mono font-bold text-white/95 text-[12px] tracking-tight tabular-nums"
-          >
-            {timeStr}
-          </span>
-          <span data-tauri-drag-region className="text-white/25 mx-1.5">•</span>
-          <span
-            data-tauri-drag-region
-            className="font-sans font-medium text-white/45 text-[11px]"
-          >
-            {dateStr}
-          </span>
+          <div className="flex items-center h-7 shrink-0 overflow-visible">
+            <CasaCompanionAvatar isPlaying={isPlaying} mood="awake" />
+          </div>
+          <span className="text-white/20 select-none text-xs font-light leading-none shrink-0" aria-hidden="true">|</span>
         </div>
 
-        {/* Tactile Segmented Lunar Astronomy Module Switcher */}
-        {(onSelectMode || onPrev || onNext) && (
+        {/* Middle: Telemetry Clock (HH.mm.ss) + Tactile Segmented Lunar Astronomy Module Switcher */}
+        <div className="flex items-center gap-2 shrink-0 h-full">
           <div
-            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-            onMouseDown={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-            className="relative z-30 pointer-events-auto flex items-center gap-1 px-1 py-0.5 rounded-full bg-white/[0.03] border border-white/[0.06] shadow-inner ml-1 select-none"
-            title={`Modul: ${activeModule.name}`}
+            data-tauri-drag-region
+            data-idle-clock-date="true"
+            className="flex items-center shrink-0 tabular-nums select-none cursor-default"
           >
-            <button
-              type="button"
-              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              onMouseDown={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                console.log('[NAV] Prev Clicked');
-                if (onPrev) {
-                  onPrev();
-                } else if (onSelectMode) {
-                  const prevIdx = (currentIdx - 1 + MODULES.length) % MODULES.length;
-                  onSelectMode(MODULES[prevIdx].id);
-                }
-              }}
-              className="w-7 h-7 flex items-center justify-center relative z-30 pointer-events-auto cursor-pointer hover:text-white text-white/60 hover:bg-white/10 rounded-full transition-colors"
-              title="Modul Sebelumnya"
-              aria-label="Previous Module"
+            <span
+              data-tauri-drag-region
+              className="font-sans font-semibold text-[12px] tracking-tight tabular-nums text-zinc-100 antialiased"
             >
-              <ChevronLeft className="w-3.5 h-3.5 pointer-events-none" />
-            </button>
-
-            <button
-              type="button"
-              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              onMouseDown={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                console.log('[NAV] Next Clicked');
-                if (onNext) {
-                  onNext();
-                } else if (onSelectMode) {
-                  const nextIdx = (currentIdx + 1) % MODULES.length;
-                  onSelectMode(MODULES[nextIdx].id);
-                }
-              }}
-              className={`w-7 h-7 flex items-center justify-center rounded-full transition-colors pointer-events-auto cursor-pointer relative z-30 ${activeModule.activeColor} ${activeModule.activeBg} ${activeModule.activeBorder}`}
-              title={`Modul: ${activeModule.name} (Klik untuk beralih)`}
-              aria-label={`Modul: ${activeModule.name}`}
+              {timeStr}
+            </span>
+            <span
+              data-tauri-drag-region
+              className="text-zinc-500/60 mx-1.5 text-[9px] select-none"
             >
-              <activeModule.Icon className="w-3.5 h-3.5 shrink-0 pointer-events-none" />
-            </button>
-
-            <button
-              type="button"
-              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              onMouseDown={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                console.log('[NAV] Next Clicked');
-                if (onNext) {
-                  onNext();
-                } else if (onSelectMode) {
-                  const nextIdx = (currentIdx + 1) % MODULES.length;
-                  onSelectMode(MODULES[nextIdx].id);
-                }
-              }}
-              className="w-7 h-7 flex items-center justify-center relative z-30 pointer-events-auto cursor-pointer hover:text-white text-white/60 hover:bg-white/10 rounded-full transition-colors"
-              title="Modul Berikutnya"
-              aria-label="Next Module"
+              •
+            </span>
+            <span
+              data-tauri-drag-region
+              className="font-sans font-medium text-[11.5px] text-zinc-300 tracking-normal antialiased tabular-nums"
             >
-              <ChevronRight className="w-3.5 h-3.5 pointer-events-none" />
-            </button>
+              {dateStr}
+            </span>
           </div>
-        )}
 
-        {/* Developer Trigger Toggle (Kept for Ctrl+Shift+D debug mode) */}
-        {showDevTrigger && onToggleDevTrigger && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleDevTrigger();
-            }}
-            className="px-1.5 py-0.5 rounded text-[8.5px] font-mono tracking-tight transition-all ml-1 bg-white/20 text-white border border-white/30 font-semibold"
-            title="Toggle Developer State Controls (Ctrl+Shift+D)"
-            aria-label="Toggle Developer State Controls"
-          >
-            DEV
-          </button>
-        )}
-      </div>
+          {/* Tactile Segmented Lunar Astronomy Module Switcher (Compacted to h-[22px] inside 28px bar) */}
+          {(onSelectMode || onPrev || onNext) && (
+            <div
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              className="relative z-30 pointer-events-auto flex items-center gap-0.5 h-[22px] px-1 py-0 rounded-full bg-[#18181c] border border-[#2e2e34] ml-0.5 select-none"
+              title={`Modul: ${activeModule.name}`}
+            >
+              <button
+                type="button"
+                style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  if (onPrev) {
+                    onPrev();
+                  } else if (onSelectMode) {
+                    const prevIdx = (currentIdx - 1 + modules.length) % modules.length;
+                    onSelectMode(modules[prevIdx].id);
+                  }
+                }}
+                className="w-5 h-5 flex items-center justify-center relative z-30 pointer-events-auto cursor-pointer text-zinc-400 hover:text-zinc-100 hover:bg-[#222226] active:scale-[0.97] rounded-full transition-all duration-100 ease-out"
+                title="Modul Sebelumnya"
+                aria-label="Previous Module"
+              >
+                <ChevronLeft className="w-3 h-3 pointer-events-none" />
+              </button>
 
-      {/* Right: Hardware Telemetry Pills & Lunar Control Notch Trigger */}
-      <div className="flex items-center gap-1.5 shrink-0">
-        {/* Caps Lock Indicator: AlertBunnyCaps (Hanya muncul saat Caps Lock aktif) */}
-        {telemetry.is_caps_locked && (
-          <div
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8.5px] font-sans font-bold tracking-[0.14em] uppercase bg-rose-500/15 text-rose-300 border border-rose-500/30 select-none cursor-default drop-shadow-[0_0_6px_rgba(244,63,94,0.35)]"
-            title="Caps Lock Aktif (VK_CAPITAL)"
-          >
-            <AlertBunnyCaps isActive={true} size={13} className="w-3.5 h-3.5 shrink-0" />
-            <span>CAPS</span>
-          </div>
-        )}
+              <button
+                type="button"
+                style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  if (onNext) {
+                    onNext();
+                  } else if (onSelectMode) {
+                    const nextIdx = (currentIdx + 1) % modules.length;
+                    onSelectMode(modules[nextIdx].id);
+                  }
+                }}
+                className={`w-5 h-5 flex items-center justify-center rounded-full active:scale-[0.97] transition-all duration-100 ease-out pointer-events-auto cursor-pointer relative z-30 ${activeModule.activeColor} ${activeModule.activeBg} ${activeModule.activeBorder}`}
+                title={`Modul: ${activeModule.name} (Klik untuk beralih)`}
+                aria-label={`Modul: ${activeModule.name}`}
+              >
+                <activeModule.Icon className="w-3 h-3 shrink-0 pointer-events-none" />
+              </button>
 
-        {/* Battery Pill: Mini Circular Battery Ring + font-mono percentage */}
-        {telemetry.has_battery && (
+              <button
+                type="button"
+                style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  if (onNext) {
+                    onNext();
+                  } else if (onSelectMode) {
+                    const nextIdx = (currentIdx + 1) % modules.length;
+                    onSelectMode(modules[nextIdx].id);
+                  }
+                }}
+                className="w-5 h-5 flex items-center justify-center relative z-30 pointer-events-auto cursor-pointer text-zinc-400 hover:text-zinc-100 hover:bg-[#222226] active:scale-[0.97] rounded-full transition-all duration-100 ease-out"
+                title="Modul Berikutnya"
+                aria-label="Next Module"
+              >
+                <ChevronRight className="w-3 h-3 pointer-events-none" />
+              </button>
+            </div>
+          )}
+
+          {/* Developer Trigger Toggle (Kept for Ctrl+Shift+D debug mode) */}
+          {showDevTrigger && onToggleDevTrigger && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleDevTrigger();
+              }}
+              className="px-1.5 py-0.5 rounded text-[8.5px] font-mono tracking-tight transition-all ml-1 bg-[#18181c] hover:bg-[#222226] border border-[#2e2e34] text-zinc-300 font-semibold active:scale-[0.97]"
+              title="Toggle Developer State Controls (Ctrl+Shift+D)"
+              aria-label="Toggle Developer State Controls"
+            >
+              DEV
+            </button>
+          )}
+        </div>
+
+        {/* Right: Hardware Telemetry Pills & Lunar Control Notch Trigger */}
+        <div className="flex items-center gap-1.5 shrink-0 h-full">
+          {/* Caps Lock Indicator: AlertBunnyCaps (Hanya muncul saat Caps Lock aktif) */}
+          {telemetry.is_caps_locked && (
+            <div
+              className="flex items-center gap-1 h-[20px] px-1.5 rounded text-[8.5px] font-mono font-bold tracking-[0.14em] uppercase bg-[rgba(192,132,252,0.12)] text-[#c084fc] border border-[rgba(192,132,252,0.25)] shadow-[0_0_8px_rgba(192,132,252,0.25)] select-none cursor-default"
+              title="Caps Lock Aktif (VK_CAPITAL)"
+            >
+              <AlertBunnyCaps isActive={true} size={12} className="w-3 h-3 shrink-0 text-[#c084fc]" />
+              <span>CAPS</span>
+            </div>
+          )}
+
+          {/* Battery Pill: Mini Circular Battery Ring + font-mono percentage */}
+          {telemetry.has_battery && (
+            <button
+              type="button"
+              data-interactive="true"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsNotchOpen((prev) => !prev);
+              }}
+              className={`flex items-center h-[22px] px-1.5 rounded-full border transition-all duration-100 ease-out cursor-pointer select-none active:scale-[0.97] ${
+                isNotchOpen
+                  ? isSpotifyActive
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                    : 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300'
+                  : 'bg-[#18181c] hover:bg-[#222226] border-[#2e2e34] text-zinc-300 hover:text-zinc-100'
+              }`}
+              title={`Baterai: ${telemetry.battery_percentage}%${telemetry.is_charging ? ' (Charging)' : ''} - Klik untuk Lunar Control Notch`}
+              aria-label="Lunar Battery Control"
+            >
+              <MiniCircularBattery
+                percentage={telemetry.battery_percentage}
+                isCharging={telemetry.is_charging}
+                hasBattery={telemetry.has_battery}
+                size={16}
+              />
+            </button>
+          )}
+
+          {/* Audio Endpoint Pill: BunnyHeadphones / MoonCraterSpeaker + font-mono master volume */}
           <button
             type="button"
             data-interactive="true"
@@ -435,76 +447,34 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
               e.stopPropagation();
               setIsNotchOpen((prev) => !prev);
             }}
-            className={`flex items-center px-1.5 py-0.5 rounded-full border transition-all cursor-pointer select-none ${
-              isNotchOpen
-                ? 'bg-[#98BBD6]/20 border-[#98BBD6]/40 text-[#98BBD6] shadow-[0_0_8px_rgba(152,187,214,0.3)]'
-                : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.07] text-white/80 hover:text-white'
+            className={`flex items-center gap-1.5 h-[22px] px-2 rounded-full border transition-all duration-100 ease-out cursor-pointer relative z-30 select-none active:scale-[0.97] ${
+              telemetry.is_muted
+                ? 'bg-zinc-800/80 text-zinc-400 border border-zinc-700 shadow-none'
+                : isNotchOpen
+                ? isSpotifyActive
+                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                  : 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300'
+                : 'bg-[#18181c] hover:bg-[#222226] border-[#2e2e34] text-zinc-300 hover:text-zinc-100'
             }`}
-            title={`Baterai: ${telemetry.battery_percentage}%${telemetry.is_charging ? ' (Charging)' : ''} - Klik untuk Lunar Control Notch`}
-            aria-label="Lunar Battery Control"
+            title={`Endpoint: ${telemetry.audio_device_name} (Vol: ${telemetry.master_volume}%) - Klik untuk Lunar Control Notch`}
+            aria-label="Lunar Audio Control Notch"
           >
-            <MiniCircularBattery
-              percentage={telemetry.battery_percentage}
-              isCharging={telemetry.is_charging}
-              hasBattery={telemetry.has_battery}
-            />
+            {telemetry.is_muted ? (
+              <MoonCraterSpeaker isMuted={true} className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
+            ) : telemetry.audio_device_type === 'headphone_bluetooth' ? (
+              <BunnyHeadphonesBluetooth className="w-3.5 h-3.5 shrink-0 text-sky-400" />
+            ) : telemetry.audio_device_type === 'headphone_wired' ? (
+              <BunnyHeadphonesWired className="w-3.5 h-3.5 shrink-0 text-indigo-300" />
+            ) : (
+              <MoonCraterSpeaker isMuted={false} className={`w-3.5 h-3.5 shrink-0 ${isSpotifyActive ? 'text-emerald-400' : 'text-cyan-400'}`} />
+            )}
+            <span className={`font-mono text-[10px] tabular-nums font-semibold leading-none ${telemetry.is_muted ? 'text-zinc-400' : ''}`}>
+              {telemetry.is_muted ? 'MUTED' : `${telemetry.master_volume}%`}
+            </span>
           </button>
-        )}
 
-        {/* Audio Endpoint Pill: BunnyHeadphones / MoonCraterSpeaker + font-mono master volume */}
-        <button
-          type="button"
-          data-interactive="true"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-          onMouseDown={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsNotchOpen((prev) => !prev);
-          }}
-          className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border transition-all cursor-pointer relative z-30 select-none ${
-            isNotchOpen
-              ? 'bg-[#98BBD6]/20 border-[#98BBD6]/40 text-[#98BBD6] shadow-[0_0_8px_rgba(152,187,214,0.3)]'
-              : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.07] text-white/80 hover:text-white'
-          }`}
-          title={`Endpoint: ${telemetry.audio_device_name} (Vol: ${telemetry.master_volume}%) - Klik untuk Lunar Control Notch`}
-          aria-label="Lunar Audio Control Notch"
-        >
-          {telemetry.audio_device_type === 'headphone_bluetooth' ? (
-            <BunnyHeadphonesBluetooth className="w-3.5 h-3.5 shrink-0 text-sky-400" />
-          ) : telemetry.audio_device_type === 'headphone_wired' ? (
-            <BunnyHeadphonesWired className="w-3.5 h-3.5 shrink-0 text-indigo-300" />
-          ) : (
-            <MoonCraterSpeaker className="w-3.5 h-3.5 shrink-0 text-[#98BBD6]" />
-          )}
-          <span className="font-mono text-[10px] tabular-nums font-semibold leading-none">
-            {telemetry.is_muted ? 'MUTED' : `${telemetry.master_volume}%`}
-          </span>
-        </button>
-
-        {/* Dynamic Mini Audio Waveform in Ice Blue */}
-        <div
-          className="w-[14px] h-[14px] flex items-end justify-center gap-[1.5px] pb-0.5 shrink-0"
-          title="Audio Waveform"
-        >
-          <span
-            className={`w-[1.5px] rounded-full transition-all ${
-              isPlaying ? 'h-2 animate-pulse bg-[#98BBD6]' : 'h-1 bg-[#98BBD6]/40'
-            }`}
-            style={{ filter: isPlaying ? 'drop-shadow(0 0 3px rgba(152, 187, 214, 0.5))' : undefined }}
-          />
-          <span
-            className={`w-[1.5px] rounded-full transition-all ${
-              isPlaying ? 'h-3.5 animate-[bounce_0.8s_infinite] bg-[#98BBD6]' : 'h-1.5 bg-[#98BBD6]/40'
-            }`}
-            style={{ filter: isPlaying ? 'drop-shadow(0 0 3px rgba(152, 187, 214, 0.5))' : undefined }}
-          />
-          <span
-            className={`w-[1.5px] rounded-full transition-all ${
-              isPlaying ? 'h-2.5 animate-[pulse_0.6s_infinite] bg-[#98BBD6]' : 'h-1 bg-[#98BBD6]/40'
-            }`}
-            style={{ filter: isPlaying ? 'drop-shadow(0 0 3px rgba(152, 187, 214, 0.5))' : undefined }}
-          />
+          {/* Dynamic Twin Audio Equalizer Glyph */}
+          <TwinEqualizerGlyph active={isPlaying} isMuted={telemetry.is_muted} isSpotify={isSpotifyActive} className="ml-1" />
         </div>
       </div>
 

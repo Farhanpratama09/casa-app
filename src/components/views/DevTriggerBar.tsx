@@ -81,7 +81,7 @@ export const DevTriggerBar: React.FC<DevTriggerBarProps> = ({
       ref={devTriggerRef}
       onWheel={handleWheel}
       aria-label="Developer State Testing Controls"
-      className={`mt-3 flex items-center justify-center gap-2 px-4 py-2 bg-neutral-900/90 backdrop-blur-md rounded-full border border-white/10 shadow-xl select-none max-w-full overflow-x-auto no-scrollbar pointer-events-auto ${className}`.trim()}
+      className={`mt-3 flex items-center justify-center gap-2 px-4 py-2 bg-[#09090b] rounded-full border border-[#27272a] shadow-[0_8px_24px_rgba(0,0,0,0.85)] select-none max-w-full overflow-x-auto no-scrollbar pointer-events-auto ${className}`.trim()}
     >
       <span className="text-[9px] font-semibold tracking-wider text-island-secondary uppercase mr-1 border-r border-white/10 pr-2">
         DEV TRIGGER

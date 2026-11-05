@@ -232,27 +232,8 @@ export const TimerCardView: React.FC<TimerCardViewProps> = ({
         {/* RIGHT COLUMN (Flex-1): Minimalist Deck & Zero-Text Action Controls */}
         {/* =================================================================== */}
         <div className="flex flex-col justify-between flex-1 min-w-0 h-full py-1">
-          {/* Header Row: Hanya 4 Titik Fase Siklus Bulan di Pojok Kanan Atas */}
-          <div className="flex items-center justify-end w-full pt-0.5">
-            <div className="flex items-center gap-1.5" title={`Fase Siklus ${timer.currentCycle} / 4`}>
-              {[1, 2, 3, 4].map((step) => {
-                const isDone = step < timer.currentCycle;
-                const isCurrent = step === timer.currentCycle;
-                return (
-                  <div
-                    key={step}
-                    className={`h-1.5 rounded-full transition-all duration-300 ${
-                      isDone
-                        ? 'w-1.5 bg-[#7DD3FC] shadow-[0_0_6px_rgba(125,211,252,0.35)]'
-                        : isCurrent
-                        ? 'w-3.5 bg-gradient-to-r from-[#7DD3FC] to-[#818CF8] shadow-[0_0_8px_rgba(125,211,252,0.35)] animate-pulse'
-                        : 'w-1.5 bg-white/[0.1]'
-                    }`}
-                  />
-                );
-              })}
-            </div>
-          </div>
+          {/* Header Row: Minimalist Deck */}
+          <div className="w-full pt-0.5" />
 
           {/* Preset Pills Khas Kelinci Bulan (Menyatu Kosmik, Urbanist Font) */}
           <div className="grid grid-cols-3 gap-2 w-full my-auto">

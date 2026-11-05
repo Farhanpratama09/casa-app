@@ -96,7 +96,7 @@ export const timerSkill: CasaSkill<TimerState> = {
       return (
         <div
           onClick={onClick}
-          className="w-[36px] h-[36px] rounded-full bg-[#0D0E12]/95 backdrop-blur-md flex items-center justify-center border border-white/[0.12] cursor-pointer hover:border-[#7DD3FC]/40 transition-colors shadow-ambient"
+          className="w-[36px] h-[36px] rounded-full bg-[#09090b] border border-[#27272a] flex items-center justify-center cursor-pointer hover:border-zinc-700 active:scale-[0.97] transition-all duration-100 ease-out shadow-[0_4px_16px_rgba(0,0,0,0.85)]"
           title={`Active Timer: ${Math.floor(state.remainingSeconds / 60)}:${(state.remainingSeconds % 60).toString().padStart(2, '0')}`}
           role="button"
           aria-label="Active Timer Bubble"

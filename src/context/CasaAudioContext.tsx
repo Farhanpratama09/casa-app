@@ -16,10 +16,13 @@ import {
   fetchLyrics,
   cleanTrackTitleForLyrics,
   LyricResult,
+  parseTimeToSeconds,
 } from '../utils/lyricsService';
 import { useSkillStore } from '../skills/store';
-import { playChimeCue } from '../utils/tauriBridge';
+import { playChimeCue, controlMediaSession } from '../utils/tauriBridge';
+import { pauseSpotifyPlayback } from '../utils/spotifyService';
 import { PlaybackSource } from '../components/views/music/constants';
+import { useQueueStore, SmartQueueTrack } from '../stores/useQueueStore';
 
 export interface CasaAudioContextType {
   // Instance & Reference
@@ -27,6 +30,7 @@ export interface CasaAudioContextType {
 
   // Playback State
   playbackSource: PlaybackSource;
+  activeSource: 'native' | 'spotify' | 'idle';
   setPlaybackSource: (source: PlaybackSource) => void;
   currentTrack: NativeTrack | null;
   isPlaying: boolean;
@@ -42,8 +46,12 @@ export interface CasaAudioContextType {
 
   // Queue State
   queue: NativeTrack[];
+  manualQueue: NativeTrack[];
+  radioQueue: NativeTrack[];
   queueIndex: number;
   addedTrackId: string | null;
+  isShuffle: boolean;
+  toggleShuffle: () => void;
 
   // Primary Controllers
   playTrack: (track: NativeTrack, customList?: NativeTrack[]) => Promise<void>;
@@ -51,16 +59,18 @@ export interface CasaAudioContextType {
   togglePlay: () => Promise<void>;
   play: () => Promise<void>;
   pause: () => void;
-  seek: (targetSecondsOrMs: number) => void;
+  seekToSeconds: (targetSeconds: number) => void;
+  seek: (targetSeconds: number) => void;
   setVolume: (val: number) => void;
   toggleMute: () => void;
   nextTrack: () => void;
-  prevTrack: (currentProgressMs?: number) => void;
+  prevTrack: (currentProgressSeconds?: number) => void;
   addToQueue: (e: React.MouseEvent | null, track: NativeTrack) => void;
   removeFromQueue: (e: React.MouseEvent | null, index: number) => void;
   clearQueue: (e?: React.MouseEvent) => void;
   setQueueAndPlay: (list: NativeTrack[], targetIndex: number) => void;
   stopInstantly: () => void;
+  ejectNativeTrack: () => void;
 
   // Legacy mappings for drop-in compatibility with useNativeAudioPlayer consumers
   nativeTrack: NativeTrack | null;
@@ -74,8 +84,8 @@ export interface CasaAudioContextType {
   nativeAudioError: string | null;
   addedNativeTrackId: string | null;
   handleNextTrack: () => void;
-  handlePrevTrack: (currentProgressMs?: number) => void;
-  handleSeekNative: (targetMs: number) => void;
+  handlePrevTrack: (currentProgressSeconds?: number) => void;
+  handleSeekNative: (targetSeconds: number) => void;
   toggleNativePlay: () => Promise<void>;
   stopNativeAudioInstantly: () => void;
 }
@@ -117,6 +127,7 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
   const [audioError, setAudioError] = useState<string | null>(null);
   const [addedTrackId, setAddedTrackId] = useState<string | null>(null);
   const [lyricsData, setLyricsData] = useState<LyricResult | null>(null);
+  const lyricsDataRef = useRef<LyricResult | null>(null);
 
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [currentTimeMs, setCurrentTimeMs] = useState<number>(0);
@@ -125,9 +136,16 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
   const [volume, setVolumeState] = useState<number>(1.0);
   const [isMuted, setIsMuted] = useState<boolean>(false);
 
+  // Dual-Tier Smart Queue Hooks
+  const manualQueue = useQueueStore((s) => s.manualQueue) as unknown as NativeTrack[];
+  const radioQueue = useQueueStore((s) => s.radioQueue) as unknown as NativeTrack[];
+  const isShuffle = useQueueStore((s) => s.isShuffle);
+  const toggleShuffle = useQueueStore((s) => s.toggleShuffle);
+
   const candidateUrlsRef = useRef<string[]>([]);
   const candidateIndexRef = useRef<number>(0);
   const playTrackAtIndexRef = useRef<((index: number) => Promise<void>) | null>(null);
+  const playTrackRef = useRef<((track: NativeTrack, customList?: NativeTrack[]) => Promise<void>) | null>(null);
 
   // Synchronize playback state to Central Skill Store ('core.media')
   useEffect(() => {
@@ -161,14 +179,59 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
     });
   }, []);
 
+  // Eject / Close Native Session: Stops audio, clears local file, resets clock & lyrics to standby
+  const ejectNativeTrack = useCallback(() => {
+    stopInstantly();
+    setCurrentTrack(null);
+    currentTrackRef.current = null;
+    setLyricsData(null);
+    lyricsDataRef.current = null;
+    setCurrentTime(0);
+    setCurrentTimeMs(0);
+    setDuration(0);
+    setDurationMs(0);
+    useSkillStore.getState().updateSkillState('core.media', (prev: any) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        nativeTrack: null,
+        isNativePlaying: false,
+        lyricsData: null,
+      };
+    });
+  }, [stopInstantly]);
+
   const setPlaybackSource = useCallback(
     (source: PlaybackSource) => {
-      setPlaybackSourceState(source);
-      if (source === 'companion' && isPlayingRef.current) {
-        stopInstantly();
+      if (source === playbackSourceRef.current) return;
+      if (source === 'companion') {
+        // Strict Manual Source Authority: Pause native player (do not teardown/destroy src)
+        if (audioRef.current && !audioRef.current.paused) {
+          audioRef.current.pause();
+        }
+        setIsPlaying(false);
+        useSkillStore.getState().updateSkillState('core.media', (prev: any) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            isNativePlaying: false,
+          };
+        });
+      } else if (source === 'native') {
+        // Return control and restore native lyrics to skill store
+        if (lyricsDataRef.current) {
+          useSkillStore.getState().updateSkillState('core.media', (prev: any) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              lyricsData: lyricsDataRef.current,
+            };
+          });
+        }
       }
+      setPlaybackSourceState(source);
     },
-    [stopInstantly]
+    []
   );
 
   // Core execution logic for playing a track at queue index
@@ -189,21 +252,52 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
     setIsResolvingAudio(true);
     isResolvingAudioRef.current = true;
 
-    // Reset progress timers
+    // Sync to Universal Queue Store
+    useQueueStore.getState().setActiveSource('native');
+    useQueueStore.getState().setCurrentTrack(track);
+
+    // Mutual Exclusion: Auto-pause Spotify and external GSMTC media sessions
+    pauseSpotifyPlayback().catch(() => {});
+    try {
+      const mediaState = useSkillStore.getState().skillStates['core.media'];
+      if (mediaState?.active_sessions) {
+        for (const s of mediaState.active_sessions) {
+          if (s.is_playing) {
+            controlMediaSession(s.session_id, 'pause').catch(() => {});
+          }
+        }
+      } else if (mediaState?.session_id && mediaState?.song?.isPlaying) {
+        controlMediaSession(mediaState.session_id, 'pause').catch(() => {});
+      }
+    } catch {}
+
+    // Reset progress timers synchronously before loading new track
     setCurrentTime(0);
     setCurrentTimeMs(0);
     if (track.durationSeconds) {
       setDuration(track.durationSeconds);
       setDurationMs(track.durationSeconds * 1000);
+    } else {
+      setDuration(0);
+      setDurationMs(0);
     }
 
-    // Synchronously prime the HTMLAudioElement
+    // Synchronously prime & reset the HTMLAudioElement clock to prevent stale timeupdate leaks
     if (audioRef.current) {
       audioRef.current.pause();
+      audioRef.current.currentTime = 0;
       audioRef.current.autoplay = true;
       audioRef.current.muted = false;
       audioRef.current.volume = volume;
     }
+
+    // Clear stale lyrics immediately on track switch before fetching new LRCLIB lyrics
+    setLyricsData(null);
+    lyricsDataRef.current = null;
+    useSkillStore.getState().updateSkillState('core.media', (prev: any) => {
+      if (!prev) return prev;
+      return { ...prev, lyricsData: null };
+    });
 
     // Trigger LRCLIB lyrics fetch in parallel
     const cleanTitle = cleanTrackTitleForLyrics(track.title);
@@ -211,8 +305,11 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
     if (cleanTitle && cleanTitle !== 'CASA Native Player') {
       fetchLyrics(cleanTitle, cleanArtist, track.durationSeconds, false)
         .then((res) => {
+          // Guard against out-of-order resolution if track changed again
+          if (currentTrackRef.current?.id !== track.id) return;
           if (res && res.lines && res.lines.length > 0) {
             setLyricsData(res);
+            lyricsDataRef.current = res;
             useSkillStore.getState().updateSkillState('core.media', (prev: any) => {
               if (!prev) return prev;
               return { ...prev, lyricsData: res };
@@ -303,9 +400,32 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
     };
 
     const handleTimeUpdate = () => {
+      if (isResolvingAudioRef.current) {
+        setCurrentTime(0);
+        setCurrentTimeMs(0);
+        return;
+      }
       const cur = audio.currentTime;
       setCurrentTime(cur);
       setCurrentTimeMs(cur * 1000);
+      const dur = audio.duration;
+      if (dur && !isNaN(dur) && isFinite(dur) && dur > 0) {
+        setDuration(dur);
+        setDurationMs(dur * 1000);
+
+        // Auto-Radio Lookahead Trigger:
+        // When track is within 15 seconds of ending and remaining manual queue is <= 1,
+        // pre-fetch recommendations to ensure 0-gap continuous playback.
+        const curIdx = queueIndexRef.current;
+        const q = queueRef.current;
+        const isNearEnd = dur > 20 && cur >= dur - 15;
+        if (isNearEnd && curIdx >= q.length - 1) {
+          const qStore = useQueueStore.getState();
+          if (qStore.radioQueue.length <= 2 && !qStore.isFetchingRadio) {
+            qStore.triggerAutoRadio();
+          }
+        }
+      }
     };
 
     const handleLoadedMetadata = () => {
@@ -317,15 +437,23 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
       }
     };
 
-    const handleEnded = () => {
+    const handleEnded = async () => {
       const curIdx = queueIndexRef.current;
       const q = queueRef.current;
       if (curIdx + 1 < q.length) {
         console.log(`[CasaAudioContext] Track ended. Advancing to ${curIdx + 1}/${q.length}`);
         playTrackAtIndexRef.current?.(curIdx + 1);
       } else {
-        console.log('[CasaAudioContext] Queue ended.');
-        setIsPlaying(false);
+        // Query next track from Smart Queue (manualQueue -> radioQueue -> auto-radio fallback)
+        console.log('[CasaAudioContext] Manual queue ended. Querying Smart Queue...');
+        const nextSmartTrack = await useQueueStore.getState().getNextTrack();
+        if (nextSmartTrack) {
+          console.log('[CasaAudioContext] Smart Queue auto-advancing to:', nextSmartTrack.title);
+          playTrackRef.current?.(nextSmartTrack as unknown as NativeTrack);
+        } else {
+          console.log('[CasaAudioContext] Queue ended.');
+          setIsPlaying(false);
+        }
       }
     };
 
@@ -385,6 +513,35 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
     if (!audioRef.current) return;
 
     if (audioRef.current.paused) {
+      // Mutual exclusion: pause Spotify and GSMTC when resuming native
+      pauseSpotifyPlayback().catch(() => {});
+      try {
+        const mediaState = useSkillStore.getState().skillStates['core.media'];
+        if (mediaState?.active_sessions) {
+          for (const s of mediaState.active_sessions) {
+            if (s.is_playing) {
+              controlMediaSession(s.session_id, 'pause').catch(() => {});
+            }
+          }
+        }
+      } catch {}
+
+      // If audio has no valid source but an active track is available, resolve and play it
+      const activeTrack =
+        currentTrackRef.current ||
+        (useQueueStore.getState().currentTrack as unknown as NativeTrack | null);
+
+      if (
+        (!audioRef.current.src ||
+          audioRef.current.src === '' ||
+          audioRef.current.src === window.location.href) &&
+        activeTrack
+      ) {
+        console.log('[CasaAudioContext] Unprimed source on togglePlay, resolving:', activeTrack.title);
+        await playTrackRef.current?.(activeTrack);
+        return;
+      }
+
       try {
         await audioRef.current.play();
         setIsPlaying(true);
@@ -401,6 +558,19 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
 
   const play = useCallback(async () => {
     if (!audioRef.current) return;
+    // Mutual exclusion: pause Spotify and GSMTC when playing native
+    pauseSpotifyPlayback().catch(() => {});
+    try {
+      const mediaState = useSkillStore.getState().skillStates['core.media'];
+      if (mediaState?.active_sessions) {
+        for (const s of mediaState.active_sessions) {
+          if (s.is_playing) {
+            controlMediaSession(s.session_id, 'pause').catch(() => {});
+          }
+        }
+      }
+    } catch {}
+
     try {
       await audioRef.current.play();
       setIsPlaying(true);
@@ -417,14 +587,15 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
     setIsPlaying(false);
   }, []);
 
-  const seek = useCallback((targetSecondsOrMs: number) => {
+  const seekToSeconds = useCallback((rawTargetSeconds: number) => {
     if (!audioRef.current) return;
-    const targetSeconds =
-      targetSecondsOrMs > 1000 ? targetSecondsOrMs / 1000 : targetSecondsOrMs;
+    const targetSeconds = parseTimeToSeconds(rawTargetSeconds);
     audioRef.current.currentTime = targetSeconds;
     setCurrentTime(targetSeconds);
     setCurrentTimeMs(targetSeconds * 1000);
   }, []);
+
+  const seek = seekToSeconds;
 
   const setVolume = useCallback((val: number) => {
     const clamped = Math.max(0, Math.min(1, val));
@@ -441,31 +612,34 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
     setIsMuted(nextMuted);
   }, []);
 
-  const nextTrack = useCallback(() => {
+  const nextTrack = useCallback(async () => {
     playChimeCue('tap');
     const curIdx = queueIndexRef.current;
     const q = queueRef.current;
     if (curIdx + 1 < q.length) {
       playTrackAtIndex(curIdx + 1);
-    } else if (q.length > 0) {
-      playTrackAtIndex(0); // loop back
+    } else {
+      const next = await useQueueStore.getState().getNextTrack();
+      if (next) {
+        playTrackRef.current?.(next as unknown as NativeTrack);
+      } else if (q.length > 0) {
+        playTrackAtIndex(0); // loop back
+      }
     }
   }, [playTrackAtIndex]);
 
   const prevTrack = useCallback(
-    (currentProgressMs?: number) => {
+    (currentProgressSeconds?: number) => {
       playChimeCue('tap');
-      const posMs =
-        currentProgressMs !== undefined
-          ? currentProgressMs
+      const posSec =
+        currentProgressSeconds !== undefined
+          ? currentProgressSeconds
           : audioRef.current
-          ? audioRef.current.currentTime * 1000
+          ? audioRef.current.currentTime
           : 0;
 
-      if (posMs > 3000 && audioRef.current) {
-        audioRef.current.currentTime = 0;
-        setCurrentTime(0);
-        setCurrentTimeMs(0);
+      if (posSec > 3 && audioRef.current) {
+        seekToSeconds(0);
         return;
       }
       const curIdx = queueIndexRef.current;
@@ -475,7 +649,7 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
         playTrackAtIndex(queueRef.current.length - 1);
       }
     },
-    [playTrackAtIndex]
+    [playTrackAtIndex, seekToSeconds]
   );
 
   const addToQueue = useCallback((e: React.MouseEvent | null, track: NativeTrack) => {
@@ -489,6 +663,7 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
       }
       return updated;
     });
+    useQueueStore.getState().addToManualQueue(track);
     setAddedTrackId(track.id);
     setTimeout(() => setAddedTrackId(null), 1500);
   }, []);
@@ -500,6 +675,7 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
       const updated = queueRef.current.filter((_, idx) => idx !== indexToRemove);
       queueRef.current = updated;
       setQueue(updated);
+      useQueueStore.getState().removeFromManualQueue(indexToRemove);
 
       if (updated.length === 0) {
         setQueueIndex(-1);
@@ -508,6 +684,7 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
         setCurrentTrack(null);
         currentTrackRef.current = null;
         setLyricsData(null);
+        lyricsDataRef.current = null;
       } else if (indexToRemove === queueIndexRef.current) {
         const nextIdx = indexToRemove < updated.length ? indexToRemove : updated.length - 1;
         playTrackAtIndex(nextIdx);
@@ -524,22 +701,35 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
     (e?: React.MouseEvent) => {
       if (e) e.stopPropagation();
       playChimeCue('tap');
-      setQueue([]);
-      queueRef.current = [];
-      setQueueIndex(-1);
-      queueIndexRef.current = -1;
-      stopInstantly();
-      setCurrentTrack(null);
-      currentTrackRef.current = null;
-      setLyricsData(null);
+      // Kosongkan HANYA membersihkan daftar lagu tunggu (manualQueue & radioQueue)!
+      // DILARANG memanggil stopInstantly, pauseAudio, atau mereset currentTrack ke null!
+      const cur =
+        currentTrackRef.current ||
+        (useQueueStore.getState().currentTrack as unknown as NativeTrack | null);
+
+      if (cur) {
+        setQueue([cur]);
+        queueRef.current = [cur];
+        setQueueIndex(0);
+        queueIndexRef.current = 0;
+      } else {
+        setQueue([]);
+        queueRef.current = [];
+        setQueueIndex(-1);
+        queueIndexRef.current = -1;
+      }
+
+      useQueueStore.getState().clearAllQueues();
     },
-    [stopInstantly]
+    []
   );
 
   const setQueueAndPlay = useCallback(
     (list: NativeTrack[], targetIndex: number) => {
       setQueue(list);
       queueRef.current = list;
+      const remaining = list.slice(targetIndex + 1);
+      useQueueStore.getState().setManualQueue(remaining);
       playTrackAtIndex(targetIndex);
     },
     [playTrackAtIndex]
@@ -547,6 +737,11 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
 
   const playTrack = useCallback(
     async (track: NativeTrack, customList?: NativeTrack[]) => {
+      setCurrentTime(0);
+      setCurrentTimeMs(0);
+      if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+      }
       const baseList = customList || [track];
       let idx = baseList.findIndex((t) => t.id === track.id);
       if (idx === -1) {
@@ -558,12 +753,34 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
     [setQueueAndPlay]
   );
 
+  playTrackRef.current = playTrack;
+
+  const effectiveIsPlaying = Boolean(audioRef.current ? !audioRef.current.paused : isPlaying);
+
+  const mediaSkill = useSkillStore((s) => s.skillStates['core.media']);
+  const isExternalPlaying = Boolean(
+    playbackSource !== 'native' &&
+    mediaSkill?.song?.isPlaying &&
+    mediaSkill?.song?.title &&
+    mediaSkill?.song?.title.trim() !== ''
+  );
+
+  const activeSource: 'native' | 'spotify' | 'idle' =
+    playbackSource === 'native' && effectiveIsPlaying
+      ? 'native'
+      : effectiveIsPlaying
+      ? 'native'
+      : isExternalPlaying
+      ? 'spotify'
+      : 'idle';
+
   const contextValue: CasaAudioContextType = {
     audioRef,
     playbackSource,
+    activeSource,
     setPlaybackSource,
     currentTrack,
-    isPlaying,
+    isPlaying: effectiveIsPlaying,
     isResolvingAudio,
     audioError,
     currentTime,
@@ -574,6 +791,10 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
     isMuted,
     lyricsData,
     queue,
+    manualQueue,
+    radioQueue,
+    isShuffle,
+    toggleShuffle,
     queueIndex,
     addedTrackId,
     playTrack,
@@ -581,6 +802,7 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
     togglePlay,
     play,
     pause,
+    seekToSeconds,
     seek,
     setVolume,
     toggleMute,
@@ -591,11 +813,12 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
     clearQueue,
     setQueueAndPlay,
     stopInstantly,
+    ejectNativeTrack,
 
     // Legacy aliases
     nativeTrack: currentTrack,
     setNativeTrack: setCurrentTrack,
-    isNativePlaying: isPlaying,
+    isNativePlaying: effectiveIsPlaying,
     setIsNativePlaying: setIsPlaying,
     nativeQueue: queue,
     setNativeQueue: setQueue,
@@ -605,7 +828,7 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
     addedNativeTrackId: addedTrackId,
     handleNextTrack: nextTrack,
     handlePrevTrack: prevTrack,
-    handleSeekNative: seek,
+    handleSeekNative: seekToSeconds,
     toggleNativePlay: togglePlay,
     stopNativeAudioInstantly: stopInstantly,
   };

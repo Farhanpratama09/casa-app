@@ -86,11 +86,6 @@ export const TodoCardView: React.FC<TodoCardViewProps> = ({
             [<span className="text-indigo-300 font-semibold">{String(completedCount).padStart(2, '0')}</span>/{String(todos.length).padStart(2, '0')}]
           </span>
         </div>
-
-        {/* Celestial Indigo Stardust Dot di pojok kanan atas (status siap) */}
-        <div className="flex items-center justify-end" title="System Ready">
-          <span className="w-1 h-1 rounded-full bg-indigo-400 shadow-[0_0_6px_rgba(129,140,248,0.7)] animate-pulse" />
-        </div>
       </div>
 
       {/* =================================================================== */}

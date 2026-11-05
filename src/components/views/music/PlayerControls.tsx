@@ -5,12 +5,15 @@ import {
   SkipBack,
   SkipForward,
   Shuffle,
-  Mic2,
-  Search,
-  ListMusic,
+  Repeat,
   Library,
   Loader2,
 } from 'lucide-react';
+import {
+  LunarLyricIcon,
+  CosmicSearchIcon,
+  QueueOrbitIcon,
+} from '../../system/CosmicIcons';
 import { playChimeCue } from '../../../utils/tauriBridge';
 import { MusicSubPanel } from './constants';
 
@@ -19,14 +22,17 @@ export interface PlayerControlsProps {
   isEffectivePlaying: boolean;
   hasActiveSession: boolean;
   canAccessSpotifyFeatures: boolean;
+  isSpotifySession?: boolean;
   isWakingSpotify?: boolean;
   currentTimeSeconds: number;
   durationSeconds: number;
-  onSeek: (targetMs: number) => void;
+  onSeek: (targetSeconds: number) => void;
   // Transport actions
   isShuffle?: boolean;
   isSmartShuffle?: boolean;
   onToggleShuffle?: () => void;
+  isRepeat?: boolean;
+  onToggleRepeat?: () => void;
   onPrev: () => void;
   onTogglePlay: () => void;
   onNext: () => void;
@@ -46,6 +52,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
   isEffectivePlaying,
   hasActiveSession,
   canAccessSpotifyFeatures,
+  isSpotifySession = false,
   isWakingSpotify = false,
   currentTimeSeconds,
   durationSeconds,
@@ -53,6 +60,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
   isShuffle = false,
   isSmartShuffle = false,
   onToggleShuffle,
+  isRepeat = false,
+  onToggleRepeat,
   onPrev,
   onTogglePlay,
   onNext,
@@ -67,7 +76,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
     if (!durationSeconds || durationSeconds <= 0) return 0;
     const rect = targetEl.getBoundingClientRect();
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    return Math.round(ratio * durationSeconds);
+    return ratio * durationSeconds;
   }, [durationSeconds]);
 
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -109,9 +118,8 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {}
 
-    const targetMs = Math.round(scrubPosition * 1000);
     setIsScrubbing(false);
-    onSeek(targetMs);
+    onSeek(scrubPosition);
   }, [isScrubbing, scrubPosition, onSeek]);
 
   const displayTime = isScrubbing ? scrubPosition : currentTimeSeconds;
@@ -121,9 +129,18 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
       ? Math.min(100, Math.max(0, (displayTime / durationSeconds) * 100))
       : 0;
 
+  const handleLyricsToggle = useCallback(() => {
+    playChimeCue('tap');
+    if (activeSubPanel === 'lyrics') {
+      onSwitchSubPanel?.('none');
+    } else {
+      onSwitchSubPanel?.('lyrics');
+    }
+  }, [activeSubPanel, onSwitchSubPanel]);
+
   return (
     <div className="w-full flex flex-col select-none">
-      {/* Scrubber Slider Row with Real-time Dragging */}
+      {/* Scrubber Slider Row with Real-time Dragging & Meteor Trail Seekbar */}
       <div className="w-full my-0.5">
         <div
           ref={scrubberRef}
@@ -131,78 +148,82 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
-          className="w-full h-2 py-0.5 relative cursor-pointer group select-none touch-none flex items-center"
+          className="w-full h-2.5 py-1 relative cursor-pointer group select-none touch-none flex items-center"
           title="Geser atau klik untuk seek lagu"
         >
-          <div className="w-full h-[2px] group-hover:h-[3px] bg-white/[0.08] rounded-full relative transition-all">
+          {/* Garis orbit dasar 2px */}
+          <div className="w-full h-[2px] bg-zinc-800/80 rounded-full relative">
+            {/* Ekor meteor: gradasi halus dari transparan via emerald/cyan ke emerald/cyan-400 */}
             <div
-              className={`h-full bg-[#98BBD6] rounded-full shadow-[0_0_8px_rgba(152,187,214,0.45)] ${
-                isScrubbing || isEffectivePlaying ? '' : 'transition-all duration-100'
-              }`}
-              style={{ width: `${progressPercent}%` }}
+              className={`h-full rounded-full ${
+                isSpotifySession
+                  ? 'bg-gradient-to-r from-transparent via-emerald-500/30 to-emerald-400'
+                  : 'bg-gradient-to-r from-transparent via-cyan-500/30 to-cyan-400'
+              } ${isScrubbing || isEffectivePlaying ? '' : 'transition-all duration-100'}`}
+              style={{
+                width: `${progressPercent}%`,
+              }}
             />
-            {/* Interactive Dot Handle */}
-            <div
-              className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-[#98BBD6] shadow-[0_0_8px_rgba(152,187,214,0.7)] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none -ml-1"
-              style={{ left: `${progressPercent}%` }}
-            />
+            {/* Head thumb: titik bintang putih bersinar tepat di ujung durasi lagu yang berjalan */}
+            {progressPercent > 0 && (
+              <div
+                className={`absolute top-1/2 -translate-y-1/2 w-2 h-2 -ml-1 rounded-full bg-white pointer-events-none transition-transform ${
+                  isSpotifySession
+                    ? 'shadow-[0_0_8px_#10b981,0_0_16px_rgba(16,185,129,0.6)]'
+                    : 'shadow-[0_0_8px_#22d3ee,0_0_16px_rgba(34,211,238,0.6)]'
+                }`}
+                style={{ left: `${progressPercent}%` }}
+              />
+            )}
           </div>
         </div>
-        <div className="flex items-center justify-between text-[10px] font-mono tracking-tight text-white/50 tabular-nums px-0.5">
+        <div className="flex items-center justify-between text-[10px] font-mono tabular-nums text-zinc-400 px-0.5 mt-0.5">
           <span>{formatTime(displayTime)}</span>
-          <span className="text-white/20">//</span>
           <span>-{formatTime(remainingSeconds)}</span>
         </div>
       </div>
 
       {/* Controls Row: Full Mode vs Compact Mode */}
       {!isCompact ? (
-        /* Full Mode: Centered Playback Controls + Feature Panels */
-        <div className={`flex items-center justify-center ${canAccessSpotifyFeatures ? 'gap-3' : 'gap-4'} w-full`}>
-          {/* Shuffle Button */}
-          {canAccessSpotifyFeatures && (
-            <button
-              onClick={onToggleShuffle}
-              disabled={!hasActiveSession}
-              className={`relative w-[24px] h-[24px] rounded-full flex items-center justify-center transition-all ${
-                isShuffle
-                  ? isSmartShuffle
-                    ? 'text-emerald-400 bg-emerald-500/20 shadow-[0_0_8px_rgba(16,185,129,0.3)]'
-                    : 'text-white bg-white/20 shadow-[0_0_8px_rgba(255,255,255,0.2)]'
-                  : 'text-white/40 hover:text-white'
-              } disabled:opacity-30 disabled:cursor-not-allowed`}
-              title={
-                isShuffle
-                  ? isSmartShuffle
-                    ? 'Smart Shuffle Active ✨'
-                    : 'Shuffle Active'
-                  : 'Shuffle Off'
-              }
-              aria-label="Toggle Shuffle"
-            >
-              <Shuffle className="w-3 h-3 shrink-0" />
-              {isShuffle && isSmartShuffle && (
-                <span className="absolute -top-0.5 -right-0.5 w-1 h-1 rounded-full bg-emerald-400 ring-1 ring-black animate-pulse" />
-              )}
-            </button>
-          )}
+        /* Full Mode: Centered Playback Controls [Shuffle Prev Play Next Repeat | Lyrics] */
+        <div className="flex items-center justify-center gap-3 w-full">
+          {/* 1. Shuffle Button */}
+          <button
+            onClick={onToggleShuffle}
+            disabled={!hasActiveSession}
+            className={`relative w-[24px] h-[24px] rounded-full flex items-center justify-center transition-all cursor-pointer ${
+              isShuffle
+                ? isSpotifySession
+                  ? 'text-[#10b981] drop-shadow-[0_0_6px_rgba(16,185,129,0.5)] bg-emerald-950/40 border border-emerald-500/30'
+                  : 'text-cyan-400 drop-shadow-[0_0_6px_rgba(34,211,238,0.5)] bg-cyan-950/40 border border-cyan-500/30'
+                : 'text-zinc-500 hover:text-zinc-300 bg-transparent border-transparent'
+            } disabled:opacity-30 disabled:cursor-not-allowed`}
+            title={isShuffle ? 'Shuffle Aktif' : 'Shuffle Mati'}
+            aria-label="Toggle Shuffle"
+          >
+            <Shuffle className="w-3.5 h-3.5 shrink-0" />
+          </button>
 
-          {/* Prev Track */}
+          {/* 2. Prev Track */}
           <button
             onClick={onPrev}
-            disabled={!hasActiveSession && !canAccessSpotifyFeatures}
-            className="w-[24px] h-[24px] rounded-full flex items-center justify-center text-island-secondary hover:text-white hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            disabled={!hasActiveSession}
+            className="w-[24px] h-[24px] rounded-full flex items-center justify-center text-island-secondary hover:text-white hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
             title="Previous Track"
             aria-label="Previous Track"
           >
             <SkipBack className="w-3.5 h-3.5 shrink-0 fill-current" />
           </button>
 
-          {/* Play / Pause Tactile 28px Button */}
+          {/* 3. Play / Pause Tactile 28px Button */}
           <button
             onClick={onTogglePlay}
             disabled={!hasActiveSession && !isWakingSpotify}
-            className="w-[28px] h-[28px] rounded-full bg-[#98BBD6] text-[#0D0E12] flex items-center justify-center hover:bg-[#98BBD6]/90 active:scale-95 transition-all shadow-[0_0_10px_rgba(152,187,214,0.4)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+            className={`w-[28px] h-[28px] rounded-full text-black flex items-center justify-center active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ${
+              isSpotifySession
+                ? 'bg-emerald-400 hover:bg-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.4)]'
+                : 'bg-cyan-400 hover:bg-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.4)]'
+            }`}
             title={
               !hasActiveSession
                 ? 'Tidak ada media aktif'
@@ -215,18 +236,18 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
             aria-label={isEffectivePlaying ? 'Pause' : 'Play'}
           >
             {isWakingSpotify ? (
-              <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-[#0D0E12]" />
+              <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin text-black" />
             ) : isEffectivePlaying ? (
-              <Pause className="w-3.5 h-3.5 shrink-0 fill-current text-[#0D0E12]" />
+              <Pause className="w-3.5 h-3.5 shrink-0 fill-current text-black" />
             ) : (
-              <Play className="w-3.5 h-3.5 shrink-0 fill-current text-[#0D0E12] ml-0.5" />
+              <Play className="w-3.5 h-3.5 shrink-0 fill-current text-black ml-0.5" />
             )}
           </button>
 
-          {/* Next Track */}
+          {/* 4. Next Track */}
           <button
             onClick={onNext}
-            disabled={!hasActiveSession && !canAccessSpotifyFeatures}
+            disabled={!hasActiveSession}
             className="w-[24px] h-[24px] rounded-full flex items-center justify-center text-island-secondary hover:text-white hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
             title="Next Track"
             aria-label="Next Track"
@@ -234,202 +255,148 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
             <SkipForward className="w-3.5 h-3.5 shrink-0 fill-current" />
           </button>
 
-          {/* Vertical Divider */}
-          {canAccessSpotifyFeatures && <div className="h-3.5 w-[1px] bg-white/10 mx-0.5" />}
-
-          {/* Lyrics Toggle */}
+          {/* 5. Repeat Button */}
           <button
-            onClick={() => onSwitchSubPanel?.('lyrics')}
-            className="w-[24px] h-[24px] rounded-full flex items-center justify-center text-white/40 hover:text-[#98BBD6] hover:bg-white/10 transition-all cursor-pointer"
-            title="Open Synced Lyrics"
-            aria-label="Open Synced Lyrics"
+            onClick={onToggleRepeat}
+            disabled={!hasActiveSession || !onToggleRepeat}
+            className={`relative w-[24px] h-[24px] rounded-full flex items-center justify-center transition-all cursor-pointer ${
+              isRepeat
+                ? isSpotifySession
+                  ? 'text-[#10b981] drop-shadow-[0_0_6px_rgba(16,185,129,0.5)] bg-emerald-950/40 border border-emerald-500/30'
+                  : 'text-cyan-400 drop-shadow-[0_0_6px_rgba(34,211,238,0.5)] bg-cyan-950/40 border border-cyan-500/30'
+                : 'text-zinc-500 hover:text-zinc-300 bg-transparent border-transparent'
+            } disabled:opacity-30 disabled:cursor-not-allowed`}
+            title={isRepeat ? 'Repeat Aktif' : 'Repeat Mati'}
+            aria-label="Toggle Repeat"
           >
-            <Mic2 className="w-3 h-3 shrink-0" />
+            <Repeat className="w-3.5 h-3.5 shrink-0" />
           </button>
 
-          {/* Search Toggle */}
-          {canAccessSpotifyFeatures && (
-            <button
-              onClick={() => onSwitchSubPanel?.('search')}
-              className="w-[24px] h-[24px] rounded-full flex items-center justify-center text-white/40 hover:text-[#98BBD6] hover:bg-white/10 transition-all cursor-pointer"
-              title="Quick Search Spotify"
-              aria-label="Quick Search Spotify"
-            >
-              <Search className="w-3 h-3 shrink-0" />
-            </button>
-          )}
+          {/* 6. Vertical Divider */}
+          <div className="h-3.5 w-[1px] bg-white/[0.08] mx-0.5 shrink-0" />
 
-          {/* Queue Toggle */}
-          {canAccessSpotifyFeatures && (
-            <button
-              onClick={() => onSwitchSubPanel?.('queue')}
-              className="w-[24px] h-[24px] rounded-full flex items-center justify-center text-white/40 hover:text-[#98BBD6] hover:bg-white/10 transition-all cursor-pointer"
-              title="Upcoming Queue"
-              aria-label="Upcoming Queue"
-            >
-              <ListMusic className="w-3 h-3 shrink-0" />
-            </button>
-          )}
-
-          {/* Playlists Toggle */}
-          {canAccessSpotifyFeatures && (
-            <button
-              onClick={() => onSwitchSubPanel?.('playlist')}
-              className="w-[24px] h-[24px] rounded-full flex items-center justify-center text-white/40 hover:text-[#98BBD6] hover:bg-white/10 transition-all cursor-pointer"
-              title="Spotify Library"
-              aria-label="Spotify Library"
-            >
-              <Library className="w-3 h-3 shrink-0" />
-            </button>
-          )}
+          {/* 7. Lyrics Toggle */}
+          <button
+            onClick={handleLyricsToggle}
+            className={`w-[24px] h-[24px] rounded-full flex items-center justify-center transition-all cursor-pointer shrink-0 ${
+              activeSubPanel === 'lyrics'
+                ? isSpotifySession
+                  ? 'bg-emerald-950/40 text-emerald-300 border border-emerald-500/30 shadow-[0_0_8px_rgba(16,185,129,0.3)]'
+                  : 'bg-cyan-950/40 text-cyan-300 border border-cyan-500/30 shadow-[0_0_8px_rgba(34,211,238,0.3)]'
+                : 'text-zinc-500 hover:text-zinc-300 bg-transparent border border-transparent'
+            }`}
+            title={activeSubPanel === 'lyrics' ? 'Tutup Lirik (Mode Pemutar Penuh)' : 'Buka Lirik'}
+            aria-label="Toggle Lirik"
+          >
+            <LunarLyricIcon className="w-3.5 h-3.5 shrink-0" />
+          </button>
         </div>
       ) : (
-        /* Compact Mode: Split View Layout with Tight Spacing & Active Highlights */
-        <div className={`flex items-center ${canAccessSpotifyFeatures ? 'justify-between' : 'justify-center gap-2.5'} w-full pt-0.5`}>
-          {/* Playback Group (Shuffle, Prev, Play/Pause, Next) */}
-          <div className="flex items-center gap-1">
-            {canAccessSpotifyFeatures && (
-              <button
-                onClick={onToggleShuffle}
-                disabled={!hasActiveSession}
-                className={`relative w-[20px] h-[20px] rounded-full flex items-center justify-center transition-all ${
-                  isShuffle
-                    ? isSmartShuffle
-                      ? 'text-emerald-400 bg-emerald-500/20 shadow-[0_0_6px_rgba(16,185,129,0.3)]'
-                      : 'text-white bg-white/20 shadow-[0_0_8px_rgba(255,255,255,0.2)]'
-                    : 'text-white/40 hover:text-white'
-                } disabled:opacity-30 disabled:cursor-not-allowed`}
-                title={
-                  isShuffle
-                    ? isSmartShuffle
-                      ? 'Smart Shuffle Active ✨'
-                      : 'Shuffle Active'
-                    : 'Shuffle Off'
-                }
-                aria-label="Toggle Shuffle"
-              >
-                <Shuffle className="w-2.5 h-2.5 shrink-0" />
-                {isShuffle && isSmartShuffle && (
-                  <span className="absolute -top-0.5 -right-0.5 w-1 h-1 rounded-full bg-emerald-400 ring-1 ring-black animate-pulse" />
-                )}
-              </button>
+        /* Compact Mode: Unified Centered Cluster [Shuffle Prev Play Next Repeat | Lyrics] */
+        <div className="flex items-center justify-center gap-2.5 w-full pt-0.5">
+          {/* 1. Shuffle Button */}
+          <button
+            onClick={onToggleShuffle}
+            disabled={!hasActiveSession}
+            className={`relative w-[20px] h-[20px] rounded-full flex items-center justify-center transition-all cursor-pointer ${
+              isShuffle
+                ? isSpotifySession
+                  ? 'text-[#10b981] drop-shadow-[0_0_6px_rgba(16,185,129,0.5)] bg-emerald-950/40 border border-emerald-500/30'
+                  : 'text-cyan-400 drop-shadow-[0_0_6px_rgba(34,211,238,0.5)] bg-cyan-950/40 border border-cyan-500/30'
+                : 'text-zinc-500 hover:text-zinc-300 bg-transparent border-transparent'
+            } disabled:opacity-30 disabled:cursor-not-allowed`}
+            title={isShuffle ? 'Shuffle Aktif' : 'Shuffle Mati'}
+            aria-label="Toggle Shuffle"
+          >
+            <Shuffle className="w-2.5 h-2.5 shrink-0" />
+          </button>
+
+          {/* 2. Prev Button */}
+          <button
+            onClick={onPrev}
+            disabled={!hasActiveSession}
+            className="w-[22px] h-[22px] rounded-full flex items-center justify-center text-island-secondary hover:text-white hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+            title="Previous Track"
+            aria-label="Previous Track"
+          >
+            <SkipBack className="w-3 h-3 shrink-0 fill-current" />
+          </button>
+
+          {/* 3. Play / Pause Tactile 28px Button */}
+          <button
+            onClick={onTogglePlay}
+            disabled={!hasActiveSession && !isWakingSpotify}
+            className={`w-[28px] h-[28px] rounded-full text-black flex items-center justify-center active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ${
+              isSpotifySession
+                ? 'bg-emerald-400 hover:bg-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.4)]'
+                : 'bg-cyan-400 hover:bg-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.4)]'
+            }`}
+            title={
+              !hasActiveSession
+                ? 'Tidak ada media aktif'
+                : isWakingSpotify
+                ? 'Menghubungkan Spotify...'
+                : isEffectivePlaying
+                ? 'Pause'
+                : 'Play'
+            }
+            aria-label={isEffectivePlaying ? 'Pause' : 'Play'}
+          >
+            {isWakingSpotify ? (
+              <Loader2 className="w-3 h-3 shrink-0 animate-spin text-black" />
+            ) : isEffectivePlaying ? (
+              <Pause className="w-3.5 h-3.5 shrink-0 fill-current text-black" />
+            ) : (
+              <Play className="w-3.5 h-3.5 shrink-0 fill-current text-black ml-0.5" />
             )}
+          </button>
 
-            {/* Prev */}
-            <button
-              onClick={onPrev}
-              disabled={!hasActiveSession && !canAccessSpotifyFeatures}
-              className="w-[22px] h-[22px] rounded-full flex items-center justify-center text-island-secondary hover:text-white hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Previous Track"
-              aria-label="Previous Track"
-            >
-              <SkipBack className="w-3 h-3 shrink-0 fill-current" />
-            </button>
+          {/* 4. Next Button */}
+          <button
+            onClick={onNext}
+            disabled={!hasActiveSession}
+            className="w-[22px] h-[22px] rounded-full flex items-center justify-center text-island-secondary hover:text-white hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+            title="Next Track"
+            aria-label="Next Track"
+          >
+            <SkipForward className="w-3 h-3 shrink-0 fill-current" />
+          </button>
 
-            {/* Play / Pause Tactile 28px Button */}
-            <button
-              onClick={onTogglePlay}
-              disabled={!hasActiveSession && !isWakingSpotify}
-              className="w-[28px] h-[28px] rounded-full bg-[#98BBD6] text-[#0D0E12] flex items-center justify-center hover:bg-[#98BBD6]/90 active:scale-95 transition-all shadow-[0_0_10px_rgba(152,187,214,0.4)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-              title={
-                !hasActiveSession
-                  ? 'Tidak ada media aktif'
-                  : isWakingSpotify
-                  ? 'Menghubungkan Spotify...'
-                  : isEffectivePlaying
-                  ? 'Pause'
-                  : 'Play'
-              }
-              aria-label={isEffectivePlaying ? 'Pause' : 'Play'}
-            >
-              {isWakingSpotify ? (
-                <Loader2 className="w-3 h-3 shrink-0 animate-spin text-[#0D0E12]" />
-              ) : isEffectivePlaying ? (
-                <Pause className="w-3.5 h-3.5 shrink-0 fill-current text-[#0D0E12]" />
-              ) : (
-                <Play className="w-3.5 h-3.5 shrink-0 fill-current text-[#0D0E12] ml-0.5" />
-              )}
-            </button>
+          {/* 5. Repeat Button */}
+          <button
+            onClick={onToggleRepeat}
+            disabled={!hasActiveSession || !onToggleRepeat}
+            className={`relative w-[20px] h-[20px] rounded-full flex items-center justify-center transition-all cursor-pointer ${
+              isRepeat
+                ? isSpotifySession
+                  ? 'text-[#10b981] drop-shadow-[0_0_6px_rgba(16,185,129,0.5)] bg-emerald-950/40 border border-emerald-500/30'
+                  : 'text-cyan-400 drop-shadow-[0_0_6px_rgba(34,211,238,0.5)] bg-cyan-950/40 border border-cyan-500/30'
+                : 'text-zinc-500 hover:text-zinc-300 bg-transparent border-transparent'
+            } disabled:opacity-30 disabled:cursor-not-allowed`}
+            title={isRepeat ? 'Repeat Aktif' : 'Repeat Mati'}
+            aria-label="Toggle Repeat"
+          >
+            <Repeat className="w-2.5 h-2.5 shrink-0" />
+          </button>
 
-            {/* Next */}
-            <button
-              onClick={onNext}
-              disabled={!hasActiveSession && !canAccessSpotifyFeatures}
-              className="w-[22px] h-[22px] rounded-full flex items-center justify-center text-island-secondary hover:text-white hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Next Track"
-              aria-label="Next Track"
-            >
-              <SkipForward className="w-3 h-3 shrink-0 fill-current" />
-            </button>
-          </div>
+          {/* 6. Micro Divider */}
+          <div className="h-3.5 w-[1px] bg-white/[0.08] mx-0.5 shrink-0" />
 
-          {/* Subtle Divider */}
-          {canAccessSpotifyFeatures && <div className="h-3.5 w-[1px] bg-white/[0.08]" />}
-
-          {/* Feature Panel Toggles: Lyrics, Search, Queue, Library */}
-          <div className="flex items-center gap-1">
-            {/* Lyrics Toggle */}
-            <button
-              onClick={() => onSwitchSubPanel?.('lyrics')}
-              className={`w-[20px] h-[20px] rounded-full flex items-center justify-center transition-all ${
-                activeSubPanel === 'lyrics'
-                  ? 'text-[#98BBD6] bg-[#98BBD6]/20 shadow-[0_0_8px_rgba(152,187,214,0.3)] ring-1 ring-[#98BBD6]/40'
-                  : 'text-white/40 hover:text-[#98BBD6]'
-              }`}
-              title="Toggle Lyrics"
-              aria-label="Toggle Lyrics"
-            >
-              <Mic2 className="w-2.5 h-2.5 shrink-0" />
-            </button>
-
-            {/* Search Toggle */}
-            {canAccessSpotifyFeatures && (
-              <button
-                onClick={() => onSwitchSubPanel?.('search')}
-                className={`w-[20px] h-[20px] rounded-full flex items-center justify-center transition-all ${
-                  activeSubPanel === 'search'
-                    ? 'text-[#98BBD6] bg-[#98BBD6]/20 shadow-[0_0_8px_rgba(152,187,214,0.3)] ring-1 ring-[#98BBD6]/40'
-                    : 'text-white/40 hover:text-[#98BBD6]'
-                }`}
-                title="Search Spotify"
-                aria-label="Search Spotify"
-              >
-                <Search className="w-2.5 h-2.5 shrink-0" />
-              </button>
-            )}
-
-            {/* Queue Toggle */}
-            {canAccessSpotifyFeatures && (
-              <button
-                onClick={() => onSwitchSubPanel?.('queue')}
-                className={`w-[20px] h-[20px] rounded-full flex items-center justify-center transition-all ${
-                  activeSubPanel === 'queue'
-                    ? 'text-[#98BBD6] bg-[#98BBD6]/20 shadow-[0_0_8px_rgba(152,187,214,0.3)] ring-1 ring-[#98BBD6]/40'
-                    : 'text-white/40 hover:text-[#98BBD6]'
-                }`}
-                title="View Queue"
-                aria-label="View Queue"
-              >
-                <ListMusic className="w-2.5 h-2.5 shrink-0" />
-              </button>
-            )}
-
-            {/* Playlists Toggle */}
-            {canAccessSpotifyFeatures && (
-              <button
-                onClick={() => onSwitchSubPanel?.('playlist')}
-                className={`w-[20px] h-[20px] rounded-full flex items-center justify-center transition-all ${
-                  activeSubPanel === 'playlist'
-                    ? 'text-[#98BBD6] bg-[#98BBD6]/20 shadow-[0_0_8px_rgba(152,187,214,0.3)] ring-1 ring-[#98BBD6]/40'
-                    : 'text-white/40 hover:text-[#98BBD6]'
-                }`}
-                title="View Playlists"
-                aria-label="View Playlists"
-              >
-                <Library className="w-2.5 h-2.5 shrink-0" />
-              </button>
-            )}
-          </div>
+          {/* 7. Round Lyrics Toggle Button */}
+          <button
+            onClick={handleLyricsToggle}
+            className={`w-[22px] h-[22px] rounded-full flex items-center justify-center transition-all cursor-pointer shrink-0 ${
+              activeSubPanel === 'lyrics'
+                ? isSpotifySession
+                  ? 'bg-emerald-950/40 text-emerald-300 border border-emerald-500/30 shadow-[0_0_8px_rgba(16,185,129,0.3)]'
+                  : 'bg-cyan-950/40 text-cyan-300 border border-cyan-500/30 shadow-[0_0_8px_rgba(34,211,238,0.3)]'
+                : 'text-zinc-500 hover:text-zinc-300 bg-transparent border border-transparent'
+            }`}
+            title={activeSubPanel === 'lyrics' ? 'Tutup Lirik (Mode Pemutar Penuh)' : 'Buka Lirik'}
+            aria-label="Toggle Lirik"
+          >
+            <LunarLyricIcon className="w-3 h-3 shrink-0" />
+          </button>
         </div>
       )}
     </div>

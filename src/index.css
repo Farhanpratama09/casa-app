@@ -1,8 +1,16 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Montserrat:ital,wght@0,300..800;1,300..800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  body, html, * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
   html, body, #root {
     background: transparent !important;
     background-color: transparent !important;
@@ -16,12 +24,18 @@
   }
 }
 
-/* Total Windows Native Scrollbar Elimination */
+/* Total Windows Native Scrollbar Elimination & Retro Arrow Button Purge */
 ::-webkit-scrollbar {
   display: none !important;
   width: 0 !important;
   height: 0 !important;
   background: transparent !important;
+}
+
+::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 * {
@@ -92,25 +106,57 @@
   scrollbar-color: rgba(129, 140, 248, 0.3) transparent !important;
 }
 
-/* Minimalist Cosmic Music Track Scrollbar (3.5px Sky Blue Track) */
+/* Minimalist Cosmic Music & Spotify Aurora Emerald Scrollbar (3.5px Floating Track) */
 .cosmic-music-scrollbar::-webkit-scrollbar {
   width: 3.5px !important;
   display: block !important;
+}
+.cosmic-music-scrollbar::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 .cosmic-music-scrollbar::-webkit-scrollbar-track {
   background: transparent !important;
 }
 .cosmic-music-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(56, 189, 248, 0.4) !important;
+  background: rgba(16, 185, 129, 0.25) !important;
   border-radius: 9999px !important;
   transition: background 0.2s ease;
 }
 .cosmic-music-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(56, 189, 248, 0.8) !important;
+  background: rgba(16, 185, 129, 0.5) !important;
 }
 .cosmic-music-scrollbar {
   scrollbar-width: thin !important;
-  scrollbar-color: rgba(56, 189, 248, 0.4) transparent !important;
+  scrollbar-color: rgba(16, 185, 129, 0.25) transparent !important;
+}
+
+/* Minimalist Cosmic Native Luminescent Cyan Scrollbar (3.5px Floating Track) */
+.cosmic-native-scrollbar::-webkit-scrollbar {
+  width: 3.5px !important;
+  height: 3.5px !important;
+  display: block !important;
+}
+.cosmic-native-scrollbar::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+.cosmic-native-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(34, 211, 238, 0.25) !important;
+  border-radius: 9999px !important;
+  transition: background 0.2s ease;
+}
+.cosmic-native-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(34, 211, 238, 0.5) !important;
+}
+.cosmic-native-scrollbar::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+.cosmic-native-scrollbar {
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(34, 211, 238, 0.25) transparent !important;
 }
 
 /* Horizontal Visual Marquee for Auto-Scrolling Lyrics */

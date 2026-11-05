@@ -1,9 +1,19 @@
 import React from 'react';
+import { CosmicSpeakerRabbitIcon, CosmicSpeakerRabbitIconProps } from './CosmicSpeakerRabbitIcon';
+import { RabbitCapsLockIcon, RabbitCapsLockIconProps } from './RabbitCapsLockIcon';
+
+export { CosmicSpeakerRabbitIcon, RabbitCapsLockIcon };
+export type { CosmicSpeakerRabbitIconProps, RabbitCapsLockIconProps };
 
 export interface LunarIconProps extends React.SVGProps<SVGSVGElement> {
   className?: string;
   size?: number;
+  isMuted?: boolean;
+  isActive?: boolean;
 }
+
+export const MoonCraterSpeaker = CosmicSpeakerRabbitIcon;
+export const AlertBunnyCaps = RabbitCapsLockIcon;
 
 /**
  * BunnyHeadphonesWired:
@@ -172,60 +182,6 @@ export const BunnyHeadphonesBluetooth: React.FC<LunarIconProps> = ({
 );
 
 /**
- * MoonCraterSpeaker:
- * Kisi akustik melingkar heksagonal menyerupai kawah bulan.
- */
-export const MoonCraterSpeaker: React.FC<LunarIconProps> = ({
-  className = 'w-4 h-4',
-  size = 24,
-  ...props
-}) => (
-  <svg
-    viewBox="0 0 24 24"
-    width={size}
-    height={size}
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    className={className}
-    {...props}
-  >
-    {/* Outer Crater Rim */}
-    <circle
-      cx="12"
-      cy="12"
-      r="9.5"
-      stroke="currentColor"
-      strokeWidth="1.3"
-      strokeOpacity="0.9"
-    />
-    {/* Inner Sub-Crater Ridge */}
-    <circle
-      cx="12"
-      cy="12"
-      r="7"
-      stroke="currentColor"
-      strokeWidth="1"
-      strokeDasharray="2.5 1.5"
-      strokeOpacity="0.45"
-    />
-    {/* Hexagonal Acoustic Lattice / Crater Core */}
-    <polygon
-      points="12,8.2 15.3,10.1 15.3,13.9 12,15.8 8.7,13.9 8.7,10.1"
-      stroke="currentColor"
-      strokeWidth="1.1"
-      fill="currentColor"
-      fillOpacity="0.2"
-    />
-    {/* Center Sound Emitter Node */}
-    <circle cx="12" cy="12" r="1.5" fill="currentColor" />
-    <circle cx="12" cy="6" r="0.75" fill="currentColor" opacity="0.6" />
-    <circle cx="12" cy="18" r="0.75" fill="currentColor" opacity="0.6" />
-    <circle cx="6" cy="12" r="0.75" fill="currentColor" opacity="0.6" />
-    <circle cx="18" cy="12" r="0.75" fill="currentColor" opacity="0.6" />
-  </svg>
-);
-
-/**
  * StardustBatteryCapsule:
  * Tabung kaca kapsul kosmik; saat is_charging, tampilkan pendar aurora emerald (#34D399)
  * dengan indikator petir halus.
@@ -313,72 +269,6 @@ export const StardustBatteryCapsule: React.FC<StardustBatteryCapsuleProps> = ({
     </svg>
   );
 };
-
-/**
- * AlertBunnyCaps:
- * Siluet telinga kelinci tegak waspada dengan aksen merah karang/blood moon (#F43F5E)
- * saat Caps Lock aktif.
- */
-export interface AlertBunnyCapsProps extends LunarIconProps {
-  isActive?: boolean;
-}
-
-export const AlertBunnyCaps: React.FC<AlertBunnyCapsProps> = ({
-  className = 'w-4 h-4',
-  size = 24,
-  isActive = false,
-  ...props
-}) => (
-  <svg
-    viewBox="0 0 24 24"
-    width={size}
-    height={size}
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    className={className}
-    {...props}
-  >
-    {/* Left Tense Alert Ear */}
-    <path
-      d="M7 13.5 C6.5 8.5, 7.5 1.5, 9.2 1 C10.4 1.5, 10.6 7.5, 10 13"
-      stroke={isActive ? '#F43F5E' : 'currentColor'}
-      strokeWidth={isActive ? '1.6' : '1.3'}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{
-        filter: isActive ? 'drop-shadow(0 0 4px rgba(244, 63, 94, 0.6))' : undefined,
-      }}
-    />
-    {/* Right Tense Alert Ear */}
-    <path
-      d="M14 13 C13.4 7.5, 13.6 1.5, 14.8 1 C16.5 1.5, 17.5 8.5, 17 13.5"
-      stroke={isActive ? '#F43F5E' : 'currentColor'}
-      strokeWidth={isActive ? '1.6' : '1.3'}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{
-        filter: isActive ? 'drop-shadow(0 0 4px rgba(244, 63, 94, 0.6))' : undefined,
-      }}
-    />
-    {/* Base Arch */}
-    <path
-      d="M5 14 C5 10.5, 19 10.5, 19 14"
-      stroke={isActive ? '#F43F5E' : 'currentColor'}
-      strokeWidth="1.2"
-      opacity="0.8"
-    />
-    {/* Alert Warning Diamond / Core Node */}
-    {isActive ? (
-      <polygon
-        points="12,14.5 14.2,17.5 12,20.5 9.8,17.5"
-        fill="#F43F5E"
-        style={{ filter: 'drop-shadow(0 0 5px #F43F5E)' }}
-      />
-    ) : (
-      <circle cx="12" cy="17.5" r="1.5" fill="currentColor" opacity="0.4" />
-    )}
-  </svg>
-);
 
 /**
  * MoonPhaseIcon:

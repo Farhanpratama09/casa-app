@@ -11,6 +11,7 @@ import { AudioOutputDevice, SongMetadata, MediaSessionItem } from '../../types/i
 import { useSkillStore } from '../../skills/store';
 import { useSystemHardware } from '../../hooks/useSystemHardware';
 import { useCasaAudio } from '../../context/CasaAudioContext';
+import { useQueueStore } from '../../stores/useQueueStore';
 import { listen } from '@tauri-apps/api/event';
 import {
   NativeSearchDrawer,
@@ -56,6 +57,7 @@ import {
   fetchLyrics,
   flushLyricsCache,
   cleanTrackTitleForLyrics,
+  parseTimeToSeconds,
 } from '../../utils/lyricsService';
 import {
   playChimeCue,
@@ -258,9 +260,13 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     currentTrackIndex: nativeQueueIndex,
     setNativeQueueIndex,
     addedNativeTrackId,
+    currentTime: nativeCurrentTime,
+    duration: nativeDuration,
+    seek: seekNativeAudio,
     playTrackAtIndex,
     toggleNativePlay: toggleNativePlayPause,
     stopNativeAudioInstantly: stopNativeAudioHook,
+    ejectNativeTrack,
     handleNextTrack: handleNextNativeTrack,
     handlePrevTrack: handlePrevNativeTrack,
     handleSeekNative,
@@ -269,6 +275,86 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     clearQueue: handleClearNativeQueue,
     setQueueAndPlay,
   } = useCasaAudio();
+
+  const handleEjectNative = useCallback(() => {
+    playChimeCue('tap');
+    ejectNativeTrack();
+    resetLyricsSyncRef.current?.();
+    setDisplayedArtwork(null);
+    setSecondaryArtwork(null);
+    onLyricsUpdated?.({ lines: [], isSynced: false, syncType: 'none', isInstrumental: false });
+  }, [ejectNativeTrack, onLyricsUpdated]);
+
+  // Local Audio File Picker & Drop Pipeline (0ms latency, pure offline playback)
+  const localFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleOpenLocalFiles = useCallback(() => {
+    localFileInputRef.current?.click();
+  }, []);
+
+  const handleProcessAudioFiles = useCallback(
+    (files: FileList | File[]) => {
+      if (!files || files.length === 0) return;
+
+      const newTracks: NativeTrack[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (
+          !file.type.startsWith('audio/') &&
+          !/\.(mp3|flac|wav|ogg|m4a|aac|opus)$/i.test(file.name)
+        ) {
+          continue;
+        }
+        const url = URL.createObjectURL(file);
+        const cleanName = file.name.replace(/\.[^/.]+$/, '');
+        let artist = 'Local Audio';
+        let title = cleanName;
+        if (cleanName.includes(' - ')) {
+          const parts = cleanName.split(' - ');
+          artist = parts[0].trim();
+          title = parts.slice(1).join(' - ').trim();
+        }
+        newTracks.push({
+          id: `local-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+          title,
+          artist,
+          durationSeconds: 0,
+          thumbnailUrl: '',
+          streamUrl: url,
+          candidates: [url],
+        });
+      }
+
+      if (newTracks.length > 0) {
+        playChimeCue('tap');
+        setGlobalPlaybackSource('native');
+        if (nativeQueue.length === 0) {
+          setQueueAndPlay(newTracks, 0);
+        } else {
+          const combined = [...nativeQueue, ...newTracks];
+          setQueueAndPlay(combined, nativeQueueIndex >= 0 ? nativeQueueIndex : 0);
+        }
+      }
+    },
+    [nativeQueue, nativeQueueIndex, setQueueAndPlay, setGlobalPlaybackSource]
+  );
+
+  const handleLocalFilesSelected = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files) {
+        handleProcessAudioFiles(e.target.files);
+      }
+      e.target.value = '';
+    },
+    [handleProcessAudioFiles]
+  );
+
+  const handleFilesDropped = useCallback(
+    (files: FileList) => {
+      handleProcessAudioFiles(files);
+    },
+    [handleProcessAudioFiles]
+  );
 
   const playbackSource = propPlaybackSource !== undefined ? propPlaybackSource : globalPlaybackSource;
   const setPlaybackSource = useCallback(
@@ -306,56 +392,88 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     resetLyricsSyncRef.current?.();
   }, [stopNativeAudioHook]);
 
-  // Audio Focus Management: Instant zero-delay cutoff for native audio ONLY when external OS session transitions from paused -> playing
-  const prevExternalPlayingRef = useRef<boolean>(song.isPlaying);
-  useEffect(() => {
-    const justStartedExternalPlay = !prevExternalPlayingRef.current && song.isPlaying;
-    prevExternalPlayingRef.current = song.isPlaying;
-    if (justStartedExternalPlay && playbackSource === 'native') {
-      console.log('[NativeAudio] External media started playing. Instant teardown of native playback.');
-      stopNativeAudioInstantly();
-      setPlaybackSource('companion');
-      setIsNativeSearchOpen(false);
-      setIsNativeQueueOpen(false);
-      if (activeSubPanel === 'search' || activeSubPanel === 'queue') {
-        setInternalSubPanel('none');
-        onSubPanelChange?.('none');
-      }
-    }
-  }, [song.isPlaying, playbackSource, activeSubPanel, onSubPanelChange, setPlaybackSource, stopNativeAudioInstantly]);
-
-  // Source Transition Safeguard: Instant cutoff when switching from native to companion
+  // Source Transition Safeguard: Pause native audio when switching from native to companion
   const prevPlaybackSourceRef = useRef<PlaybackSource>(playbackSource);
   useEffect(() => {
     if (prevPlaybackSourceRef.current === 'native' && playbackSource === 'companion') {
-      console.log('[NativeAudio] Transitioned from native to companion. Ensuring complete teardown.');
-      stopNativeAudioInstantly();
+      if (audioRef.current && !audioRef.current.paused) {
+        audioRef.current.pause();
+      }
+      setIsNativePlaying(false);
       setIsNativeSearchOpen(false);
       setIsNativeQueueOpen(false);
       if (activeSubPanel === 'search' || activeSubPanel === 'queue') {
-        setInternalSubPanel('none');
-        onSubPanelChange?.('none');
+        setInternalSubPanel('lyrics');
+        onSubPanelChange?.('lyrics');
       }
     }
     prevPlaybackSourceRef.current = playbackSource;
-  }, [playbackSource, activeSubPanel, onSubPanelChange, stopNativeAudioInstantly]);
+  }, [playbackSource, activeSubPanel, onSubPanelChange, audioRef, setIsNativePlaying]);
 
-  const handleSelectSource = (source: PlaybackSource) => {
-    playChimeCue('tap');
-    if (source === 'companion') {
+  // Atomik Flush Lifecycle:
+  // Saat currentTrackId atau activeSource / playbackSource berganti,
+  // seketika kosongkan array lirik dan reset activeLineIndex ke -1
+  const prevTrackKeyRef = useRef<string>('');
+  const currentTrackKey = `${playbackSource}::${
+    playbackSource === 'native' ? (nativeTrack?.id || '') : (song.title || '')
+  }`;
+
+  useEffect(() => {
+    if (prevTrackKeyRef.current !== currentTrackKey) {
+      prevTrackKeyRef.current = currentTrackKey;
+      onLyricsUpdated?.({ lines: [], isSynced: false, syncType: 'none', isInstrumental: false });
+      resetLyricsSyncRef.current?.();
+    }
+  }, [currentTrackKey, onLyricsUpdated]);
+
+  // Single-Master Mutual Exclusion Watcher:
+  // If external playback (Spotify/GSMTC) is confirmed playing while in companion mode,
+  // instantly halt CASA native audio so two engines never tick together!
+  useEffect(() => {
+    if (playbackSource !== 'native' && song.isPlaying && isNativePlaying) {
       stopNativeAudioInstantly();
+      setIsNativePlaying(false);
+    }
+  }, [playbackSource, song.isPlaying, isNativePlaying, stopNativeAudioInstantly, setIsNativePlaying]);
+
+  // Sebaliknya: Jika mode native sedang memutar lagu dan Spotify masih bermain, jeda Spotify
+  useEffect(() => {
+    if (playbackSource === 'native' && isNativePlaying && song.isPlaying) {
+      pauseSpotifyPlayback().catch(() => {});
+    }
+  }, [playbackSource, isNativePlaying, song.isPlaying]);
+
+  // Strict Manual Playback Source Selection: CASA Native cannot be hijacked by external OS media
+  const handleSelectSource = (source: PlaybackSource) => {
+    if (source === playbackSource) return;
+    playChimeCue('tap');
+
+    // Jika pindah DARI native KE eksternal:
+    if (playbackSource === 'native' && source !== 'native') {
+      // Jeda pemutar lokal agar audio tidak bertabrakan (jangan teardown/hapus src)
+      if (audioRef.current && !audioRef.current.paused) {
+        audioRef.current.pause();
+      }
+      setIsNativePlaying(false);
       setIsNativeSearchOpen(false);
       setIsNativeQueueOpen(false);
       if (activeSubPanel === 'search' || activeSubPanel === 'queue') {
-        setInternalSubPanel('none');
-        onSubPanelChange?.('none');
+        setInternalSubPanel('lyrics');
+        onSubPanelChange?.('lyrics');
       }
     }
-    setPlaybackSource(source);
-    if (source === 'native' && !nativeTrack) {
-      setIsNativeSearchOpen(true);
-      setIsNativeQueueOpen(false);
+
+    // Jika pindah DARI eksternal KE native:
+    if (playbackSource !== 'native' && source === 'native') {
+      // Jaga stabilitas layout split mode: jika user sedang di mode split (activeSubPanel !== 'none'),
+      // pertahankan mode split dengan tetap berada di subpanel 'lyrics' (jangan kolaps ke 'none')!
+      if (activeSubPanel !== 'none') {
+        setInternalSubPanel('lyrics');
+        onSubPanelChange?.('lyrics');
+      }
     }
+
+    setPlaybackSource(source);
   };
 
   const handleSelectNativeTrack = (track: NativeTrack, customList?: NativeTrack[]) => {
@@ -433,8 +551,8 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
   }, [song.duration]);
 
   const effectiveDuration =
-    playbackSource === 'native' && nativeTrack
-      ? nativeTrack.durationSeconds
+    playbackSource === 'native'
+      ? (nativeDuration > 0 ? nativeDuration : (nativeTrack?.durationSeconds || 0))
       : typeof song.duration === 'number' && !isNaN(song.duration) && song.duration > 0
       ? song.duration
       : lastValidDurationRef.current;
@@ -539,7 +657,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
 
   const effectiveArtist =
     playbackSource === 'native'
-      ? (nativeTrack?.artist || 'Pilih lagu untuk memutar')
+      ? (nativeTrack?.artist || 'Pilih lagu untuk putar')
       : song.artist && song.artist !== 'Unknown'
       ? song.artist
       : (optimisticTrack?.artist || song.artist || '');
@@ -774,19 +892,22 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
       ? (nativeTrack?.albumArt || null)
       : (!imgFailed ? displayedArtwork : null);
 
-  const isEffectivePlaying = playbackSource === 'native' ? isNativePlaying : song.isPlaying;
+  const isEffectivePlaying =
+    playbackSource === 'native'
+      ? Boolean(audioRef.current ? !audioRef.current.paused : isNativePlaying)
+      : song.isPlaying;
 
-  // Jika user sedang membuka sub-panel Spotify (Queue, Search, Playlist) lalu media berpindah ke sumber non-Spotify,
-  // otomatis reset activeSubPanel kembali ke tampilan utama ('none' / player)
+  // Jika user sedang membuka sub-panel Spotify (Queue, Search, Playlist) di mode Companion lalu media berpindah ke sumber non-Spotify,
+  // jangan kolaps ke UnifiedWideView ('none'), melainkan arahkan ke 'lyrics' agar layout SplitPlayerView tetap stabil!
   useEffect(() => {
-    if (!canAccessSpotifyFeatures && (activeSubPanel === 'queue' || activeSubPanel === 'search' || activeSubPanel === 'playlist')) {
-      setInternalSubPanel('none');
+    if (playbackSource === 'companion' && !canAccessSpotifyFeatures && (activeSubPanel === 'queue' || activeSubPanel === 'search' || activeSubPanel === 'playlist')) {
+      setInternalSubPanel('lyrics');
       try {
-        localStorage.setItem('casa_active_subpanel', 'none');
+        localStorage.setItem('casa_active_subpanel', 'lyrics');
       } catch {}
-      onSubPanelChange?.('none');
+      onSubPanelChange?.('lyrics');
     }
-  }, [canAccessSpotifyFeatures, activeSubPanel, onSubPanelChange]);
+  }, [playbackSource, canAccessSpotifyFeatures, activeSubPanel, onSubPanelChange]);
 
   const switchSubPanel = (target: MusicSubPanel) => {
     playChimeCue('tap');
@@ -796,6 +917,18 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
       localStorage.setItem('casa_active_subpanel', next);
     } catch {}
     onSubPanelChange?.(next);
+  };
+
+  const [isRepeat, setIsRepeat] = useState<boolean>(false);
+  const handleToggleRepeat = () => {
+    playChimeCue('tap');
+    setIsRepeat((prev) => {
+      const next = !prev;
+      if (audioRef.current) {
+        audioRef.current.loop = next;
+      }
+      return next;
+    });
   };
 
   const [isSearchFocused, setIsSearchFocused] = useState<boolean>(false);
@@ -860,13 +993,16 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     audioRef,
     isPlaying: playbackSource === 'native' ? isNativePlaying : (song.isPlaying && hasActiveSession),
     playbackSource,
+    currentTrackId: playbackSource === 'native' ? (nativeTrack?.id || null) : (song.title || null),
     displayLines,
-    durationMs: playbackSource === 'native' ? (nativeTrack?.durationSeconds || 0) * 1000 : song.duration * 1000,
+    durationMs: effectiveDuration * 1000,
+    durationSeconds: effectiveDuration,
+    currentTimeSeconds: playbackSource === 'native' ? nativeCurrentTime : song.currentTime,
     lyricOffsetSeconds,
     isSyncedLyrics,
     hasActiveSession,
-    externalCurrentTimeSeconds: song.currentTime,
-    externalTitle: song.title,
+    externalCurrentTimeSeconds: playbackSource === 'native' ? nativeCurrentTime : song.currentTime,
+    externalTitle: playbackSource === 'native' ? (nativeTrack?.title || '') : song.title,
     isBrowser,
     isBrowserSpotify,
     isDesktopSpotify,
@@ -1011,15 +1147,15 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           e.preventDefault();
           e.stopPropagation();
         }}
-        className="absolute inset-y-1.5 right-1.5 w-[310px] bg-[#0D0E12]/95 backdrop-blur-md rounded-2xl border border-white/[0.04] p-2.5 flex flex-col z-50 shadow-ambient-glow select-none"
+        className="absolute inset-y-1.5 right-1.5 w-[310px] bg-[#0e0e11] border border-[#2e2e34] rounded-2xl p-2.5 flex flex-col z-50 shadow-[0_16px_36px_rgba(0,0,0,0.95)] select-none"
       >
-        <div className="flex items-center justify-between pb-1.5 border-b border-white/[0.04] flex-shrink-0">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-white/60">
+        <div className="flex items-center justify-between pb-1.5 border-b border-[#222226] flex-shrink-0">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
             Sesi Media Aktif ({activeSessions.length})
           </span>
           <button
             onClick={() => setIsSessionPopoverOpen(false)}
-            className="text-[10px] text-white/40 hover:text-white px-1"
+            className="w-4 h-4 rounded-full bg-[#18181c] hover:bg-[#222226] border border-[#2e2e34] text-zinc-400 hover:text-zinc-100 flex items-center justify-center text-[10px] active:scale-[0.97]"
           >
             ✕
           </button>
@@ -1458,6 +1594,13 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
   const handlePlaySpotifyTrack = async (track: SpotifyTrackItem) => {
     markUserInitiatedPlayback();
     playChimeCue('tap');
+
+    // Mutual Exclusion: Hentikan CASA Native audio seketika jika sedang berputar
+    if (audioRef.current && !audioRef.current.paused) {
+      stopNativeAudioInstantly();
+    }
+    setIsNativePlaying(false);
+
     // Auto-pause passive non-Spotify sessions (e.g. YouTube in browser)
     const nonSpotifyPlaying = activeSessions.filter(
       (s) => s.is_playing && !s.app_name?.toLowerCase().includes('spotify')
@@ -1523,6 +1666,13 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
   const handlePlayQueueTrack = async (track: SpotifyTrackItem, trackIdx?: number) => {
     markUserInitiatedPlayback();
     playChimeCue('tap');
+
+    // Mutual Exclusion: Hentikan CASA Native audio seketika jika sedang berputar
+    if (audioRef.current && !audioRef.current.paused) {
+      stopNativeAudioInstantly();
+    }
+    setIsNativePlaying(false);
+
     // Auto-pause passive non-Spotify sessions (e.g. YouTube in browser)
     const nonSpotifyPlaying = activeSessions.filter(
       (s) => s.is_playing && !s.app_name?.toLowerCase().includes('spotify')
@@ -1577,6 +1727,13 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
   const handlePlayPlaylistTrack = async (track: SpotifyTrackItem) => {
     markUserInitiatedPlayback();
     playChimeCue('tap');
+
+    // Mutual Exclusion: Hentikan CASA Native audio seketika jika sedang berputar
+    if (audioRef.current && !audioRef.current.paused) {
+      stopNativeAudioInstantly();
+    }
+    setIsNativePlaying(false);
+
     // Auto-pause passive non-Spotify sessions (e.g. YouTube in browser)
     const nonSpotifyPlaying = activeSessions.filter(
       (s) => s.is_playing && !s.app_name?.toLowerCase().includes('spotify')
@@ -1687,12 +1844,13 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
   };
 
   const handlePlayerSeek = useCallback(
-    (targetMs: number) => {
+    (targetSeconds: number) => {
+      const validSeconds = parseTimeToSeconds(targetSeconds);
       if (playbackSource === 'native') {
-        handleSeekNative(targetMs);
-        handleLyricLineSeek(targetMs);
+        handleSeekNative(validSeconds);
+        handleLyricLineSeek(validSeconds);
       } else {
-        handleLyricLineSeek(targetMs);
+        handleLyricLineSeek(validSeconds);
       }
     },
     [playbackSource, handleSeekNative, handleLyricLineSeek]
@@ -1705,16 +1863,23 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
       toggleNativePlayPause();
       return;
     }
+    // Mutual Exclusion: Saat memulai pemutaran Spotify, hentikan CASA Native audio
     if (!song.isPlaying) {
+      if (audioRef.current && !audioRef.current.paused) {
+        stopNativeAudioInstantly();
+      }
+      setIsNativePlaying(false);
       markUserInitiatedPlayback();
     }
     onTogglePlay();
-  }, [hasActiveSession, playbackSource, toggleNativePlayPause, song.isPlaying, onTogglePlay]);
+  }, [hasActiveSession, playbackSource, toggleNativePlayPause, song.isPlaying, onTogglePlay, stopNativeAudioInstantly, setIsNativePlaying]);
 
   const handleAddToQueue = async (track: SpotifyTrackItem) => {
     playChimeCue('tap');
     setAddedQueueId(track.id);
     setTimeout(() => setAddedQueueId(null), 1500);
+
+    useQueueStore.getState().addToManualQueue(track);
 
     if (isUserConnected) {
       await addTrackToSpotifyQueue(track.uri || `spotify:track:${track.id}`);
@@ -1725,6 +1890,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     playChimeCue('tap');
     const previousState = isShuffle;
     onToggleShuffle();
+    useQueueStore.getState().toggleShuffle();
 
     if (isUserConnected) {
       const ok = await setShufflePlayback(!previousState);
@@ -1737,17 +1903,17 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
   };
 
   // Smart Dual-Action Previous:
-  // 1. If song position > 3s (> 3000ms): rewinds current track to 0:00 in reality.
+  // 1. If song position > 3s: rewinds current track to 0:00 in reality.
   // 2. If song position <= 3s: calls true previous track (onPrev).
   const handlePrevious = async () => {
     playChimeCue('tap');
 
     if (playbackSource === 'native') {
-      if (nativeProgressMs > 3000) {
+      if (nativeCurrentTime > 3) {
         handleSeekNative(0);
         handleLyricLineSeek(0);
       } else {
-        handlePrevNativeTrack(nativeProgressMs);
+        handlePrevNativeTrack(nativeCurrentTime);
       }
       return;
     }
@@ -1804,18 +1970,23 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
 
   // Active media session verification (hasActiveSession declared above for resilient artwork pipeline)
 
+  const effectiveQueueLength =
+    playbackSource === 'native' ? nativeQueue.length : queueTracks.length;
+
   const isCompanionEmpty =
     playbackSource === 'companion' &&
     !hasActiveSession &&
     (activeSubPanel === 'none' || activeSubPanel === 'lyrics' || activeSubPanel === 'queue');
 
   return (
-    <div className="relative w-full max-w-[620px] h-[140px] overflow-hidden">
+    <div
+      className="relative w-full max-w-[620px] h-full min-h-0 overflow-visible"
+    >
       {isCompanionEmpty ? (
         <EmptyMediaView
           playbackSource={playbackSource}
           activeSubPanel={activeSubPanel}
-          queueLength={nativeQueue.length}
+          queueLength={effectiveQueueLength}
           isSpotifySession={isSpotifySession}
           isQueueOpen={isNativeQueueOpen}
           isRefreshingLyrics={isRefreshingLyrics}
@@ -1845,8 +2016,10 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
       ) : activeSubPanel === 'none' ? (
         <UnifiedWideView
           playbackSource={playbackSource}
+          nativeTrack={nativeTrack}
+          onOpenLocalFile={handleOpenLocalFiles}
           activeSubPanel={activeSubPanel}
-          queueLength={nativeQueue.length}
+          queueLength={effectiveQueueLength}
           isEffectivePlaying={isEffectivePlaying}
           hasActiveSession={hasActiveSession}
           canAccessSpotifyFeatures={canAccessSpotifyFeatures}
@@ -1861,10 +2034,12 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           effectiveArtwork={effectiveArtwork}
           effectiveTitle={effectiveTitle}
           effectiveArtist={effectiveArtist}
-          currentTimeSeconds={playbackSource === 'native' ? nativeProgressMs / 1000 : preciseTimeMs / 1000}
+          currentTimeSeconds={playbackSource === 'native' ? nativeCurrentTime : preciseTimeMs / 1000}
           durationSeconds={effectiveDuration}
           isShuffle={isShuffle}
           isSmartShuffle={isSmartShuffle}
+          isRepeat={isRepeat}
+          onToggleRepeat={handleToggleRepeat}
           audioOutput={audioOutput}
           audioDeviceType={systemTelemetry.audio_device_type}
           audioDeviceName={systemTelemetry.audio_device_name}
@@ -1886,12 +2061,30 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           onCoverImageError={handleCoverImageError}
           onSelectSource={handleSelectSource}
           onToggleSearch={() => {
-            setIsNativeSearchOpen(true);
-            setIsNativeQueueOpen(false);
+            if (playbackSource === 'native') {
+              playChimeCue('tap');
+              setInternalSubPanel('search');
+              try {
+                localStorage.setItem('casa_active_subpanel', 'search');
+              } catch {}
+              onSubPanelChange?.('search');
+            } else {
+              setIsNativeSearchOpen(true);
+              setIsNativeQueueOpen(false);
+            }
           }}
           onToggleQueue={() => {
-            setIsNativeQueueOpen((prev) => !prev);
-            setIsNativeSearchOpen(false);
+            if (playbackSource === 'native') {
+              playChimeCue('tap');
+              setInternalSubPanel('queue');
+              try {
+                localStorage.setItem('casa_active_subpanel', 'queue');
+              } catch {}
+              onSubPanelChange?.('queue');
+            } else {
+              setIsNativeQueueOpen((prev) => !prev);
+              setIsNativeSearchOpen(false);
+            }
           }}
           onRefreshLyrics={handleRefreshLyrics}
           onRefreshSession={handleRefreshSession}
@@ -1912,12 +2105,24 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           onTogglePlay={handleMainTogglePlay}
           onNext={handleNext}
           onSwitchSubPanel={switchSubPanel}
+          onEjectNative={handleEjectNative}
         />
       ) : (
         <SplitPlayerView
           playbackSource={playbackSource}
+          nativeTrack={nativeTrack}
+          nativeQueue={nativeQueue}
+          nativeQueueIndex={nativeQueueIndex}
+          onSelectNativeTrack={playTrackAtIndex}
+          onRemoveNativeTrack={handleRemoveFromNativeQueue}
+          onClearNativeQueue={handleClearNativeQueue}
+          onPlayNativeSearchTrack={handleSelectNativeTrack}
+          onAddToNativeQueue={handleAddToNativeQueue}
+          addedNativeTrackId={addedNativeTrackId}
+          onOpenLocalFile={handleOpenLocalFiles}
+          onFilesDropped={handleFilesDropped}
           activeSubPanel={activeSubPanel}
-          queueLength={nativeQueue.length}
+          queueLength={effectiveQueueLength}
           isEffectivePlaying={isEffectivePlaying}
           hasActiveSession={hasActiveSession}
           canAccessSpotifyFeatures={canAccessSpotifyFeatures}
@@ -1943,10 +2148,12 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           onToggleMute={toggleSystemMute}
           activeAppName={activeSession?.app_name}
           sessionCount={activeSessions.length}
-          currentTimeSeconds={playbackSource === 'native' ? nativeProgressMs / 1000 : preciseTimeMs / 1000}
+          currentTimeSeconds={playbackSource === 'native' ? nativeCurrentTime : preciseTimeMs / 1000}
           durationSeconds={effectiveDuration}
           isShuffle={isShuffle}
           isSmartShuffle={isSmartShuffle}
+          isRepeat={isRepeat}
+          onToggleRepeat={handleToggleRepeat}
           queueContextTitle={queueContextTitle}
           isLoadingPlaylists={isLoadingPlaylists}
           isLoadingPlaylistTracks={isLoadingPlaylistTracks}
@@ -2005,7 +2212,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           onRefreshSession={handleRefreshSession}
           onPrevPanel={handlePrevPanel}
           onNextPanel={handleNextPanel}
-          onLyricLineSeek={(targetSeconds) => handleLyricLineSeek(targetSeconds)}
+          onLyricLineSeek={handlePlayerSeek}
           onSelectPlaylist={setSelectedPlaylist}
           onPlayPlaylistTrack={handlePlayPlaylistTrack}
           onPlayAllInPlaylist={handlePlayAllInPlaylist}
@@ -2016,10 +2223,20 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           onAddToQueue={handleAddToQueue}
           onFocusInput={handleFocusInput}
           setIsSearchFocused={setIsSearchFocused}
+          onEjectNative={handleEjectNative}
+          isLoadingLyrics={isRefreshingLyrics}
         />
       )}
       {renderSessionPopover()}
       {renderNativeDrawers()}
+      <input
+        ref={localFileInputRef}
+        type="file"
+        accept="audio/*,.mp3,.flac,.wav,.ogg,.m4a,.aac,.opus"
+        multiple
+        className="hidden"
+        onChange={handleLocalFilesSelected}
+      />
     </div>
   );
 };

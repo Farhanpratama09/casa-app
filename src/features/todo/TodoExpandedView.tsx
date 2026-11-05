@@ -1,6 +1,7 @@
 import React from 'react';
-import { TodoCardView } from '../../components/views/TodoCardView';
+import { ProductivitySplitView } from '../../components/views/ProductivitySplitView';
 import { useTodoState } from './useTodoState';
+import { useTimerState } from '../timer/useTimerState';
 import { TodoSkillState } from './types';
 
 interface TodoExpandedViewProps {
@@ -17,14 +18,22 @@ export const TodoExpandedView: React.FC<TodoExpandedViewProps> = ({
   onUpdateState: _onUpdateState,
 }) => {
   const todo = useTodoState();
+  const timer = useTimerState();
   const state = propState || todo.todoState;
 
-  if (!state) {
+  if (!state || !timer.timerState) {
     return null;
   }
 
   return (
-    <TodoCardView
+    <ProductivitySplitView
+      timer={timer.timerState}
+      onToggleTimer={timer.toggleTimer}
+      onResetTimer={timer.resetTimer}
+      onSelectPreset={(minutes, mode) =>
+        timer.selectPreset(minutes, mode === 'break' ? 'rest' : mode)
+      }
+      onAdjustMinutes={timer.adjustMinutes}
       todos={state.todos || []}
       onToggleTodo={todo.toggleTodo}
       onAddTodo={todo.addTodo}

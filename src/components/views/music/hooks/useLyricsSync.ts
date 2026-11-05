@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { LyricLine } from '../../../../utils/lyricsService';
+import { LyricLine, parseTimeToSeconds } from '../../../../utils/lyricsService';
 import { PlaybackSource } from '../constants';
 import {
   isWithinPlayGuardWindow,
@@ -14,8 +14,18 @@ export interface UseLyricsSyncParams {
   audioRef: React.RefObject<HTMLAudioElement | null>;
   isPlaying: boolean;
   playbackSource: PlaybackSource;
-  displayLines: Array<{ id: string; timeMs: number; text: string; time?: number }>;
+  currentTrackId?: string | null;
+  displayLines: Array<{
+    id: string;
+    timeMs: number;
+    text: string;
+    time?: number;
+    seconds?: number;
+    timeSeconds?: number;
+  }>;
   durationMs?: number;
+  durationSeconds?: number;
+  currentTimeSeconds?: number;
   lyricOffsetSeconds?: number;
   isSyncedLyrics?: boolean;
   hasActiveSession?: boolean;
@@ -35,8 +45,11 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
     audioRef,
     isPlaying,
     playbackSource,
+    currentTrackId = null,
     displayLines,
     durationMs = 0,
+    durationSeconds = 0,
+    currentTimeSeconds = 0,
     lyricOffsetSeconds = 0,
     isSyncedLyrics = false,
     hasActiveSession = true,
@@ -63,6 +76,24 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
   const seekLockTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSongTitleRef = useRef<string>(externalTitle);
   const prevIsPlayingSyncRef = useRef<boolean>(isPlaying);
+  const prevTrackIdRef = useRef<string | null | undefined>(currentTrackId);
+  const prevSourceRef = useRef<PlaybackSource>(playbackSource);
+  const isTrackChangingRef = useRef<boolean>(false);
+
+  // Stale Clock Guard on Track Change or Source Switch: Immediately flush activeLyricIndex to -1
+  useEffect(() => {
+    if (prevTrackIdRef.current !== currentTrackId || prevSourceRef.current !== playbackSource) {
+      prevTrackIdRef.current = currentTrackId;
+      prevSourceRef.current = playbackSource;
+      isTrackChangingRef.current = true;
+      lastActiveIndexRef.current = -1;
+      setActiveLyricIndex(-1);
+      setNativeProgressMs(0);
+      setPreciseTimeMs(0);
+      lastReportedTimeMs.current = 0;
+      lastSyncLocalTime.current = performance.now();
+    }
+  }, [currentTrackId, playbackSource]);
 
   useEffect(() => {
     return () => {
@@ -240,11 +271,13 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
     applyProgressUpdate,
   ]);
 
-  // Handle manual seek from lyric row or scrubber
+  // Handle manual seek from lyric row or scrubber (Pure Float Seconds Contract)
   const handleLyricLineSeek = useCallback(
-    async (targetMs: number) => {
-      if (targetMs < 0) return;
-      const targetSeconds = targetMs / 1000;
+    async (rawTargetSeconds: number) => {
+      const targetSeconds = parseTimeToSeconds(rawTargetSeconds);
+      if (targetSeconds < 0) return;
+      const targetMs = Math.round(targetSeconds * 1000);
+      isTrackChangingRef.current = false;
 
       // 1. Activate Seek Lock to reject incoming stale GSMTC updates (anti-rubber-banding)
       isSeekingRef.current = true;
@@ -381,6 +414,18 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
         setPreciseTimeMs(currentMs);
       }
 
+      // Stale Clock Guard on Track Change: hold activeLyricIndex at -1 until audio clock confirms <= 1s
+      if (isTrackChangingRef.current) {
+        if (currentMs <= 1000) {
+          isTrackChangingRef.current = false;
+        } else {
+          lastActiveIndexRef.current = -1;
+          setActiveLyricIndex(-1);
+          animId = requestAnimationFrame(loop);
+          return;
+        }
+      }
+
       // Monotonic lyric advancement during continuous 60FPS playback (+75ms perception offset)
       const adjustedTime = getLyricAdjustedTime(currentMs);
       const rawIdx = computeRawLyricIndex(displayLines, adjustedTime);
@@ -459,6 +504,58 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
     computeRawLyricIndex,
     getLyricAdjustedTime,
     applyProgressUpdate,
+  ]);
+
+  // Reaktivitas Auto-Sync: Tangani Asynchronous Lyrics Arrival & Sinkronisasi Posisi Aktif
+  useEffect(() => {
+    if (!displayLines || displayLines.length === 0) return;
+
+    // Hitung posisi waktu pemutaran saat ini (dalam detik)
+    const currentSec =
+      playbackSource === 'native'
+        ? (currentTimeSeconds > 0 ? currentTimeSeconds : (audioRef.current ? audioRef.current.currentTime : 0))
+        : (preciseTimeMs > 0 ? preciseTimeMs / 1000 : externalCurrentTimeSeconds);
+
+    // Stale Clock Guard on Track Change: tahan kalkulasi baris aktif di 0 sampai waktu <= 1 detik
+    if (isTrackChangingRef.current) {
+      if (currentSec <= 1) {
+        isTrackChangingRef.current = false;
+      } else {
+        if (activeLyricIndex !== 0) {
+          lastActiveIndexRef.current = 0;
+          setActiveLyricIndex(0);
+        }
+        return;
+      }
+    }
+
+    // Cari index baris lirik berdasarkan currentSec saat ini
+    let currentIndex = -1;
+    for (let i = displayLines.length - 1; i >= 0; i--) {
+      const line = displayLines[i];
+      const lineSec =
+        (line as any).timeSeconds ??
+        (line as any).seconds ??
+        line.time ??
+        (typeof line.timeMs === 'number' ? line.timeMs / 1000 : 0);
+      if (lineSec <= currentSec + 0.05) {
+        currentIndex = i;
+        break;
+      }
+    }
+
+    if (currentIndex !== -1 && currentIndex !== activeLyricIndex) {
+      lastActiveIndexRef.current = currentIndex;
+      setActiveLyricIndex(currentIndex);
+    }
+  }, [
+    displayLines,
+    currentTimeSeconds,
+    playbackSource,
+    externalCurrentTimeSeconds,
+    preciseTimeMs,
+    activeLyricIndex,
+    audioRef,
   ]);
 
   const calibrateExternalTime = useCallback((timeMs: number, shiftSyncBaseline: boolean = false) => {

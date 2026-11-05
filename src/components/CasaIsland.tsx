@@ -13,6 +13,7 @@ import { TodoExpandedView } from '../features/todo/TodoExpandedView';
 import { SatelliteDisc } from './views/SatelliteDisc';
 import { setSmartIgnoreCursorEvents, playChimeCue, adjustWindowSize, updateIslandHitbox } from '../utils/tauriBridge';
 import { useSkillStore } from '../skills/store';
+import { useDropZoneStore } from '../stores/useDropZoneStore';
 import {
   registerIslandTransitionHook,
   unregisterIslandTransitionHook,
@@ -127,6 +128,16 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   const isDraggingFileRef = useRef<boolean>(false);
   const previousModeBeforeDragRef = useRef<IslandMode>('idle');
 
+  const onChangeModeRef = useRef(onChangeMode);
+  useEffect(() => {
+    onChangeModeRef.current = onChangeMode;
+  }, [onChangeMode]);
+
+  const showDevTriggerRef = useRef(showDevTrigger);
+  useEffect(() => {
+    showDevTriggerRef.current = showDevTrigger;
+  }, [showDevTrigger]);
+
   // Auto-Sleep setelah 5.5 detik tanpa aktivitas kursor:
   // HAKIKAT RESTING: HANYA BOLEH AKTIF jika hening total: !isMusicPlaying && !isTimerActive
   const [isRestingSleep, setIsRestingSleep] = useState<boolean>(false);
@@ -185,7 +196,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     modeRef.current = mode;
   }, [mode]);
 
-  const IDLE_AWAKE_NO_MUSIC_WIDTH = 290;
+  const IDLE_AWAKE_NO_MUSIC_WIDTH = 240; // Dipangkas ke 240px agar compact & memeluk konten rapat (Anti-Kopong)
   const IDLE_AWAKE_TIMER_ONLY_WIDTH = 350;
   const IDLE_AWAKE_WITH_MUSIC_WIDTH = 380;
   const TRUE_RESTING_WIDTH = 168;
@@ -197,8 +208,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   const IDLE_PHYSICAL_HEIGHT = 38;
   const IDLE_WINDOW_HEIGHT = 42; // 38px physical capsule + 4px tight buffer (anti browser tab block)
 
+  const isDualIdleActive = isMusicPlaying && isTimerActive;
   const hasSecondaryBubble =
-    isMusicPlaying ||
+    isDualIdleActive ||
     secondaryBubbleSkillId !== null ||
     mode === 'dual_bubble' ||
     (mode as string) === 'dual_idle';
@@ -211,8 +223,8 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     : IDLE_AWAKE_NO_MUSIC_WIDTH;
   // Dynamic native canvas width in idle/resting mode (tight fit to free browser tab clicks on left & right):
   // - Mode Resting: 180px (height 42px)
-  // - Mode Idle (Standard 290px): 310px (height 42px)
-  // - Jendela 620px HANYA aktif saat status 'expanded' atau 'idle_peek'.
+  // - Mode Idle (Compact 240px): 260px (height 42px)
+  // - Mode Satelit Aktif: tambahkan padding kanvas +48px di sisi kanan agar lingkaran satelit tidak terpotong
   const getActiveIdleWindowWidth = useCallback(() => {
     if (isRestingSleep || isRestingSleepRef.current) {
       return 180;
@@ -223,12 +235,12 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         : isTimerActive
         ? IDLE_AWAKE_TIMER_ONLY_WIDTH
         : IDLE_AWAKE_NO_MUSIC_WIDTH;
-      return baseW + 96 + 12;
+      return baseW + 48 + 48;
     }
     if (isTimerActive) {
       return IDLE_AWAKE_TIMER_ONLY_WIDTH + 20;
     }
-    return 310;
+    return 260;
   }, [isRestingSleep, hasSecondaryBubble, isMusicPlaying, isTimerActive]);
 
   const idleWindowWidth = getActiveIdleWindowWidth();
@@ -315,8 +327,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
 
   // Helper to map active skill to its default expanded mode
   const getEffectiveExpandedMode = (skillId: string | null): IslandMode => {
-    if (skillId === 'core.timer') return 'expanded_timer';
-    if (skillId === 'core.todo') return 'expanded_todo';
+    if (skillId === 'core.timer' || skillId === 'core.todo') return 'expanded_timer';
     return 'expanded_music';
   };
 
@@ -387,6 +398,14 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     mode === 'drop_zone' ||
     mode.startsWith('expanded_');
 
+  // Secondary Bubble HANYA BOLEH dirender jika dan hanya jika pulau berada dalam status idle murni
+  // dan pendaratan penyusutan pil utama telah selesai sempurna di lebar 396px.
+  const shouldShowSecondaryBubble =
+    hasSecondaryBubble &&
+    !isExpandedView &&
+    islandState === 'idle' &&
+    isLandingComplete;
+
   // Dynamic Hover Sensor Dimensions: anti ghost trigger on tucked and resting
   const getSensorDimensions = () => {
     if (islandState === 'tucked') {
@@ -398,18 +417,13 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     if (isExpandedView || !isLandingComplete) {
       return { width: EXPANDED_WIDTH, height: EXPANDED_HEIGHT };
     }
+    if (hasSecondaryBubble || shouldShowSecondaryBubble) {
+      return { width: width + 48 + 16, height };
+    }
     return { width, height };
   };
 
   const { width: sensorWidth, height: sensorHeight } = getSensorDimensions();
-
-  // Secondary Bubble HANYA BOLEH dirender jika dan hanya jika pulau berada dalam status idle murni
-  // dan pendaratan penyusutan pil utama telah selesai sempurna di lebar 396px.
-  const shouldShowSecondaryBubble =
-    hasSecondaryBubble &&
-    !isExpandedView &&
-    islandState === 'idle' &&
-    isLandingComplete;
 
   // Initial Window Setup on Mount
   useEffect(() => {
@@ -1299,17 +1313,17 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
 
       if (currentState === 'idle' || currentState === 'tucked_peek') {
         useSkillStore.getState().cycleActiveSkill(dirStep);
-      } else if ((isExpandedView || isPeeking) && effectiveExpandedMode !== 'drop_zone') {
-        const modes: IslandMode[] = ['expanded_music', 'expanded_timer', 'expanded_todo'];
-        const currentIdx = modes.indexOf(effectiveExpandedMode);
+      } else if (isExpandedView || isPeeking) {
+        const modes: IslandMode[] = ['expanded_music', 'expanded_timer', 'drop_zone'];
+        const normalizedMode =
+          effectiveExpandedMode === 'expanded_todo' ? 'expanded_timer' : effectiveExpandedMode;
+        const currentIdx = modes.indexOf(normalizedMode);
         const validIdx = currentIdx >= 0 ? currentIdx : 0;
         const nextIdx = (validIdx + dirStep + modes.length) % modes.length;
         const nextMode = modes[nextIdx];
         const targetSkill =
           nextMode === 'expanded_timer'
             ? 'core.timer'
-            : nextMode === 'expanded_todo'
-            ? 'core.todo'
             : 'core.media';
         useSkillStore.getState().setActiveSkillId(targetSkill);
         const { width: targetW, height: targetH } = getIslandDimensions('expanded', nextMode);
@@ -1329,7 +1343,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     [handleNavigate]
   );
 
-  // Native Tauri Window File-Drop Listener for automatic DropZone morphing
+  // Native Tauri Window File-Drop Listener for automatic DropZone morphing & persistent drop handling
   useEffect(() => {
     if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) {
       return;
@@ -1338,59 +1352,52 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     let unlisten: (() => void) | undefined;
     let isSubscribed = true;
 
-    getCurrentWebview()
-      .onDragDropEvent((event) => {
-        if (!isSubscribed) return;
-        const payload = event.payload;
+    async function setupDropListener() {
+      try {
+        unlisten = await getCurrentWebview().onDragDropEvent(async (event) => {
+          if (!isSubscribed) return;
+          // Isolasi: Jika sedang melakukan drag-out internal, abaikan event drag-drop native
+          if (useDropZoneStore.getState().isInternalDragging) return;
+          const payload = event.payload;
 
-        if (payload.type === 'enter') {
-          islandStateRef.current = 'expanded';
-          setIslandState('expanded');
-          isDraggingFileRef.current = true;
-          if (modeRef.current !== 'drop_zone') {
-            previousModeBeforeDragRef.current = modeRef.current;
-          }
-          const { width: targetW, height: targetH } = getIslandDimensions('expanded', 'drop_zone');
-          applyWindowSize(targetW, showDevTrigger ? targetH + 70 : targetH);
-          onChangeMode('drop_zone');
-          playChimeCue('whisper');
-        } else if (payload.type === 'leave') {
-          if (!isDraggingFileRef.current) return;
-          isDraggingFileRef.current = false;
-          setStagedDroppedFile(null);
-          if (modeRef.current === 'drop_zone') {
-            collapseToIdle();
-          }
-        } else if (payload.type === 'drop') {
-          isDraggingFileRef.current = false;
-          playChimeCue('ding');
-          const paths = payload.paths;
-          if (paths && paths.length > 0) {
-            const filePath = paths[0];
-            const fileName = filePath.replace(/^.*[\\/]/, '') || filePath;
-            setStagedDroppedFile(fileName);
-          }
+          if (payload.type === 'enter' || payload.type === 'over') {
+            useDropZoneStore.getState().setIsDragging(true);
+            isDraggingFileRef.current = true;
 
-          if (dropTimeoutRef.current) {
-            clearTimeout(dropTimeoutRef.current);
+            if (modeRef.current !== 'drop_zone' || islandStateRef.current !== 'expanded') {
+              islandStateRef.current = 'expanded';
+              setIslandState('expanded');
+              if (modeRef.current !== 'drop_zone') {
+                previousModeBeforeDragRef.current = modeRef.current;
+              }
+              const { width: targetW, height: targetH } = getIslandDimensions('expanded', 'drop_zone');
+              applyWindowSize(targetW, showDevTriggerRef.current ? targetH + 70 : targetH);
+              onChangeModeRef.current?.('drop_zone');
+              playChimeCue('whisper');
+            }
+          } else if (payload.type === 'leave') {
+            isDraggingFileRef.current = false;
+            useDropZoneStore.getState().setIsDragging(false);
+          } else if (payload.type === 'drop') {
+            isDraggingFileRef.current = false;
+            useDropZoneStore.getState().setIsDragging(false);
+            const paths = payload.paths;
+            if (paths && paths.length > 0) {
+              for (const filePath of paths) {
+                const fileName = filePath.replace(/^.*[\\/]/, '') || filePath;
+                setStagedDroppedFile(fileName);
+                await useDropZoneStore.getState().addDroppedPath(filePath);
+              }
+              playChimeCue('ding');
+            }
           }
-          dropTimeoutRef.current = setTimeout(() => {
-            collapseToIdle();
-            setStagedDroppedFile(null);
-            dropTimeoutRef.current = null;
-          }, 1500);
-        }
-      })
-      .then((unlistenFn) => {
-        if (isSubscribed) {
-          unlisten = unlistenFn;
-        } else {
-          unlistenFn();
-        }
-      })
-      .catch((err) => {
+        });
+      } catch (err) {
         console.warn('[CasaIsland] Native onDragDropEvent registration failed:', err);
-      });
+      }
+    }
+
+    setupDropListener();
 
     return () => {
       isSubscribed = false;
@@ -1401,7 +1408,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         clearTimeout(dropTimeoutRef.current);
       }
     };
-  }, [showDevTrigger, onChangeMode]);
+  }, []);
 
   // Clean up all pending timers on unmount
   useEffect(() => {
@@ -1489,14 +1496,14 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           }}
           style={{
             borderRadius: isExpandedView ? 24 : 20,
-            overflow: 'hidden',
+            overflow: 'clip',
           }}
-          className={`relative flex flex-col pointer-events-auto shrink-0 border border-white/[0.06] backdrop-blur-2xl ${
+          className={`relative flex flex-col pointer-events-auto shrink-0 border border-[#27272a] overflow-clip ${
             islandState === 'tucked'
-              ? 'bg-[#0D0E12]/90 shadow-[0_2px_10px_rgba(0,0,0,0.5)] hover:bg-[#0D0E12] cursor-pointer'
+              ? 'bg-[#09090b] shadow-[0_4px_16px_rgba(0,0,0,0.85)] hover:border-zinc-700 cursor-pointer'
               : isExpandedView
-              ? 'bg-[#0D0E12]/90 shadow-[0_20px_50px_rgba(0,0,0,0.6)]'
-              : 'bg-[#0D0E12]/95 shadow-ambient cursor-pointer hover:shadow-ambient-glow'
+              ? 'bg-[#09090b] shadow-[0_12px_40px_rgba(0,0,0,0.85)]'
+              : 'bg-[#09090b] shadow-[0_12px_40px_rgba(0,0,0,0.85)] cursor-pointer hover:border-zinc-700'
           }`}
           title={
             islandState === 'tucked'
@@ -1504,9 +1511,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
               : undefined
           }
         >
-          {/* Internal Content Animated with Stacked Absolute Layers (Zero Ghosting & Zero Unmount Jolt) */}
-          <div className="relative w-full h-full overflow-hidden">
-            {/* Layer 0: Tucked Stealth Notch Accent Line (Static Stacked Layer) */}
+          {/* Internal Content Animated with Clean Lifecycle & Overflow Clip */}
+          <div className="relative w-full h-full overflow-clip" style={{ overflow: 'clip' }}>
+            {/* Layer 0: Tucked Stealth Notch Accent Line */}
             <motion.div
               data-island-view="tucked"
               initial={false}
@@ -1519,69 +1526,93 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
               <div className="w-8 h-[2px] bg-white/30 rounded-full transition-colors" />
             </motion.div>
 
-            {/* Layer 1: Expanded View (Static Stacked Layer - Fixed 620x168 Canvas to Prevent Reflow) */}
-            <motion.div
-              data-island-view="expanded"
-              initial={false}
-              animate={{
-                opacity: isExpandedView ? 1 : 0,
-              }}
-              transition={
-                isExpandedView
-                  ? { duration: 0.12, delay: 0, ease: 'easeOut' }
-                  : { duration: 0.12, ease: 'easeIn' }
-              }
-              onClick={(e) => {
-                // KLIK SAAT PREVIEW = KUNCI STAY (EXPAND PERMANEN)
-                if (islandStateRef.current === 'idle_peek') {
-                  e.stopPropagation();
-                  handleLockExpanded();
-                  return;
-                }
-                e.stopPropagation();
-              }}
-              className={`absolute inset-0 top-0 left-1/2 -translate-x-1/2 w-[620px] h-[168px] flex flex-col justify-start overflow-hidden select-none ${
-                isExpandedView ? 'z-20' : 'z-10'
-              }`}
-              style={{
-                pointerEvents: isExpandedView ? 'auto' : 'none',
-              }}
-            >
-              {effectiveExpandedMode !== 'drop_zone' && (
-                <MicroStatusHeader
-                  currentMode={effectiveExpandedMode}
-                  onSelectMode={handleSelectMode}
-                  onPrev={() => handleNavigate('prev')}
-                  onNext={() => handleNavigate('next')}
-                  isPlaying={isMusicPlaying}
-                  batteryPct={metrics.batteryPct}
-                  showDevTrigger={showDevTrigger}
-                  onToggleDevTrigger={onToggleDevTrigger}
-                  onHeaderClick={handleHeaderClick}
-                  isPeekPreview={islandState === 'idle_peek'}
-                />
+            {/* Layer 1: Expanded View (Unmounted cleanly when !isExpandedView to prevent ghost RAFs & layout overflow) */}
+            <AnimatePresence initial={false}>
+              {isExpandedView && (
+                <motion.div
+                  key="expanded-layer"
+                  data-island-view="expanded"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.12, ease: 'easeOut' }}
+                  onDragOver={(e) => {
+                    if (useDropZoneStore.getState().isInternalDragging) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'copy';
+                  }}
+                  onDrop={async (e) => {
+                    if (useDropZoneStore.getState().isInternalDragging) return;
+                    e.preventDefault();
+                    useDropZoneStore.getState().setIsDragging(false);
+                    const text = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text/uri-list');
+                    if (text && text.trim()) {
+                      await useDropZoneStore.getState().addItem(text.trim());
+                      playChimeCue('ding');
+                      return;
+                    }
+                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                      for (let i = 0; i < e.dataTransfer.files.length; i++) {
+                        const file = e.dataTransfer.files[i];
+                        const path = (file as any).path || file.name;
+                        await useDropZoneStore.getState().addItem(path, file.size);
+                      }
+                      playChimeCue('ding');
+                    }
+                  }}
+                  onClick={(e) => {
+                    // KLIK SAAT PREVIEW = KUNCI STAY (EXPAND PERMANEN)
+                    if (islandStateRef.current === 'idle_peek') {
+                      e.stopPropagation();
+                      handleLockExpanded();
+                      return;
+                    }
+                    e.stopPropagation();
+                  }}
+                  className="absolute inset-0 w-full h-full flex flex-col justify-start overflow-visible select-none z-20"
+                  style={{
+                    overflow: 'visible',
+                    pointerEvents: 'auto',
+                  }}
+                >
+                  <MicroStatusHeader
+                    currentMode={effectiveExpandedMode}
+                    onSelectMode={handleSelectMode}
+                    onPrev={() => handleNavigate('prev')}
+                    onNext={() => handleNavigate('next')}
+                    isPlaying={isMusicPlaying}
+                    batteryPct={metrics.batteryPct}
+                    showDevTrigger={showDevTrigger}
+                    onToggleDevTrigger={onToggleDevTrigger}
+                    onHeaderClick={handleHeaderClick}
+                    isPeekPreview={islandState === 'idle_peek'}
+                  />
+
+                  <div
+                    className="w-full flex-1 min-h-0 flex flex-col justify-center overflow-visible relative z-20"
+                    style={{ overflow: 'visible' }}
+                  >
+                    {effectiveExpandedMode === 'expanded_music' && (
+                      <MediaExpandedView onCollapse={collapseToIdle} />
+                    )}
+
+                    {effectiveExpandedMode === 'expanded_timer' && (
+                      <TimerExpandedView onCollapse={collapseToIdle} />
+                    )}
+
+                    {effectiveExpandedMode === 'expanded_todo' && (
+                      <TodoExpandedView onCollapse={collapseToIdle} />
+                    )}
+
+                    {effectiveExpandedMode === 'drop_zone' && (
+                      <DropZoneView />
+                    )}
+                  </div>
+                </motion.div>
               )}
+            </AnimatePresence>
 
-              <div className="w-full flex-1 flex flex-col justify-center overflow-hidden">
-                {effectiveExpandedMode === 'expanded_music' && (
-                  <MediaExpandedView onCollapse={collapseToIdle} />
-                )}
-
-                {effectiveExpandedMode === 'expanded_timer' && (
-                  <TimerExpandedView onCollapse={collapseToIdle} />
-                )}
-
-                {effectiveExpandedMode === 'expanded_todo' && (
-                  <TodoExpandedView onCollapse={collapseToIdle} />
-                )}
-
-                {effectiveExpandedMode === 'drop_zone' && (
-                  <DropZoneView stagedFile={stagedDroppedFile} />
-                )}
-              </div>
-            </motion.div>
-
-            {/* Layer 2: Idle View (Static Stacked Layer) */}
+            {/* Layer 2: Idle View */}
             <motion.div
               data-island-view="idle"
               initial={false}
@@ -1593,10 +1624,11 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                   ? { duration: 0.06, ease: 'easeIn' }
                   : { duration: 0.10, delay: 0.06, ease: 'easeOut' }
               }
-              className={`absolute inset-0 top-0 left-1/2 -translate-x-1/2 w-full h-[38px] mx-auto flex items-center justify-center shrink-0 ${
+              className={`absolute inset-0 w-full h-full mx-auto flex items-center justify-center shrink-0 overflow-clip ${
                 isExpandedView ? 'z-10' : 'z-20'
               }`}
               style={{
+                overflow: 'clip',
                 pointerEvents: isExpandedView || islandState === 'tucked' ? 'none' : 'auto',
               }}
             >

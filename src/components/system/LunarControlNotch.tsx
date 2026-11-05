@@ -6,9 +6,9 @@ import {
   BunnyHeadphonesWired,
   BunnyHeadphonesBluetooth,
   MoonCraterSpeaker,
-  StardustBatteryCapsule,
   AlertBunnyCaps,
   MoonPhaseIcon,
+  CosmicSpeakerRabbitIcon,
 } from './LunarIcons';
 
 export interface LunarControlNotchProps {
@@ -168,7 +168,7 @@ export const LunarControlNotch: React.FC<LunarControlNotchProps> = ({
               e.stopPropagation();
               onClose();
             }}
-            className="absolute inset-0 bg-black/50 backdrop-blur-md cursor-pointer"
+            className="absolute inset-0 bg-black/70 cursor-pointer"
           />
 
           {/* Expanding Lunar Notch Docked Sheet */}
@@ -178,7 +178,7 @@ export const LunarControlNotch: React.FC<LunarControlNotchProps> = ({
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
             onClick={(e) => e.stopPropagation()}
-            className="relative z-10 w-full bg-[#08090C]/90 backdrop-blur-2xl border-b border-x border-white/[0.07] shadow-[0_12px_32px_rgba(0,0,0,0.85)] rounded-b-2xl px-4 py-2.5 flex flex-col gap-2 pointer-events-auto"
+            className="relative z-10 w-full bg-[#09090b] border-b border-x border-[#27272a] shadow-[0_16px_40px_rgba(0,0,0,0.95)] rounded-b-2xl px-4 py-2.5 flex flex-col gap-2 pointer-events-auto"
           >
             {/* Header: Device Routing Header & Close Button */}
             <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] pb-1.5 relative">
@@ -215,7 +215,7 @@ export const LunarControlNotch: React.FC<LunarControlNotchProps> = ({
                 {isDevicePickerOpen && (
                   <div
                     ref={devicePickerRef}
-                    className="absolute top-full mt-1.5 left-0 z-50 w-[310px] bg-[#0c0e14]/95 backdrop-blur-2xl border border-white/[0.08] shadow-[0_12px_32px_rgba(0,0,0,0.95)] rounded-xl p-2 flex flex-col gap-1 select-none"
+                    className="absolute top-full mt-1.5 left-0 z-50 w-[310px] bg-[#0e0e11] border border-[#2e2e34] shadow-[0_16px_36px_rgba(0,0,0,0.95)] rounded-xl p-2 flex flex-col gap-1 select-none"
                   >
                     <div className="flex items-center justify-between px-2 py-1 border-b border-white/[0.06]">
                       <span className="font-sans text-[9px] tracking-[0.14em] uppercase font-semibold text-white/50">
@@ -290,16 +290,18 @@ export const LunarControlNotch: React.FC<LunarControlNotchProps> = ({
                   e.stopPropagation();
                   toggleMute();
                 }}
-                className={`flex items-center gap-1 px-2 py-1 rounded-md border text-[10px] transition-all cursor-pointer shrink-0 select-none ${
+                className={`flex items-center gap-1.5 px-2 py-1 rounded-md border text-[10px] transition-all cursor-pointer shrink-0 select-none ${
                   telemetry.is_muted
-                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-[0_0_8px_rgba(244,63,94,0.3)]'
+                    ? 'bg-zinc-800 text-zinc-400 border-zinc-700'
                     : 'bg-white/[0.04] hover:bg-white/[0.08] text-white/70 hover:text-white border-white/[0.07]'
                 }`}
                 title={telemetry.is_muted ? 'Klik untuk Unmute' : 'Klik untuk Mute'}
               >
-                <VolumeX
+                <CosmicSpeakerRabbitIcon
+                  isMuted={telemetry.is_muted}
+                  size={14}
                   className={`w-3.5 h-3.5 ${
-                    telemetry.is_muted ? 'text-rose-400' : 'text-white/60'
+                    telemetry.is_muted ? 'text-zinc-400' : 'text-white/60'
                   }`}
                 />
                 <span className="font-sans text-[9px] tracking-[0.14em] uppercase font-semibold">
@@ -316,8 +318,8 @@ export const LunarControlNotch: React.FC<LunarControlNotchProps> = ({
                 >
                   <defs>
                     <linearGradient id="cyberCarrotGrad" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0%" stopColor="#F97316" />
-                      <stop offset="100%" stopColor="#FB923C" />
+                      <stop offset="0%" stopColor="#0284c7" />
+                      <stop offset="100%" stopColor="#38bdf8" />
                     </linearGradient>
                   </defs>
 
@@ -331,9 +333,9 @@ export const LunarControlNotch: React.FC<LunarControlNotchProps> = ({
                   {volPct > 0 && (
                     <polygon
                       points={`0,5.5 ${volPct},${carrotTop} ${volPct},${carrotBottom} 0,8.5`}
-                      fill="url(#cyberCarrotGrad)"
+                      fill={telemetry.is_muted ? '#71717a' : 'url(#cyberCarrotGrad)'}
                       style={{
-                        filter: 'drop-shadow(0 0 6px rgba(249, 115, 22, 0.45))',
+                        filter: telemetry.is_muted ? 'none' : 'drop-shadow(0 0 6px rgba(56, 189, 248, 0.45))',
                       }}
                     />
                   )}
@@ -341,12 +343,20 @@ export const LunarControlNotch: React.FC<LunarControlNotchProps> = ({
 
                 {/* Handle / Thumb: Obsidian Crystal Capsule */}
                 <div
-                  className="absolute top-1/2 -translate-y-1/2 w-3.5 h-5 rounded-[4px] bg-[#12141a] border border-white/30 shadow-[0_0_8px_rgba(249,115,22,0.4)] flex items-center justify-center pointer-events-none transition-transform"
+                  className={`absolute top-1/2 -translate-y-1/2 w-3.5 h-5 rounded-[4px] bg-[#12141a] border border-white/30 flex items-center justify-center pointer-events-none transition-transform ${
+                    telemetry.is_muted
+                      ? 'opacity-50 shadow-none'
+                      : 'shadow-[0_0_8px_rgba(56,189,248,0.4)]'
+                  }`}
                   style={{
                     left: `calc(${volPct}% - ${volPct * 0.14}px)`,
                   }}
                 >
-                  <div className="w-[1.5px] h-2.5 rounded-full bg-[#FB923C] shadow-[0_0_4px_#FB923C]" />
+                  <div
+                    className={`w-[1.5px] h-2.5 rounded-full ${
+                      telemetry.is_muted ? 'bg-zinc-500 shadow-none' : 'bg-[#38bdf8] shadow-[0_0_4px_#38bdf8]'
+                    }`}
+                  />
                 </div>
 
                 <input
@@ -364,7 +374,11 @@ export const LunarControlNotch: React.FC<LunarControlNotchProps> = ({
               </div>
 
               {/* Numeric Metric Value */}
-              <span className="font-mono text-xs tabular-nums font-semibold text-white/90 w-10 text-right shrink-0">
+              <span
+                className={`font-sans text-[11px] font-medium tabular-nums w-10 text-right shrink-0 ${
+                  telemetry.is_muted ? 'text-zinc-500' : 'text-zinc-400'
+                }`}
+              >
                 {telemetry.is_muted ? '0%' : `${localVolume}%`}
               </span>
             </div>
@@ -397,7 +411,7 @@ export const LunarControlNotch: React.FC<LunarControlNotchProps> = ({
               >
                 <div className="relative w-full h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-white/30 to-[#E2E8F0]"
+                    className="h-full rounded-full bg-gradient-to-r from-zinc-600 via-[#e3e0f7]/70 to-[#e3e0f7]"
                     style={{
                       width: telemetry.is_brightness_supported ? `${localBrightness}%` : '0%',
                     }}
@@ -406,7 +420,7 @@ export const LunarControlNotch: React.FC<LunarControlNotchProps> = ({
 
                 {telemetry.is_brightness_supported && (
                   <div
-                    className="absolute top-1/2 -translate-y-1/2 pointer-events-none transition-transform flex items-center justify-center text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.7)]"
+                    className="absolute top-1/2 -translate-y-1/2 pointer-events-none transition-transform flex items-center justify-center text-white drop-shadow-[0_0_8px_rgba(227,224,247,0.7)]"
                     style={{
                       left: `calc(${localBrightness}% - 10px)`,
                     }}
@@ -432,41 +446,27 @@ export const LunarControlNotch: React.FC<LunarControlNotchProps> = ({
               </div>
 
               {/* Numeric Metric Value */}
-              <span className="font-mono text-xs tabular-nums font-semibold text-white/90 w-10 text-right shrink-0">
+              <span className="font-sans text-[11px] font-medium text-zinc-400 tabular-nums w-10 text-right shrink-0">
                 {telemetry.is_brightness_supported ? `${localBrightness}%` : 'N/A'}
               </span>
             </div>
 
             {/* Sub-strip Footer Telemetry */}
-            <div className="flex items-center justify-between pt-1 border-t border-white/[0.04] text-[9.5px]">
+            <div className="flex items-center justify-start pt-1 border-t border-white/[0.04] text-[9.5px]">
               <div className="flex items-center gap-1.5">
                 <AlertBunnyCaps
                   isActive={telemetry.is_caps_locked}
                   size={14}
-                  className="w-3.5 h-3.5"
+                  className={`w-3.5 h-3.5 transition-colors ${
+                    telemetry.is_caps_locked ? 'text-[#c084fc]' : 'text-zinc-500'
+                  }`}
                 />
                 <span
                   className={`font-sans text-[9px] tracking-[0.14em] uppercase font-semibold ${
-                    telemetry.is_caps_locked ? 'text-rose-400' : 'text-white/40'
+                    telemetry.is_caps_locked ? 'text-[#c084fc]' : 'text-zinc-500'
                   }`}
                 >
                   {telemetry.is_caps_locked ? 'CAPS LOCK AKTIF' : 'CAPS LOCK NONAKTIF'}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-1.5 text-white/60">
-                <StardustBatteryCapsule
-                  percentage={telemetry.battery_percentage}
-                  isCharging={telemetry.is_charging}
-                  size={18}
-                  className="w-4 h-2.5"
-                />
-                <span className="font-mono text-[9.5px] tabular-nums">
-                  {telemetry.has_battery
-                    ? `${telemetry.battery_percentage}% ${
-                        telemetry.is_charging ? '(Charging)' : ''
-                      }`
-                    : 'Desktop (AC)'}
                 </span>
               </div>
             </div>

@@ -3,14 +3,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Zap } from 'lucide-react';
 import { useSkillStore } from '../../skills/store';
 import { useSystemHardware } from '../../hooks/useSystemHardware';
-import { SashaEyes } from '@/components/views/SashaEyes';
-import { MoonRabbitEmblem } from '@/components/MoonRabbitEmblem';
-import { TimerPillSlot } from '@/features/timer/TimerPillSlot';
+import { RestingPill } from '../companion/RestingPill';
+import { CasaCompanionAvatar } from '../companion/CasaCompanionAvatar';
 import {
   BunnyHeadphonesWired,
   BunnyHeadphonesBluetooth,
   MoonCraterSpeaker,
+  RabbitCapsLockIcon,
 } from '../system/LunarIcons';
+import { TwinEqualizerGlyph } from '../system/CosmicIcons';
 
 interface IdlePillViewProps {
   isDualBubble?: boolean;
@@ -33,7 +34,15 @@ export const PureCircleBattery: React.FC<{
   hasBattery?: boolean;
   size?: number;
   className?: string;
-}> = ({ percentage, isCharging, hasBattery = true, size = 18, className = '' }) => {
+  showText?: boolean;
+}> = ({
+  percentage,
+  isCharging,
+  hasBattery = true,
+  size = 18,
+  className = '',
+  showText = true,
+}) => {
   if (!hasBattery) return null;
 
   const center = size / 2;
@@ -42,88 +51,97 @@ export const PureCircleBattery: React.FC<{
   const clamped = Math.max(0, Math.min(100, Math.round(percentage)));
   const offset = circumference - (clamped / 100) * circumference;
 
+  // Meteor arc endpoint in -90deg rotated SVG coordinates:
+  const angleRad = (clamped / 100) * 2 * Math.PI;
+  const dotX = center + radius * Math.cos(angleRad);
+  const dotY = center + radius * Math.sin(angleRad);
+
   const strokeColor = isCharging
     ? '#34D399' // Emerald charging
     : clamped <= 20
     ? '#F43F5E' // Rose low
-    : '#38BDF8'; // Lunar Cyan normal
+    : clamped <= 50
+    ? '#FBBF24' // Amber moderate
+    : '#22D3EE'; // Cyan normal (> 50%)
 
   const glowStyle = isCharging
     ? { filter: 'drop-shadow(0 0 3px rgba(52, 211, 153, 0.75))' }
     : clamped <= 20
     ? { filter: 'drop-shadow(0 0 3px rgba(244, 63, 94, 0.75))' }
-    : { filter: 'drop-shadow(0 0 3px rgba(56, 189, 248, 0.65))' };
+    : clamped <= 50
+    ? { filter: 'drop-shadow(0 0 3px rgba(251, 191, 36, 0.65))' }
+    : { filter: 'drop-shadow(0 0 4px rgba(34, 211, 238, 0.65))' };
+
+  const dotGlowColor = isCharging ? '#34d399' : clamped <= 20 ? '#f43f5e' : '#22d3ee';
 
   return (
     <div
-      className={`relative flex items-center justify-center shrink-0 select-none ${className}`}
-      style={{ width: size, height: size }}
+      className={`flex items-center gap-1.5 shrink-0 select-none ${className}`}
       title={`Baterai: ${clamped}%${isCharging ? ' (Charging)' : ''}`}
     >
-      <svg
-        className="w-full h-full -rotate-90 transform"
-        viewBox={`0 0 ${size} ${size}`}
+      <div
+        className="relative flex items-center justify-center shrink-0"
+        style={{ width: size, height: size }}
       >
-        {/* Track orbit redup */}
-        <circle
-          cx={center}
-          cy={center}
-          r={radius}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          className="text-white/[0.08]"
-        />
-        {/* Arc baterai terisi proporsional */}
-        <circle
-          cx={center}
-          cy={center}
-          r={radius}
-          fill="none"
-          stroke={strokeColor}
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          style={glowStyle}
-          className="transition-all duration-500 ease-out"
-        />
-      </svg>
+        <svg
+          className="w-full h-full -rotate-90 transform"
+          viewBox={`0 0 ${size} ${size}`}
+        >
+          {/* Track orbit redup */}
+          <circle
+            cx={center}
+            cy={center}
+            r={radius}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            className="text-white/[0.08]"
+          />
+          {/* Arc baterai terisi proporsional */}
+          <circle
+            cx={center}
+            cy={center}
+            r={radius}
+            fill="none"
+            stroke={strokeColor}
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+            style={glowStyle}
+            className="transition-all duration-500 ease-out"
+          />
+          {/* Ujung Orbit Bintang (Meteor Arc Tip) */}
+          {clamped > 3 && (
+            <circle
+              cx={dotX}
+              cy={dotY}
+              r={1.2}
+              fill="#ffffff"
+              style={{ filter: `drop-shadow(0 0 4px ${dotGlowColor})` }}
+              className="transition-all duration-500 ease-out"
+            />
+          )}
+        </svg>
 
-      {/* Pusat Cincin: Petir mikro saat charging, bersih tanpa teks saat normal */}
-      {isCharging && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <Zap className="w-2.5 h-2.5 text-[#34D399] animate-pulse fill-[#34D399]/40" />
-        </div>
+        {/* Pusat Cincin: Petir mikro saat charging */}
+        {isCharging && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <Zap className="w-2.5 h-2.5 text-[#34D399] animate-pulse fill-[#34D399]/40" />
+          </div>
+        )}
+      </div>
+
+      {/* Persentase Teks Angka */}
+      {showText && (
+        <span className="font-sans font-medium text-[10.5px] tabular-nums text-zinc-300 leading-none">
+          {clamped}%
+        </span>
       )}
     </div>
   );
 };
 
-// Visualizer Gelombang Mikro (Equalizer)
-const MiniEqualizerGlyph: React.FC<{ active?: boolean }> = ({ active = true }) => (
-  <div
-    className="flex items-end gap-[2px] h-[11px] shrink-0"
-    style={{ filter: 'drop-shadow(0 0 4px rgba(152, 187, 214, 0.45))' }}
-    aria-hidden="true"
-  >
-    <span
-      className={`w-[2px] rounded-full bg-[#98BBD6] transition-all ${
-        active ? 'h-[9px] animate-[pulse_0.9s_ease-in-out_infinite]' : 'h-[3px] opacity-40'
-      }`}
-    />
-    <span
-      className={`w-[2px] rounded-full bg-[#98BBD6] transition-all ${
-        active ? 'h-[11px] animate-[pulse_0.6s_ease-in-out_infinite]' : 'h-[3px] opacity-40'
-      }`}
-    />
-    <span
-      className={`w-[2px] rounded-full bg-[#98BBD6] transition-all ${
-        active ? 'h-[7px] animate-[pulse_1.1s_ease-in-out_infinite]' : 'h-[3px] opacity-40'
-      }`}
-    />
-  </div>
-);
 
 // Komponen Marquee Teks Lagu & Artis Dinamis
 interface MarqueeTrackProps {
@@ -159,11 +177,11 @@ const MarqueeTrack: React.FC<MarqueeTrackProps> = ({ title, artist, isPlaying = 
       ref={refProp}
       className={`inline-flex items-center gap-1.5 whitespace-nowrap ${withSpacer ? 'pr-6' : ''}`}
     >
-      <span className="font-medium text-white/90">{title}</span>
+      <span className="font-sans font-medium text-[11px] text-zinc-200 tracking-tight">{title}</span>
       {artist && (
         <>
-          <span className="text-white/30">•</span>
-          <span className="text-white/50">{artist}</span>
+          <span className="text-zinc-600 select-none text-[10px]">•</span>
+          <span className="font-sans font-medium text-[11px] text-zinc-400 tracking-wide">{artist}</span>
         </>
       )}
     </span>
@@ -205,6 +223,11 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
   const isPlaying = playbackSource === 'native'
     ? Boolean(isNativePlaying && nativeTrack)
     : Boolean(song?.isPlaying && song?.title && song.title.trim() !== '');
+
+  const isSpotifyActive = Boolean(
+    playbackSource !== 'native' &&
+    (song?.is_spotify || (mediaState?.isSpotifyRunning && !mediaState?.is_browser))
+  );
 
   // Akses langsung state timer dari store (BUKAN .timerState)
   const timerState = useSkillStore((s) => s.skillStates['core.timer']);
@@ -260,19 +283,17 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
       triggeredAlert = {
         id: Date.now(),
         icon: (
-          <span
-            className={`w-2 h-2 rounded-full shrink-0 ${
-              telemetry.is_caps_locked
-                ? 'bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.9)]'
-                : 'bg-white/40'
-            }`}
+          <RabbitCapsLockIcon
+            isActive={telemetry.is_caps_locked}
+            size={13}
+            className={`shrink-0 ${telemetry.is_caps_locked ? 'text-[#c084fc]' : 'text-zinc-500'}`}
           />
         ),
         text: telemetry.is_caps_locked ? 'CAPS LOCK AKTIF' : 'CAPS LOCK NONAKTIF',
-        colorClass: telemetry.is_caps_locked ? 'text-rose-300' : 'text-white/70',
-        borderClass: telemetry.is_caps_locked ? 'border-rose-500/40' : 'border-white/20',
+        colorClass: telemetry.is_caps_locked ? 'text-[#c084fc]' : 'text-white/70',
+        borderClass: telemetry.is_caps_locked ? 'border-[rgba(192,132,252,0.4)]' : 'border-white/20',
         bgClass: telemetry.is_caps_locked
-          ? 'bg-rose-500/15 shadow-[0_0_12px_rgba(244,63,94,0.35)]'
+          ? 'bg-[rgba(192,132,252,0.15)] shadow-[0_0_12px_rgba(192,132,252,0.35)]'
           : 'bg-white/[0.08]',
       };
     }
@@ -340,7 +361,7 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
       const now = new Date();
       const hours = String(now.getHours()).padStart(2, '0');
       const minutes = String(now.getMinutes()).padStart(2, '0');
-      setTimeStr(`${hours}.${minutes}`);
+      setTimeStr(`${hours}:${minutes}`);
       setDateStr(
         now.toLocaleDateString('en-US', {
           weekday: 'short',
@@ -379,12 +400,9 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
           isExpanded ? 'pointer-events-none' : ''
         }`}
       >
-        {/* Sisi Kiri: MoonRabbitEmblem + C Λ S Λ */}
-        <div className="flex items-center gap-1.5 shrink-0" title="CASA System">
-          <MoonRabbitEmblem size={18} />
-          <span className="text-[10px] font-bold text-white/90 tracking-[0.2em] select-none">
-            C Λ S Λ
-          </span>
+        {/* Sisi Kiri: Maskot Interaktif Vibing Companion (Always Awake/Alert in Status Bar) */}
+        <div className="flex items-center h-7 pt-0.5 shrink-0 overflow-visible" title="CASA Companion">
+          <CasaCompanionAvatar isPlaying={isPlaying} mood="awake" />
         </div>
 
         {/* Separator 1 */}
@@ -421,11 +439,11 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
                 transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
                 className="flex items-center tabular-nums"
               >
-                <span className="font-mono font-bold text-white/95 text-[12px] tracking-tight tabular-nums">
-                  {timeStr || '19.13'}
+                <span className="font-sans font-medium text-[12px] tracking-tight text-zinc-100 tabular-nums antialiased">
+                  {timeStr || '19:13'}
                 </span>
                 <span className="text-white/25 mx-1.5">•</span>
-                <span className="font-sans font-medium text-white/45 text-[11px]">
+                <span className="font-sans font-medium text-[11.5px] text-zinc-300 tracking-normal antialiased tabular-nums">
                   {dateStr}
                 </span>
               </motion.div>
@@ -452,15 +470,14 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
         >
           {/* Wadah Teks */}
           <div
-            className="flex-1 min-w-0 overflow-hidden text-xs font-urbanist select-none"
-            style={{ fontFamily: "'Urbanist', sans-serif" }}
+            className="flex-1 min-w-0 overflow-hidden text-xs select-none"
           >
             <MarqueeTrack title={trackTitle} artist={artistName} isPlaying={isPlaying} />
           </div>
 
           {/* Equalizer Terkunci & Pure Circle Battery Ring */}
           <div className="shrink-0 flex items-center gap-2">
-            <MiniEqualizerGlyph active={isPlaying} />
+            <TwinEqualizerGlyph active={isPlaying} isSpotify={isSpotifyActive} />
             {telemetry.has_battery && (
               <PureCircleBattery
                 percentage={telemetry.battery_percentage}
@@ -487,12 +504,9 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
           isExpanded ? 'pointer-events-none' : ''
         }`}
       >
-        {/* Sisi Kiri: MoonRabbitEmblem + C Λ S Λ */}
-        <div className="flex items-center gap-1.5 shrink-0" title="CASA System">
-          <MoonRabbitEmblem size={18} />
-          <span className="text-[10px] font-bold text-white/90 tracking-[0.2em] select-none">
-            C Λ S Λ
-          </span>
+        {/* Sisi Kiri: Maskot Interaktif Vibing Companion (Always Awake/Alert in Status Bar) */}
+        <div className="flex items-center h-7 pt-0.5 shrink-0 overflow-visible" title="CASA Companion">
+          <CasaCompanionAvatar isPlaying={isPlaying} mood="awake" />
         </div>
 
         {/* Separator */}
@@ -529,11 +543,11 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
                 transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
                 className="flex items-center tabular-nums"
               >
-                <span className="font-mono font-bold text-white/95 text-[12px] tracking-tight tabular-nums">
-                  {timeStr || '19.13'}
+                <span className="font-sans font-medium text-[12px] tracking-tight text-zinc-100 tabular-nums antialiased">
+                  {timeStr || '19:13'}
                 </span>
                 <span className="text-white/25 mx-1.5">•</span>
-                <span className="font-sans font-medium text-white/45 text-[11px]">
+                <span className="font-sans font-medium text-[11.5px] text-zinc-300 tracking-normal antialiased tabular-nums">
                   {dateStr}
                 </span>
               </motion.div>
@@ -544,7 +558,7 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
         {/* Separator */}
         <span className="h-3 w-[1px] bg-white/[0.08] shrink-0" aria-hidden="true" />
 
-        {/* Sisi Kanan: Countdown Timer Slot */}
+        {/* Sisi Kanan: Persentase Baterai + Indikator Timer [80% ⚡] • [☽ 21m] (Graceful Collapse) */}
         <div className={`shrink-0 flex items-center gap-2 justify-end ${isExpanded ? 'pointer-events-none' : ''}`}>
           {telemetry.has_battery && (
             <PureCircleBattery
@@ -552,16 +566,35 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
               isCharging={telemetry.is_charging}
               hasBattery={telemetry.has_battery}
               size={18}
+              showText={true}
             />
           )}
-          <TimerPillSlot
-            state={timerState}
-            onClick={() => {
+
+          <span className="text-white/20 select-none text-[9px]">•</span>
+
+          {/* Indikator Timer Astral Periwinkle (#818cf8) */}
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
               if (onExpandSkill) {
                 onExpandSkill('core.timer');
               }
             }}
-          />
+            className="flex items-center gap-1 shrink-0 cursor-pointer select-none px-2 py-0.5 rounded-full hover:bg-[#818cf8]/15 border border-[#818cf8]/20 transition-colors text-[#818cf8]"
+            title={`Pomodoro Timer: ${Math.floor((timerState?.remainingSeconds ?? 0) / 60)}:${((timerState?.remainingSeconds ?? 0) % 60).toString().padStart(2, '0')}`}
+            role="button"
+            aria-label="Pomodoro Timer"
+          >
+            <span className="text-[#818cf8] text-[11px] leading-none select-none font-bold">☽</span>
+            <span className="font-sans font-semibold text-[11px] tabular-nums tracking-tight leading-none text-[#818cf8]">
+              {(() => {
+                const rem = timerState?.remainingSeconds ?? 0;
+                if (rem <= 0) return '0m';
+                if (rem < 60) return `${rem}s`;
+                return `${Math.ceil(rem / 60)}m`;
+              })()}
+            </span>
+          </div>
         </div>
       </div>
     );
@@ -578,7 +611,7 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
         isExpanded ? 'pointer-events-none' : ''
       }`}
     >
-      {/* Sub-layer 1: SashaEyes (True Resting) */}
+      {/* Sub-layer 1: RestingPill (True Resting with CasaCompanionEyes) */}
       <div
         data-resting-capsule="true"
         className={`absolute inset-0 flex items-center justify-center transition-opacity duration-300 ${
@@ -587,83 +620,39 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
             : 'opacity-100 pointer-events-auto'
         }`}
       >
-        <SashaEyes />
+        <RestingPill />
       </div>
 
-      {/* Sub-layer 2: Jam Digital & Hari Tanggal + Mini Circular Battery Ring (Awake 290px) */}
+      {/* Sub-layer 2: Jam Digital & Hari Tanggal + Mini Circular Battery Ring (Awake 240px Compact) */}
       <div
-        className={`absolute inset-0 w-[290px] px-3.5 py-1.5 mx-auto flex items-center justify-between transition-opacity duration-300 ${
+        className={`absolute inset-0 w-[240px] px-3.5 py-1.5 mx-auto flex items-center justify-between transition-opacity duration-300 ${
           isExpanded || isRestingSleep
             ? 'opacity-0 pointer-events-none'
             : 'opacity-100 pointer-events-auto'
         }`}
       >
-        {/* Sisi Kiri: MoonRabbitEmblem + C Λ S Λ */}
-        <div className="flex items-center gap-1.5 shrink-0" title="CASA System">
-          <MoonRabbitEmblem size={18} />
-          <span className="text-[10px] font-bold text-white/90 tracking-[0.2em] select-none">
-            C Λ S Λ
+        {/* Sisi Kiri: Alur Flex Rapat [Avatar | Jam · Tanggal] (Anti-Jurang Kosong) */}
+        <div className="flex items-center gap-2.5 shrink-0 select-none">
+          <div className="flex items-center h-7 shrink-0 overflow-visible" title="CASA Companion">
+            <CasaCompanionAvatar isPlaying={isPlaying} mood="awake" />
+          </div>
+          <span className="text-white/20 select-none text-xs font-light leading-none shrink-0" aria-hidden="true">|</span>
+          <span className="text-xs font-medium text-white/90 whitespace-nowrap tabular-nums shrink-0">
+            {timeStr || '19:13'} <span className="text-white/40 font-normal">· {dateStr}</span>
           </span>
         </div>
 
-        {/* Separator Tengah */}
-        <span className="h-3 w-[1px] bg-white/[0.08] shrink-0" aria-hidden="true" />
-
-        {/* Sisi Kanan: Dynamic Morphing Pill (Jam + Baterai vs Hardware Alert) */}
-        <div
-          data-idle-clock-date="true"
-          className="flex items-center justify-end shrink-0 select-none min-w-0"
-        >
-          <AnimatePresence mode="wait">
-            {activeAlert ? (
-              <motion.div
-                key={`compact-alert-${activeAlert.id}`}
-                initial={{ opacity: 0, y: 6, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -6, scale: 0.95 }}
-                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                className={`h-[24px] px-2.5 rounded-full border flex items-center gap-1.5 select-none ${activeAlert.bgClass} ${activeAlert.borderClass}`}
-              >
-                {activeAlert.icon}
-                <span
-                  className={`font-sans text-[9px] tracking-[0.14em] uppercase font-bold truncate max-w-[170px] ${activeAlert.colorClass}`}
-                >
-                  {activeAlert.text}
-                </span>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="compact-clock-battery"
-                initial={{ opacity: 0, y: -6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 6 }}
-                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                className="flex items-center gap-2 select-none"
-              >
-                {/* Jam Digital & Hari Tanggal */}
-                <div className="flex items-center tabular-nums">
-                  <span className="font-mono font-bold text-white/95 text-[12px] tracking-tight tabular-nums">
-                    {timeStr || '19.38'}
-                  </span>
-                  <span className="text-white/25 mx-1.5">•</span>
-                  <span className="font-sans font-medium text-white/45 text-[11px]">
-                    {dateStr}
-                  </span>
-                </div>
-
-                {/* Pure Circle Battery Ring (No Text) */}
-                {telemetry.has_battery && (
-                  <PureCircleBattery
-                    percentage={telemetry.battery_percentage}
-                    isCharging={telemetry.is_charging}
-                    hasBattery={telemetry.has_battery}
-                    size={18}
-                  />
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+        {/* Sisi Kanan: Mini Circular Battery Ring di Ujung Kanan */}
+        {telemetry.has_battery && (
+          <div className="shrink-0 ml-auto flex items-center">
+            <PureCircleBattery
+              percentage={telemetry.battery_percentage}
+              isCharging={telemetry.is_charging}
+              hasBattery={telemetry.has_battery}
+              size={18}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

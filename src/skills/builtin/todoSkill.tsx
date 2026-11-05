@@ -51,7 +51,7 @@ export const todoSkill: CasaSkill<TodoSkillState> = {
       return (
         <div
           onClick={onClick}
-          className="w-[36px] h-[36px] rounded-full bg-neutral-950/80 backdrop-blur-2xl border border-white/[0.12] flex items-center justify-center cursor-pointer hover:border-indigo-400/50 transition-colors shadow-2xl"
+          className="w-[36px] h-[36px] rounded-full bg-[#09090b] border border-[#27272a] flex items-center justify-center cursor-pointer hover:border-zinc-700 active:scale-[0.97] transition-all duration-100 ease-out shadow-[0_4px_16px_rgba(0,0,0,0.85)]"
           title={`Tasks: ${pendingCount} pending`}
           role="button"
           aria-label="Active Tasks Bubble"
