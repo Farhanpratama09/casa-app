@@ -1,8 +1,8 @@
 [package]
 name = "casa"
-version = "0.1.0"
-description = "CASA Dynamic Floating Island for Windows"
-authors = ["CASA Architect"]
+version = "1.0.0"
+description = "CASA - Cyber Moon Rabbit Desktop Music Player"
+authors = ["Farhan Pratama"]
 edition = "2021"
 
 [lib]
