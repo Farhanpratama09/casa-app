@@ -83,23 +83,52 @@ pub fn start_hitbox_poller(window: tauri::WebviewWindow) {
                     let top = win_rect.top;
                     let bottom = win_rect.top + phys_hb_h + safety_buffer;
 
-                    let is_cursor_inside = cursor.x >= left
-                        && cursor.x <= right
-                        && cursor.y >= top
-                        && cursor.y <= bottom;
-
-                    // Anti-Drag Protection:
-                    // If left mouse button is pressed and we were previously NOT transparent (user is clicking or dragging),
-                    // maintain interactive state until the user releases the mouse button.
-                    let is_lbutton_down = (GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000) != 0;
-                    let should_be_transparent = if !is_cursor_inside {
-                        if !was_transparent && is_lbutton_down {
-                            false // maintain active window while user is dragging
-                        } else {
-                            true
-                        }
+                    // In expanded mode (width >= 500 or height >= 120), the entire window bounds up to active height are interactive
+                    let is_expanded_hitbox = hb_w >= 500.0 || hb_h >= 120.0;
+                    let effective_left = if is_expanded_hitbox {
+                        win_rect.left
                     } else {
+                        left
+                    };
+                    let effective_right = if is_expanded_hitbox {
+                        win_rect.right
+                    } else {
+                        right
+                    };
+                    let effective_bottom = if is_expanded_hitbox {
+                        win_rect.top + phys_hb_h + (16.0 * scale).round() as i32
+                    } else {
+                        bottom
+                    };
+
+                    let is_cursor_inside = cursor.x >= effective_left
+                        && cursor.x <= effective_right
+                        && cursor.y >= top
+                        && cursor.y <= effective_bottom;
+
+                    // Anti-Drag Protection & External Drag Approach Detection:
+                    // If left mouse button is pressed:
+                    // 1. If cursor approaches anywhere within window bounds, release transparency immediately
+                    //    so WebView2's OLE Drag Target can receive DragEnter and Drop without 🚫 cursor.
+                    // 2. If we were previously not transparent, maintain interactive state while dragging.
+                    let is_lbutton_down = (GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000) != 0;
+                    let drag_approach_bottom = if is_expanded_hitbox {
+                        effective_bottom
+                    } else {
+                        win_rect.top + (120.0 * scale).round() as i32
+                    };
+                    let is_approaching_drag = is_lbutton_down
+                        && cursor.x >= (win_rect.left - safety_buffer)
+                        && cursor.x <= (win_rect.right + safety_buffer)
+                        && cursor.y >= win_rect.top
+                        && cursor.y <= drag_approach_bottom;
+
+                    let should_be_transparent = if is_cursor_inside || is_approaching_drag {
                         false
+                    } else if !was_transparent && is_lbutton_down {
+                        false // maintain active window while user is dragging
+                    } else {
+                        true
                     };
 
                     if should_be_transparent != was_transparent {

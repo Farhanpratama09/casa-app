@@ -27,11 +27,18 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.scdn.co https://*.spotifycdn.com https://*.ytimg.com https://*.googleusercontent.com; media-src 'self' data: blob: http://127.0.0.1:* https://*.googlevideo.com; connect-src 'self' ipc: http://127.0.0.1:* ws://127.0.0.1:* https://api.spotify.com https://accounts.spotify.com https://lrclib.net; font-src 'self' data:;"
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
   }
 }

@@ -46,13 +46,13 @@ export interface SpotifyPlaylistItem {
   uri: string;
 }
 
-// Credentials loaded from .env with fallback
+// Credentials loaded safely from environment variables (.env)
 export const SPOTIFY_CLIENT_ID =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SPOTIFY_CLIENT_ID) ||
   '6d0512b574044ffa8833b4d0c550a4ce';
 export const SPOTIFY_CLIENT_SECRET =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SPOTIFY_CLIENT_SECRET) ||
-  '5a73687140fb413ca3f8639430780eb8';
+  '';
 
 const STORAGE_KEY_USER_ACCESS = 'casa_spotify_user_access_token';
 const STORAGE_KEY_USER_REFRESH = 'casa_spotify_user_refresh_token';

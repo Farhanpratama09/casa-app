@@ -9,6 +9,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': '/src',
+      '@tauri-apps/plugin-drag': '@crabnebula/tauri-plugin-drag',
     },
   },
   clearScreen: false,
