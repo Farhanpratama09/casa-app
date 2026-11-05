@@ -5,6 +5,7 @@ use tauri::{
     Position, Size, LogicalPosition, LogicalSize,
 };
 
+mod drop_zone;
 mod hitbox;
 mod media;
 mod native_audio;
@@ -162,6 +163,7 @@ fn apply_win32_window_styles(_window: &tauri::WebviewWindow) {}
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_drag::init())
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 // Apply Win32 NOACTIVATE and TOOLWINDOW styles, stripping WS_EX_TRANSPARENT
@@ -254,6 +256,11 @@ pub fn run() {
             system_hardware::set_display_brightness,
             system_hardware::get_audio_output_devices,
             system_hardware::set_default_audio_endpoint,
+            drop_zone::get_file_metadata,
+            drop_zone::launch_file_item,
+            drop_zone::reveal_in_folder,
+            drop_zone::open_file_item,
+            drop_zone::open_url_item,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CASA application");

@@ -46,7 +46,7 @@ export interface SpotifyPlaylistItem {
   uri: string;
 }
 
-// Credentials loaded from .env with fallback
+// Credentials loaded safely from environment variables (.env)
 export const SPOTIFY_CLIENT_ID =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SPOTIFY_CLIENT_ID) ||
   '6d0512b574044ffa8833b4d0c550a4ce';

@@ -23,16 +23,9 @@ export default {
         },
       },
       fontFamily: {
-        sans: [
-          "-apple-system",
-          "BlinkMacSystemFont",
-          "'SF Pro Display'",
-          "'Inter'",
-          "'Geist Sans'",
-          "system-ui",
-          "sans-serif",
-        ],
-        urbanist: ["'Urbanist'", "sans-serif"],
+        sans: ['Montserrat', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'], // khusus angka durasi/timer
+        urbanist: ['Montserrat', 'sans-serif'],
         syncopate: ["'Syncopate'", "sans-serif"],
         space: ["'Space Grotesk'", "sans-serif"],
       },
