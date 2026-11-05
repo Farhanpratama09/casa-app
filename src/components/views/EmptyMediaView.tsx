@@ -1,6 +1,7 @@
 import React from 'react';
 import { Loader2 } from 'lucide-react';
 import { MoonRabbitEmblem } from '../MoonRabbitEmblem';
+import { SpotifyLunarIcon } from '../system/CosmicIcons';
 
 interface EmptyMediaViewProps {
   onOpenSpotify: () => void;
@@ -135,13 +136,7 @@ export const EmptyMediaView: React.FC<EmptyMediaViewProps> = ({
           {isWakingSpotify ? (
             <Loader2 className="w-[13px] h-[13px] animate-spin text-white/60" />
           ) : (
-            <svg
-              className="w-[13px] h-[13px] text-white/60 group-hover:text-white shrink-0 transition-colors"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-            >
-              <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424c-.18.295-.563.387-.857.207-2.35-1.435-5.308-1.76-8.792-.963-.335.077-.67-.133-.746-.468-.077-.334.132-.67.467-.746 3.808-.87 7.076-.496 9.721 1.115.294.18.387.562.207.855zm1.226-2.724c-.227.368-.711.485-1.08.258-2.69-1.653-6.79-2.134-9.97-1.168-.413.125-.852-.108-.977-.52-.125-.413.108-.852.52-.977 3.633-1.103 8.147-.568 11.249 1.328.368.226.485.71.258 1.079zm.106-2.835C14.692 8.95 9.375 8.775 6.297 9.71c-.495.15-1.022-.13-1.172-.625-.15-.496.13-1.022.626-1.172 3.535-1.073 9.404-.866 13.115 1.338.445.264.59.838.327 1.282-.264.444-.838.59-1.281.327z" />
-            </svg>
+            <SpotifyLunarIcon className="w-[14px] h-[14px] text-emerald-400 group-hover:text-emerald-300 shrink-0 transition-colors" />
           )}
           <span className="font-urbanist" style={{ fontFamily: "'Urbanist', sans-serif" }}>
             Buka Spotify

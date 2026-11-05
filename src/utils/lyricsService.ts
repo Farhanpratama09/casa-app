@@ -53,12 +53,12 @@ export function cleanTrackTitleForLyrics(rawTitle: string): string {
       ''
     )
     .replace(
-      /\s*[\(\[](?:(?:\d{4}\s*)?remaster(?:ed)?(?:\s*\d{4})?|explicit|clean|studio|deluxe|bonus|radio\s*edit|mono|stereo|ver|version|single|ep|acoustic|album\s*version|performance\s*video|special\s*clip|karaoke|instrumental|backing\s*track|minus\s*one)[^\)\]]*[\)\]]/gi,
+      /\s*[\(\[](?:(?:\d{4}\s*)?remaster(?:ed)?(?:\s*\d{4})?|explicit|clean|studio|deluxe(?:\s*edition)?|bonus(?:\s*track)?|radio\s*edit|mono|stereo|ver|version|single|ep|acoustic|album\s*version|performance\s*video|special\s*clip|karaoke|instrumental|backing\s*track|minus\s*one|live(?:\s+at[^\)\]]*)?)[^\)\]]*[\)\]]/gi,
       ''
     )
-    // 2. Remove trailing suffix separators: "| Lyrics", "// Lyrics", "- Lyrics", "- Lyric Video", "| Official Video"
+    // 2. Remove trailing suffix separators: "| Lyrics", "// Lyrics", "- Lyrics", "- Lyric Video", "| Official Video", "- Remastered", "- Live", etc.
     .replace(
-      /\s*(?:\|\s*|\/\/\s*|\s-\s*)(?:official\s*(?:music\s*)?video|music\s*video|official\s*audio|mv|m\/v|(?:easy\s*)?lyrics?|color\s*coded(?:\s*lyrics?)?|lirik\s*(?:lagu)?|audio|terjemahan).*$/gi,
+      /\s*(?:\|\s*|\/\/\s*|\s-\s*)(?:(?:\d{4}\s*)?remaster(?:ed)?(?:\s*\d{4})?|deluxe(?:\s*edition)?|bonus(?:\s*track)?|official\s*(?:music\s*)?video|music\s*video|official\s*audio|mv|m\/v|(?:easy\s*)?lyrics?|color\s*coded(?:\s*lyrics?)?|lirik\s*(?:lagu)?|audio|terjemahan|live(?:\s+at[^-–—|]+)?).*$/gi,
       ''
     )
     .replace(/\s+\b(?:m\/v|mv)\b$/gi, '')
@@ -66,8 +66,8 @@ export function cleanTrackTitleForLyrics(rawTitle: string): string {
     .replace(/\s*[\(\[](?:feat|ft|featuring|with)\b[^\)\]]*[\)\]]/gi, '')
     .replace(/\s*\b(?:feat|ft|featuring|with)\b.*$/gi, '')
     // 4. Remove leftover brackets e.g. [ ... ] or ( ... ) containing video/lyrics noise
-    .replace(/\s*\[[^\]]*(?:mv|video|audio|4k|hd|clip|live|lyric|sub|ver)[^\]]*\]/gi, '')
-    .replace(/\s*\([^)]*(?:mv|video|audio|4k|hd|clip|live|lyric|sub|ver)[^)]*\)/gi, '')
+    .replace(/\s*\[[^\]]*(?:mv|video|audio|4k|hd|clip|live|lyric|sub|ver|remaster)[^\]]*\]/gi, '')
+    .replace(/\s*\([^)]*(?:mv|video|audio|4k|hd|clip|live|lyric|sub|ver|remaster)[^)]*\)/gi, '')
     // 5. Clean Japanese / Korean quotation brackets e.g. 「Title」 or 『Title』
     .replace(/^[「『](.+)[」』]$/g, '$1')
     .replace(/^[“"'](.+)["”']$/g, '$1')
@@ -83,6 +83,48 @@ export function cleanTrackTitleForLyrics(rawTitle: string): string {
  */
 export function sanitizeTrackTitleForSearch(title: string): string {
   return cleanTrackTitleForLyrics(title);
+}
+
+/**
+ * Helper parser waktu lirik:
+ * Menjamin timestamp yang dikonversi selalu berupa detik numerik murni (float).
+ * Menangani string "mm:ss.xx", "hh:mm:ss", atau angka detik float murni (tanpa heuristik > 1000).
+ */
+export function parseTimeToSeconds(rawTime: string | number | undefined | null): number {
+  if (rawTime === undefined || rawTime === null) return 0;
+
+  if (typeof rawTime === 'number') {
+    if (isNaN(rawTime) || !isFinite(rawTime) || rawTime < 0) return 0;
+    return rawTime;
+  }
+
+  if (typeof rawTime === 'string') {
+    const trimmed = rawTime.trim();
+    if (!trimmed) return 0;
+
+    const parts = trimmed.split(':');
+    if (parts.length === 2) {
+      const minutes = parseFloat(parts[0]);
+      const seconds = parseFloat(parts[1]);
+      if (!isNaN(minutes) && !isNaN(seconds)) {
+        return Math.max(0, minutes * 60 + seconds);
+      }
+    } else if (parts.length === 3) {
+      const hours = parseFloat(parts[0]);
+      const minutes = parseFloat(parts[1]);
+      const seconds = parseFloat(parts[2]);
+      if (!isNaN(hours) && !isNaN(minutes) && !isNaN(seconds)) {
+        return Math.max(0, hours * 3600 + minutes * 60 + seconds);
+      }
+    }
+
+    const parsedNum = parseFloat(trimmed);
+    if (!isNaN(parsedNum) && isFinite(parsedNum) && parsedNum >= 0) {
+      return parsedNum;
+    }
+  }
+
+  return 0;
 }
 
 /**

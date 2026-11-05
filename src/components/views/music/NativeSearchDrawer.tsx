@@ -84,17 +84,17 @@ export const NativeSearchDrawer: React.FC<NativeSearchDrawerProps> = memo(({
   return (
     <div
       data-tauri-drag-region="false"
-      className="absolute inset-0 z-40 bg-[#0A0D15]/95 backdrop-blur-xl p-3 flex flex-col justify-between select-none animate-in fade-in duration-200"
+      className="absolute inset-0 z-40 bg-[#0e0e11] border border-[#2e2e34] rounded-2xl p-3 flex flex-col justify-between select-none animate-in fade-in duration-200"
       onClick={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
       {/* Top Search Input Row */}
-      <div className="flex items-center gap-2 shrink-0 border-b border-white/[0.08] pb-1.5">
-        <div className="flex items-center gap-2 flex-1 bg-white/[0.06] hover:bg-white/[0.09] focus-within:bg-white/[0.1] focus-within:border-sky-400/40 border border-white/10 rounded-lg px-2.5 py-1 transition-all">
+      <div className="flex items-center gap-2 shrink-0 border-b border-[#222226] pb-1.5">
+        <div className="flex items-center gap-2 flex-1 bg-[#18181c] hover:bg-[#222226] focus-within:border-cyan-400/40 border border-[#2e2e34] rounded-lg px-2.5 py-1 transition-all">
           {isSearching ? (
-            <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin shrink-0" />
+            <Loader2 className="w-3.5 h-3.5 text-cyan-400 animate-spin shrink-0" />
           ) : (
-            <Search className="w-3.5 h-3.5 text-white/40 shrink-0" />
+            <Search className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
           )}
           <input
             ref={inputRef}
@@ -137,7 +137,7 @@ export const NativeSearchDrawer: React.FC<NativeSearchDrawerProps> = memo(({
       <div
         data-tauri-drag-region="false"
         onWheel={(e) => e.stopPropagation()}
-        className="flex-1 min-h-0 overflow-y-auto mt-1.5 pr-1 space-y-1 cosmic-music-scrollbar"
+        className="flex-1 min-h-0 overflow-y-auto mt-1.5 pr-1 space-y-1 cosmic-native-scrollbar"
       >
         <div className="flex items-center justify-between text-[9.5px] font-urbanist text-white/40 px-1 font-medium tracking-wide uppercase">
           <span>

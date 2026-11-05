@@ -5,82 +5,30 @@ interface MoonRabbitEmblemProps {
   size?: number;
 }
 
+/**
+ * Cyber Moon Rabbit Emblem (Crescent Moon with Cyber Bunny Ears)
+ */
 export const MoonRabbitEmblem: React.FC<MoonRabbitEmblemProps> = ({
   className = '',
-  size = 18,
+  size = 16,
 }) => {
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 20 20"
+      viewBox="0 0 24 24"
+      className={`text-cyan-400 drop-shadow-[0_0_6px_rgba(34,211,238,0.6)] shrink-0 select-none ${className}`}
       fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={`shrink-0 select-none ${className}`}
-      style={{
-        filter: 'drop-shadow(0 0 5px rgba(152, 187, 214, 0.45))',
-      }}
-      aria-label="Sasha Moon Rabbit Emblem"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-label="CASA Cyber Moon Rabbit Emblem"
     >
-      <defs>
-        <linearGradient id="moonArcGrad" x1="2" y1="2" x2="18" y2="18" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#98BBD6" stopOpacity="0.95" />
-          <stop offset="100%" stopColor="#6C8EA8" stopOpacity="0.4" />
-        </linearGradient>
-      </defs>
-
-      {/* 1. Crescent Moon Arc hugging rabbit from left to lower base */}
-      <path
-        d="M 9.5 2 C 5.5 2.2 2 5.8 2 10.2 C 2 14.6 5.6 18.2 10 18.2 C 12.8 18.2 15.3 16.7 16.6 14.5 C 13.8 15.3 10.6 14.5 8.7 12.4 C 6.8 10.3 6.6 7.2 8 4.6 C 8.5 3.7 9 3 9.5 2 Z"
-        fill="url(#moonArcGrad)"
-      />
-
-      {/* 2. Rabbit Head Base */}
-      <circle cx="11.8" cy="11.2" r="3.8" fill="#FFFFFF" fillOpacity="0.92" />
-
-      {/* 3. Left Upright Ear: Sharp Cyber Blade with Ice Blue Core */}
-      <path
-        d="M 9.5 8.2 L 9.2 3.2 C 9.2 2.7 9.8 2.4 10.2 2.8 L 11.6 8.0 Z"
-        fill="#FFFFFF"
-        fillOpacity="0.95"
-      />
-      {/* Neon Ice Blue Core Stripe */}
-      <line
-        x1="9.8"
-        y1="3.6"
-        x2="10.4"
-        y2="7.4"
-        stroke="#98BBD6"
-        strokeWidth="0.9"
-        strokeLinecap="round"
-      />
-
-      {/* 4. Right Ear: Floppy Lop-Ear folded over */}
-      <path
-        d="M 13.2 8.0 C 14.2 7.6 15.6 8.4 15.8 9.8 C 16.0 11.2 15.2 12.6 14.4 12.8 C 13.8 13.0 13.2 12.2 13.2 11.4 Z"
-        fill="#E2E8F0"
-        fillOpacity="0.92"
-      />
-      {/* Silver Cyber Hoop Ring on Floppy Ear */}
-      <circle
-        cx="15.2"
-        cy="11.2"
-        r="1.2"
-        stroke="#98BBD6"
-        strokeWidth="0.75"
-        fill="none"
-      />
-
-      {/* 5. Minimalist Facial Features */}
-      {/* Left eye: cross (✖) */}
-      <path
-        d="M 9.9 10.4 L 10.9 11.4 M 10.9 10.4 L 9.9 11.4"
-        stroke="#98BBD6"
-        strokeWidth="0.7"
-        strokeLinecap="round"
-      />
-      {/* Right eye: tiny tareme dot / heart */}
-      <circle cx="13.1" cy="10.9" r="0.6" fill="#98BBD6" />
+      {/* Siluet Bulan Sabit yang Menyilang Membentuk Telinga Kelinci */}
+      <path d="M12 3c-1.2 0-2.4.3-3.5.9 1 .8 1.8 2 2.1 3.4.4 1.8-.2 3.6-1.5 4.8-1.3 1.2-3.1 1.7-4.8 1.3-.8-.2-1.5-.6-2.1-1.1.2 4.4 3.8 8 8.3 8 4.6 0 8.4-3.8 8.4-8.4 0-4.6-3.7-8.3-8.4-8.3" />
+      {/* Telinga Kelinci Kembar Cyber Ramping */}
+      <path d="M16 2.5c.8 1.2.6 3-.4 4.2M19.5 5c.4 1.5-.2 3.2-1.5 4" />
     </svg>
   );
 };

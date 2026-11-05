@@ -1,24 +1,30 @@
-import React, { memo } from 'react';
+import React, { memo, useState, useEffect } from 'react';
 import {
   Loader2,
-  Headphones,
   Speaker,
-  Bluetooth,
-  VolumeX,
 } from 'lucide-react';
+import { SpotifyLunarIcon } from '../../../system/CosmicIcons';
 import { VinylDiscFallback } from './VinylDiscFallback';
 import { PlayerHeaderBar } from '../PlayerHeaderBar';
 import { PlayerControls } from '../PlayerControls';
 import { LyricsPanel } from '../LyricsPanel';
 import { SpotifyPanels } from '../SpotifyPanels';
+import { NativeQueuePanel, NativeSearchPanel } from '../panels/NativePanels';
+import { playChimeCue } from '../../../../utils/tauriBridge';
 import type { MusicSubPanel } from '../constants';
 import type { LyricLine } from '../../../../utils/lyricsService';
 import type { SpotifyTrackItem, SpotifyPlaylistItem } from '../../../../utils/spotifyService';
 import type { AudioDeviceType } from '../../../../hooks/useSystemHardware';
+import type { NativeTrack } from '../../../../services/nativeAudioService';
+
+export type NativeTab = 'lyrics' | 'queue' | 'search';
 
 export interface SplitPlayerViewProps {
   // Session & Playback
   playbackSource: 'companion' | 'native';
+  nativeTrack?: NativeTrack | null;
+  nativeQueue?: NativeTrack[];
+  nativeQueueIndex?: number;
   activeSubPanel: 'lyrics' | 'search' | 'queue' | 'playlist';
   queueLength: number;
   isEffectivePlaying: boolean;
@@ -55,6 +61,8 @@ export interface SplitPlayerViewProps {
   durationSeconds: number;
   isShuffle: boolean;
   isSmartShuffle: boolean;
+  isRepeat?: boolean;
+  onToggleRepeat?: () => void;
 
   // Right column contextual title & loaders
   queueContextTitle: string;
@@ -115,10 +123,23 @@ export interface SplitPlayerViewProps {
   onAddToQueue: (track: SpotifyTrackItem) => void;
   onFocusInput: () => void;
   setIsSearchFocused: (focused: boolean) => void;
+  onEjectNative?: () => void;
+  isLoadingLyrics?: boolean;
+  onSelectNativeTrack?: (index: number) => void;
+  onRemoveNativeTrack?: (e: React.MouseEvent, index: number) => void;
+  onClearNativeQueue?: (e: React.MouseEvent) => void;
+  onPlayNativeSearchTrack?: (track: NativeTrack, currentList: NativeTrack[]) => void;
+  onAddToNativeQueue?: (e: React.MouseEvent, track: NativeTrack) => void;
+  addedNativeTrackId?: string | null;
+  onOpenLocalFile?: () => void;
+  onFilesDropped?: (files: FileList) => void;
 }
 
 export const SplitPlayerView: React.FC<SplitPlayerViewProps> = memo(({
   playbackSource,
+  nativeTrack,
+  nativeQueue,
+  nativeQueueIndex,
   activeSubPanel,
   queueLength,
   isEffectivePlaying,
@@ -149,6 +170,8 @@ export const SplitPlayerView: React.FC<SplitPlayerViewProps> = memo(({
   durationSeconds,
   isShuffle,
   isSmartShuffle,
+  isRepeat = false,
+  onToggleRepeat,
   queueContextTitle,
   isLoadingPlaylists,
   isLoadingPlaylistTracks,
@@ -201,147 +224,136 @@ export const SplitPlayerView: React.FC<SplitPlayerViewProps> = memo(({
   onAddToQueue,
   onFocusInput,
   setIsSearchFocused,
+  onEjectNative,
+  isLoadingLyrics = false,
+  onSelectNativeTrack,
+  onRemoveNativeTrack,
+  onClearNativeQueue,
+  onPlayNativeSearchTrack,
+  onAddToNativeQueue,
+  addedNativeTrackId,
+  onOpenLocalFile,
+  onFilesDropped,
 }) => {
+  const [activeNativeTab, setActiveNativeTab] = useState<NativeTab>(() => {
+    if (activeSubPanel === 'search' || activeSubPanel === 'queue') return activeSubPanel;
+    return 'lyrics';
+  });
+
+  useEffect(() => {
+    if (activeSubPanel === 'search' || activeSubPanel === 'queue' || activeSubPanel === 'lyrics') {
+      setActiveNativeTab(activeSubPanel);
+    }
+  }, [activeSubPanel]);
+
+  const handleNativeTabSelect = (tab: NativeTab) => {
+    playChimeCue('tap');
+    setActiveNativeTab(tab);
+    if (activeSubPanel !== tab) {
+      onSwitchSubPanel(tab);
+    }
+  };
+
   return (
-    <div className="relative w-full max-w-[620px] h-[140px] overflow-hidden">
-      {/* =================================================================== */}
-      {/* Ambient Cosmic Background Texture Layers                            */}
-      {/* =================================================================== */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
-        {/* Ambient Glow: Bottom-Left Radial Gradient */}
-        <div
-          className="absolute inset-0 pointer-events-none blur-2xl opacity-80"
-          style={{
-            background:
-              'radial-gradient(circle at bottom left, rgba(14, 165, 233, 0.15) 0%, rgba(30, 27, 75, 0.10) 45%, transparent 70%)',
-          }}
-        />
-
-        {/* Secondary soft glow at top-right for active side panel */}
-        <div
-          className="absolute top-0 right-0 w-[280px] h-[140px] pointer-events-none blur-xl opacity-60"
-          style={{
-            background:
-              'radial-gradient(circle at top right, rgba(255, 255, 255, 0.03) 0%, rgba(125, 211, 252, 0.03) 40%, transparent 70%)',
-          }}
-        />
-
-        {/* Subtle Cosmic Dust Layer + Cosmic Orbit Arc (SVG Passive Nodes) */}
-        <svg
-          className="absolute inset-0 w-full h-full pointer-events-none opacity-20"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          {/* Cosmic Orbit Curve */}
-          <path
-            d="M -20,120 Q 280,30 640,65"
-            fill="none"
-            stroke="white"
-            strokeWidth="1"
-            strokeOpacity="0.04"
-            strokeDasharray="4 6"
-          />
-          {/* Stardust Micro Nodes (1px–1.5px, #7DD3FC / #E0F2FE) */}
-          <circle cx="270" cy="22" r="1.2" fill="#7DD3FC" opacity="0.18" />
-          <circle cx="385" cy="115" r="1.5" fill="#E0F2FE" opacity="0.15" />
-          <circle cx="450" cy="32" r="1.0" fill="#7DD3FC" opacity="0.14" />
-          <circle cx="530" cy="98" r="1.4" fill="#E0F2FE" opacity="0.16" />
-          <circle cx="595" cy="45" r="1.2" fill="#7DD3FC" opacity="0.15" />
-        </svg>
-      </div>
-
-      <div className="relative z-10 w-full max-w-[620px] px-3.5 py-1.5 select-none group/card flex flex-col justify-between h-[140px]">
-        <div className="flex items-stretch gap-3 w-full h-[132px]">
-          {/* Left Column (230px): Audio Deck */}
-          <div className="flex flex-col justify-between w-[230px] shrink-0 border-r border-white/[0.04] pr-2.5 h-[132px]">
-            {/* Cover Art + Track Metadata & Like Button */}
+    <div
+      className="relative w-full max-w-[620px] h-full min-h-0 bg-[#121215] border border-[#222226] rounded-2xl overflow-visible"
+    >
+      <div className="relative z-10 w-full max-w-[620px] h-full min-h-0 px-3.5 py-1.5 select-none group/card flex flex-col justify-between overflow-visible">
+        <div className="grid grid-cols-[236px_minmax(0,1fr)] gap-3 w-full h-full min-h-0 items-stretch overflow-visible">
+          {/* Left Column (236px): Audio Deck */}
+          <div className="flex flex-col justify-between w-[236px] h-full min-h-0 shrink-0 border-r border-[#222226] pr-2">
+            {/* Cover Art (Non-Interaktif: pointer-events-none) + Track Metadata & Spotify Action */}
             <div className="flex items-center gap-2">
-              <button
-                onClick={onOpenSpotify}
-                onContextMenu={onQuitSpotify}
-                className="relative w-[46px] h-[46px] aspect-square rounded-xl overflow-hidden shrink-0 bg-[#0D0E12] border border-white/[0.06] shadow-sm cursor-pointer hover:border-[#98BBD6]/40 hover:scale-[1.02] active:scale-95 transition-all text-left flex-shrink-0"
-                title="Klik: Buka/Sembunyi | Klik Kanan: Keluar Total (Quit)"
-              >
+              {/* Cover Art Wrapper with Dynamic Ambient Glow */}
+              <div className="relative w-[46px] h-[46px] aspect-square rounded-xl shrink-0 pointer-events-none cursor-default select-none text-left flex-shrink-0">
+                {/* Dynamic Ambient Glow Layer */}
                 {effectiveArtwork ? (
                   <img
-                    key={`${currentSessionId}-${effectiveArtwork || effectiveTitle}`}
+                    key={`ambient-${currentSessionId}-${effectiveArtwork || effectiveTitle}`}
                     src={effectiveArtwork}
-                    alt={effectiveTitle}
-                    className="w-full h-full aspect-square object-cover select-none pointer-events-none transition-opacity duration-300 flex-shrink-0"
-                    onLoad={onCoverImageLoad}
-                    onError={onCoverImageError}
+                    alt=""
+                    aria-hidden="true"
+                    className="absolute -inset-1.5 -z-10 rounded-2xl blur-xl opacity-25 scale-105 pointer-events-none select-none transition-all duration-700 ease-out object-cover"
                   />
                 ) : (
-                  <VinylDiscFallback isPlaying={isEffectivePlaying} />
+                  <div
+                    className="absolute -inset-1.5 -z-10 rounded-2xl blur-xl opacity-25 scale-105 pointer-events-none select-none transition-all duration-700 ease-out bg-cyan-400/20 shadow-[0_0_24px_rgba(34,211,238,0.2)]"
+                  />
                 )}
-              </button>
+
+                {/* Primary Foreground Cover */}
+                <div
+                  className={`relative w-full h-full aspect-square rounded-xl overflow-hidden bg-[#09090b] border border-[#222226] select-none flex-shrink-0 ${
+                    !effectiveArtwork ? 'shadow-[0_0_24px_rgba(34,211,238,0.2)]' : 'shadow-sm'
+                  }`}
+                >
+                  {effectiveArtwork ? (
+                    <img
+                      key={`${currentSessionId}-${effectiveArtwork || effectiveTitle}`}
+                      src={effectiveArtwork}
+                      alt={effectiveTitle}
+                      className="w-full h-full aspect-square object-cover select-none pointer-events-none transition-opacity duration-300 flex-shrink-0"
+                      onLoad={onCoverImageLoad}
+                      onError={onCoverImageError}
+                    />
+                  ) : (
+                    <VinylDiscFallback isPlaying={isEffectivePlaying} />
+                  )}
+                </div>
+              </div>
 
               <div className="flex items-center justify-between min-w-0 flex-1">
                 <div className="flex flex-col min-w-0 flex-1 justify-center mr-1">
                   <div className="flex items-center gap-1.5">
                     <span
-                      className="text-[13px] font-semibold text-white/95 truncate tracking-tight leading-tight font-sans"
+                      className="font-sans font-semibold text-[13px] text-zinc-100 truncate tracking-tight leading-tight"
                       title={effectiveTitle}
                     >
                       {effectiveTitle}
                     </span>
                     {isResolvingAudio && (
-                      <Loader2 className="w-2.5 h-2.5 animate-spin text-sky-300 shrink-0" />
+                      <Loader2 className="w-2.5 h-2.5 animate-spin text-cyan-400 shrink-0" />
                     )}
                   </div>
                   <span
-                    className="text-[11px] font-medium text-white/40 truncate mt-0.5 font-sans"
+                    className="font-sans text-[10.5px] font-medium text-zinc-400 truncate mt-0.5 tracking-tight max-w-[150px]"
                     title={effectiveArtist}
                   >
                     {effectiveArtist}
                   </span>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  {/* Audio Endpoint Switcher with dynamic Hardware Telemetry */}
-                  <button
-                    onClick={onToggleMute || onToggleAudioOutput}
-                    onContextMenu={onContextMenuAudioOutput}
-                    className={`w-[20px] h-[20px] rounded-full flex items-center justify-center transition-all border ${
-                      isMuted
-                        ? 'text-rose-400 bg-rose-500/15 border-rose-500/30 shadow-[0_0_6px_rgba(244,63,94,0.2)]'
-                        : audioDeviceType === 'headphone_bluetooth'
-                        ? 'text-sky-300 bg-sky-500/15 border-sky-400/30 shadow-[0_0_6px_rgba(56,189,248,0.2)]'
-                        : audioDeviceType === 'headphone_wired' || audioOutput === 'headset'
-                        ? 'text-indigo-300 bg-indigo-500/15 border-indigo-400/30'
-                        : 'text-island-blue bg-island-blue/10 border-island-blue/20 hover:bg-island-blue/20'
-                    }`}
-                    title={`${audioDeviceName || (audioOutput === 'headset' ? 'Headphones' : 'Speakers')} (${
-                      audioDeviceType === 'headphone_bluetooth'
-                        ? 'Bluetooth'
-                        : audioDeviceType === 'headphone_wired'
-                        ? 'Kabel / Wired'
-                        : 'Speaker'
-                    }) • Vol: ${masterVolume ?? 100}%${isMuted ? ' [MUTED - Klik Unmute]' : ' [Klik Mute]'}${
-                      activeAppName ? ` • Sesi: ${activeAppName}` : ''
-                    }${sessionCount > 1 ? ' (Klik kanan kelola sesi)' : ''}`}
-                    aria-label="Audio Output Switcher"
-                  >
-                    {isMuted ? (
-                      <VolumeX className="w-2.5 h-2.5 shrink-0 text-rose-400" />
-                    ) : audioDeviceType === 'headphone_bluetooth' ? (
-                      <Bluetooth className="w-2.5 h-2.5 shrink-0" />
-                    ) : audioDeviceType === 'headphone_wired' || audioOutput === 'headset' ? (
-                      <Headphones className="w-2.5 h-2.5 shrink-0" />
+                  {playbackSource === 'native' ? (
+                    nativeTrack && onEjectNative ? (
+                      <button
+                        onClick={onEjectNative}
+                        className="w-[20px] h-[20px] rounded-full flex items-center justify-center text-zinc-400 hover:text-cyan-400 hover:bg-cyan-950/30 border border-transparent hover:border-cyan-500/30 transition-all duration-100 ease-out active:scale-[0.97] cursor-pointer"
+                        title="Tutup Sesi / Eject (Kembali ke Standby)"
+                        aria-label="Tutup Sesi / Eject"
+                      >
+                        <span className="text-[12px] font-sans font-bold leading-none select-none text-zinc-400 hover:text-cyan-400">⏏</span>
+                      </button>
                     ) : (
-                      <Speaker className="w-2.5 h-2.5 shrink-0" />
-                    )}
-                  </button>
-
-                  <button
-                    onClick={onOpenSpotify}
-                    onContextMenu={onQuitSpotify}
-                    className="w-[20px] h-[20px] rounded-full flex items-center justify-center text-white/30 hover:text-[#1DB954] hover:bg-white/10 transition-colors"
-                    title="Klik: Buka/Sembunyi | Klik Kanan: Keluar Total (Quit)"
-                    aria-label="Spotify Desktop (Klik: Buka/Sembunyi | Klik Kanan: Keluar Total)"
-                  >
-                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424c-.18.295-.563.387-.857.207-2.35-1.435-5.308-1.76-8.792-.963-.335.077-.67-.133-.746-.468-.077-.334.132-.67.467-.746 3.808-.87 7.076-.496 9.721 1.115.294.18.387.562.207.855zm1.226-2.724c-.227.368-.711.485-1.08.258-2.69-1.653-6.79-2.134-9.97-1.168-.413.125-.852-.108-.977-.52-.125-.413.108-.852.52-.977 3.633-1.103 8.147-.568 11.249 1.328.368.226.485.71.258 1.079zm.106-2.835C14.692 8.95 9.375 8.775 6.297 9.71c-.495.15-1.022-.13-1.172-.625-.15-.496.13-1.022.626-1.172 3.535-1.073 9.404-.866 13.115 1.338.445.264.59.838.327 1.282-.264.444-.838.59-1.281.327z" />
-                    </svg>
-                  </button>
+                      <button
+                        onClick={() => onSelectSource?.('companion')}
+                        className="w-[20px] h-[20px] rounded-full flex items-center justify-center text-zinc-500 hover:text-emerald-400 hover:bg-[#18181c] border border-transparent hover:border-[#2e2e34] transition-all duration-100 ease-out active:scale-[0.97] cursor-pointer"
+                        title="Beralih ke Windows Media / Spotify"
+                        aria-label="Beralih ke Windows Media / Spotify"
+                      >
+                        <SpotifyLunarIcon className="w-3.5 h-3.5 text-zinc-500 hover:text-emerald-400 transition-colors" />
+                      </button>
+                    )
+                  ) : (
+                    <button
+                      onClick={onOpenSpotify}
+                      onContextMenu={onQuitSpotify}
+                      className="w-[20px] h-[20px] rounded-full flex items-center justify-center text-zinc-400 hover:text-emerald-400 hover:bg-[#18181c] border border-transparent hover:border-[#2e2e34] transition-all duration-100 ease-out active:scale-[0.97] cursor-pointer"
+                      title="Klik: Buka/Sembunyi | Klik Kanan: Keluar Total (Quit)"
+                      aria-label="Spotify Desktop (Klik: Buka/Sembunyi | Klik Kanan: Keluar Total)"
+                    >
+                      <SpotifyLunarIcon className="w-3.5 h-3.5 text-emerald-400/80 hover:text-emerald-400 transition-colors" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -352,6 +364,7 @@ export const SplitPlayerView: React.FC<SplitPlayerViewProps> = memo(({
               isEffectivePlaying={isEffectivePlaying}
               hasActiveSession={hasActiveSession}
               canAccessSpotifyFeatures={canAccessSpotifyFeatures}
+              isSpotifySession={isSpotifySession}
               isWakingSpotify={isWakingSpotify}
               currentTimeSeconds={currentTimeSeconds}
               durationSeconds={durationSeconds}
@@ -359,44 +372,93 @@ export const SplitPlayerView: React.FC<SplitPlayerViewProps> = memo(({
               isShuffle={isShuffle}
               isSmartShuffle={isSmartShuffle}
               onToggleShuffle={onToggleShuffle}
+              isRepeat={isRepeat}
+              onToggleRepeat={onToggleRepeat}
               onPrev={onPrev}
               onTogglePlay={onTogglePlay}
               onNext={onNext}
-              activeSubPanel={activeSubPanel}
-              onSwitchSubPanel={onSwitchSubPanel}
+              activeSubPanel={playbackSource === 'native' ? activeNativeTab : activeSubPanel}
+              onSwitchSubPanel={(panel) => {
+                if (panel === 'none') {
+                  onSwitchSubPanel('none');
+                  return;
+                }
+                if (panel === 'lyrics') {
+                  if (activeNativeTab === 'lyrics') {
+                    onSwitchSubPanel('none');
+                  } else {
+                    handleNativeTabSelect('lyrics');
+                  }
+                  return;
+                }
+                if (playbackSource === 'native' && (panel === 'queue' || panel === 'search')) {
+                  handleNativeTabSelect(panel as NativeTab);
+                  return;
+                }
+                onSwitchSubPanel(panel);
+              }}
             />
           </div>
 
-          {/* Right Column: Dynamic Feature Panel with Paging & Close X */}
-          <div className="flex flex-col justify-between flex-1 min-w-0 h-[147px]">
-            {/* Header Bar: Title + Paging Chevron Navigation + Indicator Dots + Close X Button */}
-            <div className="flex items-center justify-between shrink-0 border-b border-white/[0.04] pb-1 mb-1 gap-2">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span
-                  className="text-[10px] tracking-[0.2em] font-semibold text-sky-300/80 uppercase truncate font-urbanist"
-                  style={{ fontFamily: "'Urbanist', sans-serif" }}
-                >
-                  {activeSubPanel === 'lyrics' && 'SYNCED LYRICS'}
-                  {activeSubPanel === 'playlist' &&
-                    (selectedPlaylist ? selectedPlaylist.name.toUpperCase() : 'SPOTIFY LIBRARY')}
-                  {activeSubPanel === 'queue' && queueContextTitle.toUpperCase()}
-                  {activeSubPanel === 'search' && 'QUICK SEARCH'}
-                </span>
+          {/* Right Column: Dynamic Feature Panel with Segmented Pill Nav */}
+          <div className="flex flex-col justify-between flex-1 min-w-0 min-h-0 h-full overflow-visible relative">
+            {/* Header Bar: Segmented Pill Nav [Lirik | Antrean | Cari | Library] + Source Switcher */}
+            <div className="flex items-center justify-between shrink-0 border-b border-[#222226] pb-1 mb-1 gap-1.5 w-full min-w-0 px-1">
+              {/* Segmented Pill Navigation Tabs */}
+              <div className="flex items-center gap-1 min-w-0">
+                {(playbackSource === 'native'
+                  ? [
+                      { id: 'lyrics' as const, label: 'Lirik' },
+                      { id: 'queue' as const, label: 'Antrean' },
+                      { id: 'search' as const, label: 'Cari Musik' },
+                    ]
+                  : [
+                      { id: 'lyrics' as const, label: 'Lirik' },
+                      { id: 'queue' as const, label: 'Antrean' },
+                      { id: 'search' as const, label: 'Cari' },
+                      { id: 'playlist' as const, label: 'Library' },
+                    ]
+                ).map((tab) => {
+                  const isActive =
+                    playbackSource === 'native'
+                      ? activeNativeTab === tab.id
+                      : activeSubPanel === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => {
+                        if (playbackSource === 'native') {
+                          handleNativeTabSelect(tab.id as NativeTab);
+                        } else {
+                          playChimeCue('tap');
+                          onSwitchSubPanel(tab.id);
+                        }
+                      }}
+                      className={`font-sans text-[10.5px] font-medium tracking-tight transition-all cursor-pointer ${
+                        isActive
+                          ? isSpotifySession
+                            ? 'bg-emerald-950/40 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-lg shadow-sm'
+                            : 'bg-cyan-950/40 text-cyan-300 border border-cyan-500/30 px-2.5 py-0.5 rounded-lg shadow-sm'
+                          : 'text-zinc-400 hover:text-zinc-200 px-2.5 py-0.5 border border-transparent transition-colors'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
 
+                {/* Loading indicator */}
                 {isWakingSpotify ? (
-                  <span
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-sky-400/15 border border-sky-400/30 text-sky-300 text-[8.5px] font-urbanist font-medium shrink-0 animate-pulse"
-                    style={{ fontFamily: "'Urbanist', sans-serif" }}
-                  >
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-[8.5px] font-sans font-medium shrink-0 animate-pulse ml-1">
                     <Loader2 className="w-2 h-2 animate-spin" />
-                    <span>Connecting Spotify...</span>
+                    <span>CONNECTING...</span>
                   </span>
                 ) : (
                   ((activeSubPanel === 'playlist' &&
                     (isLoadingPlaylists || isLoadingPlaylistTracks)) ||
                     (activeSubPanel === 'queue' && isLoadingQueue) ||
                     (activeSubPanel === 'search' && isSearching)) && (
-                    <Loader2 className="w-2.5 h-2.5 text-white/50 animate-spin shrink-0" />
+                    <Loader2 className={`w-2.5 h-2.5 ${playbackSource === 'native' ? 'text-cyan-400' : 'text-emerald-400/80'} animate-spin shrink-0 ml-1`} />
                   )
                 )}
               </div>
@@ -404,23 +466,34 @@ export const SplitPlayerView: React.FC<SplitPlayerViewProps> = memo(({
               {/* Right side: Source Switcher, Search & Paging Controls */}
               <PlayerHeaderBar
                 playbackSource={playbackSource}
-                activeSubPanel={activeSubPanel}
+                activeSubPanel={playbackSource === 'native' ? activeNativeTab : activeSubPanel}
                 queueLength={queueLength}
                 isCompact={true}
                 isSpotifySession={isSpotifySession}
                 isQueueOpen={isQueueOpen}
                 isRefreshingLyrics={isRefreshingLyrics}
                 isRefreshingSession={isRefreshingSession}
-                showRefreshLyrics={activeSubPanel === 'lyrics'}
-                showPagingControls={true}
+                showRefreshLyrics={
+                  playbackSource === 'native'
+                    ? activeNativeTab === 'lyrics'
+                    : activeSubPanel === 'lyrics'
+                }
+                showPagingControls={false}
                 onSelectSource={onSelectSource}
                 onToggleSearch={onToggleSearch}
                 onToggleQueue={onToggleQueue}
+                onOpenLocalFile={onOpenLocalFile}
                 onRefreshLyrics={onRefreshLyrics}
                 onRefreshSession={onRefreshSession}
                 onPrevPanel={onPrevPanel}
                 onNextPanel={onNextPanel}
-                onSelectPanel={(p) => onSwitchSubPanel(p as any)}
+                onSelectPanel={(p) => {
+                  if (playbackSource === 'native' && (p === 'lyrics' || p === 'queue' || p === 'search')) {
+                    handleNativeTabSelect(p as NativeTab);
+                  } else {
+                    onSwitchSubPanel(p as any);
+                  }
+                }}
                 onClosePanel={() => onSwitchSubPanel(activeSubPanel)}
               />
             </div>
@@ -428,22 +501,64 @@ export const SplitPlayerView: React.FC<SplitPlayerViewProps> = memo(({
             {/* Body Area: Scrollable Content Containers with Wheel Scroll Protection */}
             <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
               {/* 1. Synced or Plain Lyrics */}
-              {activeSubPanel === 'lyrics' && (
+              {((playbackSource === 'native' && activeNativeTab === 'lyrics') ||
+                (playbackSource !== 'native' && activeSubPanel === 'lyrics')) && (
                 <LyricsPanel
                   lines={displayLines}
                   activeLyricIndex={activeLyricIndex}
-                  onSeekLine={(targetMs) => onLyricLineSeek(targetMs / 1000)}
+                  onSeekLine={(targetSeconds) => onLyricLineSeek(targetSeconds)}
+                  duration={durationSeconds}
                   isSynced={isSyncedLyrics}
+                  isLoading={isLoadingLyrics || isRefreshingLyrics}
                   containerRef={lyricsContainerRef}
                   onRefreshLyrics={onRefreshLyrics}
                   isRefreshingLyrics={isRefreshingLyrics}
                   isMidSongInstrumental={isMidSongInstrumental}
                   audioAdjustedTime={audioAdjustedTime}
+                  isSpotifyActive={isSpotifySession}
+                  emptyTitle={
+                    playbackSource === 'native' && !isEffectivePlaying && displayLines.length === 0
+                      ? 'Lirik Musik'
+                      : undefined
+                  }
+                  emptySubtitle={
+                    playbackSource === 'native' && !isEffectivePlaying && displayLines.length === 0
+                      ? 'Pilih lagu dari antrean untuk mulai memutar lirik'
+                      : undefined
+                  }
                 />
               )}
 
-              {/* 2. Spotify Ecosystem Panels (Playlists, Queue, Quick Search) */}
-              {activeSubPanel !== 'lyrics' && (
+              {/* 2. CASA Native Panels (Zero Spotify Leakage) */}
+              {playbackSource === 'native' && activeNativeTab === 'queue' && (
+                <NativeQueuePanel
+                  currentTrack={nativeTrack}
+                  queue={nativeQueue || []}
+                  currentIndex={nativeQueueIndex ?? -1}
+                  isPlaying={isEffectivePlaying}
+                  onSelectTrack={(idx) => onSelectNativeTrack?.(idx)}
+                  onRemoveTrack={onRemoveNativeTrack}
+                  onClearQueue={onClearNativeQueue}
+                  onOpenSearch={() => handleNativeTabSelect('search')}
+                  onOpenLocalFile={onOpenLocalFile}
+                  onPlayTrackDirect={(track) => onPlayNativeSearchTrack?.(track, [track])}
+                />
+              )}
+
+              {playbackSource === 'native' && activeNativeTab === 'search' && (
+                <NativeSearchPanel
+                  onPlayTrack={(track, list) => onPlayNativeSearchTrack?.(track, list)}
+                  onAddToQueue={(e, track) => onAddToNativeQueue?.(e, track)}
+                  currentTrackId={nativeTrack?.id}
+                  addedTrackId={addedNativeTrackId}
+                  isResolvingAudio={isResolvingAudio}
+                  onOpenLocalFile={onOpenLocalFile}
+                  onFilesDropped={onFilesDropped}
+                />
+              )}
+
+              {/* 3. Spotify Ecosystem Panels (Playlists, Queue, Quick Search) - Strictly Companion Mode */}
+              {playbackSource !== 'native' && activeSubPanel !== 'lyrics' && (
                 <SpotifyPanels
                   activeSubPanel={activeSubPanel}
                   isUserConnected={isUserConnected}
@@ -459,6 +574,7 @@ export const SplitPlayerView: React.FC<SplitPlayerViewProps> = memo(({
                   onConnectSpotify={onConnectSpotify}
                   queueTracks={queueTracks}
                   isLoadingQueue={isLoadingQueue}
+                  queueContextTitle={queueContextTitle}
                   onPlayQueueTrack={onPlayQueueTrack}
                   searchQuery={searchQuery}
                   onSearchQueryChange={onSearchQueryChange}
