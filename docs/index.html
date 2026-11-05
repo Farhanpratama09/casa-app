@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="id" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CASA — Cyber Moon Rabbit Desktop Music Companion</title>
+  <meta name="description" content="Dynamic Island & Cyber Moon Rabbit media companion untuk Windows dengan integrasi Spotify SMTC, YouTube audio fallback, dan lirik sinkron otomatis.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M 7.5,9.5 C 5.0,2.0 8.5,1.0 10.0,6.5 M 16.5,9.5 C 19.0,2.0 15.5,1.0 14.0,6.5' fill='none' stroke='%2322d3ee' stroke-width='2' stroke-linecap='round'/><circle cx='8.5' cy='14.5' r='2' fill='%2322d3ee'/><circle cx='15.5' cy='14.5' r='2' fill='%2322d3ee'/></svg>">
+
+  <!-- Tailwind CSS & Lucide Icons -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cyber: {
+              base: '#080c14',
+              surface: '#0e1626',
+              border: '#1e293b',
+              neon: '#22d3ee',
+              glow: 'rgba(34, 211, 238, 0.15)'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #080c14; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .neon-border { box-shadow: 0 0 20px -3px rgba(34, 211, 238, 0.25); }
+  </style>
+</head>
+<body class="text-slate-200 antialiased selection:bg-cyan-500/20 selection:text-cyan-300">
+
+  <!-- Ambient Glow -->
+  <div class="fixed top-0 left-1/2 -translate-x-1/2 w-[800px] h-[350px] bg-gradient-to-b from-cyan-500/10 via-sky-500/5 to-transparent blur-3xl pointer-events-none -z-10"></div>
+
+  <!-- Navbar -->
+  <header class="border-b border-slate-800/80 bg-cyber-base/80 backdrop-blur-md sticky top-0 z-50">
+    <div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <!-- Logo Kelinci SVG Asli -->
+        <svg viewBox="0 0 24 24" class="w-6 h-6 shrink-0 drop-shadow-[0_0_8px_rgba(34,211,238,0.8)]">
+          <path d="M 7.5,9.5 C 5.0,2.0 8.5,1.0 10.0,6.5" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round"/>
+          <path d="M 16.5,9.5 C 19.0,2.0 15.5,1.0 14.0,6.5" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round"/>
+          <path d="M 9.5,11.5 C 5.5,11.5 5.5,17.5 9.5,17.5 C 7.2,16.0 7.2,13.0 9.5,11.5 Z" fill="#22d3ee"/>
+          <path d="M 14.5,11.5 C 18.5,11.5 18.5,17.5 14.5,17.5 C 16.8,16.0 16.8,13.0 14.5,11.5 Z" fill="#22d3ee"/>
+        </svg>
+        <span class="font-bold text-lg tracking-wider text-white">CASA</span>
+        <span class="text-[11px] font-mono px-2 py-0.5 rounded-full bg-cyan-950/60 text-cyan-400 border border-cyan-800/50">v1.0.0</span>
+      </div>
+
+      <nav class="flex items-center gap-6 text-sm font-medium">
+        <a href="#features" class="text-slate-400 hover:text-cyan-400 transition-colors">Fitur</a>
+        <a href="#modes" class="text-slate-400 hover:text-cyan-400 transition-colors">Mode</a>
+        <a href="#checksum" class="text-slate-400 hover:text-cyan-400 transition-colors">Keamanan</a>
+        <a href="https://github.com/Farhanpratama09/casa-app" target="_blank" class="text-slate-400 hover:text-white transition-colors flex items-center gap-1.5">
+          <i data-lucide="github" class="w-4 h-4"></i>
+          <span>GitHub</span>
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <main class="max-w-4xl mx-auto px-6 pt-20 pb-24 text-center">
+    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900 border border-slate-700/60 text-xs text-slate-300 mb-8 font-mono">
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+      Rilis Stabil Windows 64-bit Resmi Mengudara
+    </div>
+
+    <h1 class="text-4xl sm:text-6xl font-bold tracking-tight text-white mb-6 leading-tight">
+      Musik Desktop dengan Jiwa <br/>
+      <span class="bg-gradient-to-r from-cyan-400 via-sky-300 to-teal-400 bg-clip-text text-transparent">Cyber Moon Rabbit.</span>
+    </h1>
+
+    <p class="text-base sm:text-lg text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed">
+      Dynamic Island modern untuk Windows. Sinkronisasi Spotify SMTC instan, pemutaran audio YouTube bebas hambatan, serta lirik berjalan real-time dalam kemasan super ringan 3.84 MB.
+    </p>
+
+    <!-- Download Box CTA -->
+    <div class="flex flex-col sm:flex-row items-center justify-center gap-4 mb-6">
+      <a href="https://github.com/Farhanpratama09/casa-app/releases/download/v1.0.0/CASA_1.0.0_x64-setup.exe"
+         class="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold flex items-center justify-center gap-2.5 transition-all shadow-lg shadow-cyan-500/25 active:scale-95">
+        <i data-lucide="download" class="w-5 h-5"></i>
+        <span>Unduh CASA untuk Windows</span>
+      </a>
+      <a href="https://github.com/Farhanpratama09/casa-app" target="_blank"
+         class="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-slate-200 font-medium flex items-center justify-center gap-2 transition-all">
+        <i data-lucide="code-2" class="w-4 h-4 text-slate-400"></i>
+        <span>Source Code</span>
+      </a>
+    </div>
+
+    <p class="text-xs text-slate-500 font-mono">
+      Versi 1.0.0 &bull; Ukuran 3.84 MiB &bull; Mendukung Windows 10 & 11 (64-bit)
+    </p>
+
+    <!-- Visual Interactive Island Mockup -->
+    <div class="mt-16 p-4 sm:p-8 rounded-2xl bg-cyber-surface/60 border border-slate-800/80 neon-border">
+      <div class="flex items-center justify-between pb-4 border-b border-slate-800/60 mb-6 text-xs text-slate-400 font-mono">
+        <span class="flex items-center gap-1.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-slate-700 inline-block"></span>
+          Simulasi Dynamic Island Desktop
+        </span>
+        <span>Native Tauri 2.0 + Rust</span>
+      </div>
+
+      <!-- Preview Dynamic Island -->
+      <div class="py-6 flex flex-col items-center justify-center gap-6">
+        <!-- Active Playing Island -->
+        <div class="w-full max-w-md h-10 px-4 rounded-full bg-black/90 border border-slate-800 flex items-center justify-between shadow-2xl">
+          <div class="flex items-center gap-2.5">
+            <!-- Bunny with Headphones -->
+            <svg viewBox="0 0 24 24" class="w-5 h-5 drop-shadow-[0_0_6px_rgba(34,211,238,0.9)]">
+              <path d="M 5,12 C 5,6 19,6 19,12" fill="none" stroke="#22d3ee" stroke-width="1.8"/>
+              <rect x="3" y="10" width="3" height="6" rx="1.5" fill="#22d3ee"/>
+              <rect x="18" y="10" width="3" height="6" rx="1.5" fill="#22d3ee"/>
+              <path d="M 8.5,14 Q 10,12.5 11.5,14 M 12.5,14 Q 14,12.5 15.5,14" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <span class="text-slate-600 text-xs">|</span>
+            <span class="text-xs font-medium text-white truncate max-w-[140px]">XXL &bull; LANY</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <div class="flex items-end gap-0.5 h-3">
+              <span class="w-0.5 h-2 bg-cyan-400 rounded-full animate-bounce"></span>
+              <span class="w-0.5 h-3 bg-cyan-400 rounded-full animate-bounce" style="animation-delay: 0.15s"></span>
+              <span class="w-0.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style="animation-delay: 0.3s"></span>
+            </div>
+            <div class="w-4 h-4 rounded-full border-2 border-emerald-400 border-t-transparent flex items-center justify-center">
+              <i data-lucide="zap" class="w-2.5 h-2.5 text-emerald-400"></i>
+            </div>
+            <span class="text-[11px] font-mono text-slate-300">77%</span>
+          </div>
+        </div>
+
+        <p class="text-xs text-slate-400">Kapsul melayang di sudut layar, responsif, dan bebas distorsi.</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Showcase 3 Mode -->
+  <section id="modes" class="border-t border-slate-800/80 py-20 bg-cyber-surface/30">
+    <div class="max-w-5xl mx-auto px-6">
+      <div class="text-center max-w-xl mx-auto mb-16">
+        <h2 class="text-2xl sm:text-3xl font-bold text-white mb-3">Tiga Mode Visual Cerdas</h2>
+        <p class="text-slate-400 text-sm">CASA beradaptasi secara dinamis dengan aktivitas musik dan kondisi desktop kamu.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Mode 1 -->
+        <div class="p-6 rounded-xl bg-cyber-surface border border-slate-800/80 flex flex-col justify-between">
+          <div>
+            <div class="h-14 flex items-center justify-center bg-black/40 rounded-lg border border-slate-800/60 mb-5">
+              <!-- Resting Visor -->
+              <div class="flex items-center gap-2">
+                <div class="px-2 py-0.5 rounded border border-cyan-500/40 text-cyan-400 text-xs font-mono">C ×</div>
+                <div class="px-2 py-0.5 rounded border border-cyan-500/40 text-cyan-400 text-xs font-mono">♥ Ɔ</div>
+              </div>
+            </div>
+            <h3 class="text-lg font-semibold text-white mb-2">1. Resting Mode</h3>
+            <p class="text-slate-400 text-xs leading-relaxed">
+              Saat hening, kacamata visor futuristik terpusat dengan bulan sabit montok dan retikel holografik yang tenang di layar.
+            </p>
+          </div>
+          <span class="text-[11px] font-mono text-cyan-400/80 mt-4 block">&bull; Visor Panoramik 44×26</span>
+        </div>
+
+        <!-- Mode 2 -->
+        <div class="p-6 rounded-xl bg-cyber-surface border border-cyan-900/40 neon-border flex flex-col justify-between">
+          <div>
+            <div class="h-14 flex items-center justify-center bg-black/40 rounded-lg border border-slate-800/60 mb-5">
+              <i data-lucide="headphones" class="w-6 h-6 text-cyan-400 animate-pulse"></i>
+            </div>
+            <h3 class="text-lg font-semibold text-white mb-2">2. Song Bobbing Mode</h3>
+            <p class="text-slate-400 text-xs leading-relaxed">
+              Ketika lagu berputar, maskot memasang cyber headphone dan mengangguk berirama mengikuti ketukan lagu.
+            </p>
+          </div>
+          <span class="text-[11px] font-mono text-cyan-400 mt-4 block">&bull; Rhythmic Head-Bobbing</span>
+        </div>
+
+        <!-- Mode 3 -->
+        <div class="p-6 rounded-xl bg-cyber-surface border border-slate-800/80 flex flex-col justify-between">
+          <div>
+            <div class="h-14 flex items-center justify-center bg-black/40 rounded-lg border border-slate-800/60 mb-5">
+              <div class="flex items-center gap-2 text-xs text-slate-300 font-mono">
+                <span class="text-cyan-400">&bull;﹏&bull;</span>
+                <span>|</span>
+                <span>19:25 &bull; 77%</span>
+              </div>
+            </div>
+            <h3 class="text-lg font-semibold text-white mb-2">3. Compact Status Bar</h3>
+            <p class="text-slate-400 text-xs leading-relaxed">
+              Saat siaga tanpa musik, pulau menciut menjadi status bar ringkas yang memuat jam, tanggal, dan baterai tanpa ruang kosong.
+            </p>
+          </div>
+          <span class="text-[11px] font-mono text-cyan-400/80 mt-4 block">&bull; Kapsul Ringkas 240px</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Fitur Utama -->
+  <section id="features" class="py-20 border-t border-slate-800/80">
+    <div class="max-w-5xl mx-auto px-6">
+      <div class="text-center max-w-xl mx-auto mb-16">
+        <h2 class="text-2xl sm:text-3xl font-bold text-white mb-3">Arsitektur Cepat & Hemat Daya</h2>
+        <p class="text-slate-400 text-sm">Dibangun di atas fondasi Tauri 2.0 dan Rust, tanpa bloatware Electron yang rakus memori.</p>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <div class="p-6 rounded-xl bg-slate-900/40 border border-slate-800/80">
+          <div class="w-9 h-9 rounded-lg bg-cyan-950/80 border border-cyan-800/50 flex items-center justify-center text-cyan-400 mb-4">
+            <i data-lucide="radio" class="w-5 h-5"></i>
+          </div>
+          <h3 class="text-base font-semibold text-white mb-2">Spotify SMTC Real-Time</h3>
+          <p class="text-slate-400 text-xs leading-relaxed">Membaca sesi pemutaran Windows secara native tanpa perlu token berulang. Kontrol play, pause, dan ganti lagu langsung dari kapsul.</p>
+        </div>
+
+        <div class="p-6 rounded-xl bg-slate-900/40 border border-slate-800/80">
+          <div class="w-9 h-9 rounded-lg bg-cyan-950/80 border border-cyan-800/50 flex items-center justify-center text-cyan-400 mb-4">
+            <i data-lucide="file-text" class="w-5 h-5"></i>
+          </div>
+          <h3 class="text-base font-semibold text-white mb-2">Sinkronisasi Lirik LRCLIB</h3>
+          <p class="text-slate-400 text-xs leading-relaxed">Menampilkan lirik berjalan otomatis baris demi baris, bersih dari script berbahaya dan ter-render mulus di layar.</p>
+        </div>
+
+        <div class="p-6 rounded-xl bg-slate-900/40 border border-slate-800/80">
+          <div class="w-9 h-9 rounded-lg bg-cyan-950/80 border border-cyan-800/50 flex items-center justify-center text-cyan-400 mb-4">
+            <i data-lucide="cpu" class="w-5 h-5"></i>
+          </div>
+          <h3 class="text-base font-semibold text-white mb-2">Ringan: Hanya 3.84 MB</h3>
+          <p class="text-slate-400 text-xs leading-relaxed">Ukuran unduhan installer hanya 3.84 MB dengan konsumsi RAM di bawah 50 MB, aman dijalankan bersamaan dengan game berat.</p>
+        </div>
+
+        <div class="p-6 rounded-xl bg-slate-900/40 border border-slate-800/80">
+          <div class="w-9 h-9 rounded-lg bg-cyan-950/80 border border-cyan-800/50 flex items-center justify-center text-cyan-400 mb-4">
+            <i data-lucide="shield-check" class="w-5 h-5"></i>
+          </div>
+          <h3 class="text-base font-semibold text-white mb-2">Keamanan Teruji (68/69 Bersih)</h3>
+          <p class="text-slate-400 text-xs leading-relaxed">Kebijakan CSP ketat, zero telemetry mencurigakan, dan 68 dari 69 vendor keamanan VirusTotal memvalidasi biner bersih.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Keamanan & Checksum Section -->
+  <section id="checksum" class="py-20 border-t border-slate-800/80 bg-cyber-surface/40">
+    <div class="max-w-3xl mx-auto px-6">
+      <div class="text-center mb-10">
+        <h2 class="text-2xl font-bold text-white mb-2">Transparansi & Verifikasi Berkas</h2>
+        <p class="text-slate-400 text-xs">CASA adalah aplikasi open-source independen. Pastikan integritas berkas unduhan kamu melalui nilai hash berikut.</p>
+      </div>
+
+      <!-- Hash Card -->
+      <div class="p-5 rounded-xl bg-slate-950 border border-slate-800">
+        <div class="flex items-center justify-between mb-3 text-xs text-slate-400 font-mono">
+          <span>SHA-256 (CASA_1.0.0_x64-setup.exe)</span>
+          <button id="copy-btn" onclick="copyHash()" class="flex items-center gap-1.5 text-cyan-400 hover:text-cyan-300 transition-colors">
+            <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+            <span id="copy-text">Salin Hash</span>
+          </button>
+        </div>
+        <p id="hash-val" class="font-mono text-xs sm:text-sm text-slate-300 break-all select-all bg-slate-900/80 p-3 rounded border border-slate-800">
+          46825A6646B7CE52CD19849C2E6FC18887D0C1566946CE43C7473C528D41D2D9
+        </p>
+      </div>
+
+      <!-- SmartScreen Guide Note -->
+      <div class="mt-6 p-4 rounded-xl bg-cyan-950/20 border border-cyan-800/40 text-xs text-slate-300 flex items-start gap-3">
+        <i data-lucide="info" class="w-4 h-4 text-cyan-400 shrink-0 mt-0.5"></i>
+        <div>
+          <strong class="text-white block mb-0.5">Muncul jendela biru Windows SmartScreen?</strong>
+          Karena CASA belum menggunakan sertifikat berbayar korporat Microsoft, cukup klik <span class="text-cyan-300 font-medium">"More Info"</span> lalu pilih <span class="text-cyan-300 font-medium">"Run anyway"</span>. Seluruh kode sumber terbuka untuk diaudit di GitHub.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-800/80 py-10 bg-cyber-base">
+    <div class="max-w-5xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+      <p>&copy; 2026 Farhan Pratama. Dilindungi hak cipta.</p>
+      <div class="flex items-center gap-6">
+        <a href="https://github.com/Farhanpratama09/casa-app" target="_blank" class="hover:text-cyan-400 transition-colors">GitHub Repository</a>
+        <a href="https://github.com/Farhanpratama09/casa-app/releases" target="_blank" class="hover:text-cyan-400 transition-colors">Release Notes</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    lucide.createIcons();
+
+    function copyHash() {
+      const hash = document.getElementById('hash-val').innerText.trim();
+      navigator.clipboard.writeText(hash).then(() => {
+        const text = document.getElementById('copy-text');
+        text.innerText = 'Tersalin!';
+        setTimeout(() => { text.innerText = 'Salin Hash'; }, 2000);
+      });
+    }
+  </script>
+</body>
+</html>
