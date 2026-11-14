@@ -1,309 +1,698 @@
 <!DOCTYPE html>
-<html lang="id" class="scroll-smooth">
+<html lang="id" data-theme="default">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CASA — Cyber Moon Rabbit Desktop Music Companion</title>
-  <meta name="description" content="Dynamic Island & Cyber Moon Rabbit media companion untuk Windows dengan integrasi Spotify SMTC, YouTube audio fallback, dan lirik sinkron otomatis.">
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M 7.5,9.5 C 5.0,2.0 8.5,1.0 10.0,6.5 M 16.5,9.5 C 19.0,2.0 15.5,1.0 14.0,6.5' fill='none' stroke='%2322d3ee' stroke-width='2' stroke-linecap='round'/><circle cx='8.5' cy='14.5' r='2' fill='%2322d3ee'/><circle cx='15.5' cy='14.5' r='2' fill='%2322d3ee'/></svg>">
-
-  <!-- Tailwind CSS & Lucide Icons -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            cyber: {
-              base: '#080c14',
-              surface: '#0e1626',
-              border: '#1e293b',
-              neon: '#22d3ee',
-              glow: 'rgba(34, 211, 238, 0.15)'
-            }
-          }
-        }
-      }
-    }
-  </script>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-    body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #080c14; }
-    .font-mono { font-family: 'JetBrains Mono', monospace; }
-    .neon-border { box-shadow: 0 0 20px -3px rgba(34, 211, 238, 0.25); }
-  </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://avatars.githubusercontent.com; connect-src 'self' https://api.github.com https://api.web3forms.com https://formspree.io; base-uri 'self'; object-src 'none'; form-action 'self' https://github.com https://api.web3forms.com https://formspree.io;"
+  />
+  <meta name="theme-color" content="#000000" />
+  <meta
+    name="description"
+    content="CASA v2.0.0 — Pure OLED Windows 11 Dynamic Notch Companion. Ringan 4.43 MB berbasis Tauri 2 & Rust dengan kontrol musik Spotify SMTC, lirik LRCLIB, Focus Pomodoro, Bluetooth battery telemetry, dan 4px smart-tuck."
+  />
+  <title>CASA v2.0.0 — Pure OLED Dynamic Notch for Windows</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="./styles.css" />
 </head>
-<body class="text-slate-200 antialiased selection:bg-cyan-500/20 selection:text-cyan-300">
+<body>
+  <!-- ======================================================================
+       LIVE PINNED TOP-LIP CASA NOTCH SIMULATOR
+       ====================================================================== -->
+  <div
+    id="live-notch-mount"
+    class="live-notch-mount"
+    data-placement="docked"
+    data-tucked="false"
+    aria-label="Simulasi Interaktif CASA Notch"
+  >
+    <div
+      id="casa-notch-shell"
+      class="casa-notch-shell"
+      data-state="idle"
+      role="region"
+      aria-label="Kapsul CASA Interaktif"
+    >
+      <!-- Idle / HUD / Alarm Pill Row -->
+      <div class="notch-idle-row" id="notch-idle-row">
+        <div class="notch-left-cluster">
+          <svg
+            id="notch-eyes-svg"
+            class="notch-eyes-svg"
+            viewBox="0 0 34 16"
+            aria-hidden="true"
+          ></svg>
+          <span class="notch-divider" aria-hidden="true"></span>
+          <span id="notch-primary-text" class="notch-title">19:13</span>
+          <span id="notch-secondary-text" class="notch-sub">Sab, 14 Nov</span>
+        </div>
 
-  <!-- Ambient Glow -->
-  <div class="fixed top-0 left-1/2 -translate-x-1/2 w-[800px] h-[350px] bg-gradient-to-b from-cyan-500/10 via-sky-500/5 to-transparent blur-3xl pointer-events-none -z-10"></div>
-
-  <!-- Navbar -->
-  <header class="border-b border-slate-800/80 bg-cyber-base/80 backdrop-blur-md sticky top-0 z-50">
-    <div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <!-- Logo Kelinci SVG Asli -->
-        <svg viewBox="0 0 24 24" class="w-6 h-6 shrink-0 drop-shadow-[0_0_8px_rgba(34,211,238,0.8)]">
-          <path d="M 7.5,9.5 C 5.0,2.0 8.5,1.0 10.0,6.5" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round"/>
-          <path d="M 16.5,9.5 C 19.0,2.0 15.5,1.0 14.0,6.5" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round"/>
-          <path d="M 9.5,11.5 C 5.5,11.5 5.5,17.5 9.5,17.5 C 7.2,16.0 7.2,13.0 9.5,11.5 Z" fill="#22d3ee"/>
-          <path d="M 14.5,11.5 C 18.5,11.5 18.5,17.5 14.5,17.5 C 16.8,16.0 16.8,13.0 14.5,11.5 Z" fill="#22d3ee"/>
-        </svg>
-        <span class="font-bold text-lg tracking-wider text-white">CASA</span>
-        <span class="text-[11px] font-mono px-2 py-0.5 rounded-full bg-cyan-950/60 text-cyan-400 border border-cyan-800/50">v1.0.0</span>
+        <div class="notch-right-cluster" id="notch-right-cluster">
+          <span id="notch-hud-chip" class="notch-hud-chip" hidden></span>
+          <div id="notch-alarm-actions" class="notch-alarm-actions" hidden>
+            <button type="button" id="notch-snooze-btn" class="notch-alarm-btn">+5m</button>
+            <button type="button" id="notch-dismiss-btn" class="notch-alarm-btn primary">Dismiss</button>
+          </div>
+          <span id="notch-battery-label" class="notch-battery-text tabular">88%</span>
+        </div>
       </div>
 
-      <nav class="flex items-center gap-6 text-sm font-medium">
-        <a href="#features" class="text-slate-400 hover:text-cyan-400 transition-colors">Fitur</a>
-        <a href="#modes" class="text-slate-400 hover:text-cyan-400 transition-colors">Mode</a>
-        <a href="#checksum" class="text-slate-400 hover:text-cyan-400 transition-colors">Keamanan</a>
-        <a href="https://github.com/Farhanpratama09/casa-app" target="_blank" class="text-slate-400 hover:text-white transition-colors flex items-center gap-1.5">
-          <i data-lucide="github" class="w-4 h-4"></i>
-          <span>GitHub</span>
-        </a>
+      <!-- Expanded Mode 6 Panel (500 x 186 proportions) -->
+      <div class="notch-expanded-panel" id="notch-expanded-panel">
+        <div class="notch-exp-topnav">
+          <div class="notch-exp-tabs" role="tablist" aria-label="Mode kapsul">
+            <button type="button" class="notch-tab-btn" role="tab" data-notch-tab="control" aria-selected="true">Control</button>
+            <button type="button" class="notch-tab-btn" role="tab" data-notch-tab="music" aria-selected="false">Music</button>
+          </div>
+          <div class="notch-exp-tabs">
+            <span class="notch-battery-text tabular" id="notch-exp-clock">19:13 · Alt+Space</span>
+            <button type="button" id="notch-collapse-btn" class="notch-close-btn">Tutup</button>
+          </div>
+        </div>
+
+        <div class="notch-exp-body" id="notch-exp-body-control">
+          <div class="notch-exp-col">
+            <span class="notch-exp-label">Focus Pomodoro</span>
+            <div class="notch-timer-readout">
+              <span class="notch-timer-digits tabular" id="notch-timer-display">25:00</span>
+              <span class="notch-sub" id="notch-timer-status">Ready</span>
+            </div>
+            <div class="notch-mini-actions">
+              <button type="button" id="notch-focus-toggle" class="notch-mini-btn">Start Focus</button>
+              <button type="button" id="notch-awake-toggle" class="notch-mini-btn" aria-pressed="false">Keep Awake</button>
+            </div>
+          </div>
+
+          <span class="notch-exp-divider" aria-hidden="true"></span>
+
+          <div class="notch-exp-col">
+            <span class="notch-exp-label">Hardware &amp; Chime</span>
+            <div class="notch-music-card">
+              <div class="notch-album-tile" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 18V5l12-2v13" />
+                  <circle cx="6" cy="18" r="3" />
+                  <circle cx="18" cy="16" r="3" />
+                </svg>
+              </div>
+              <div class="notch-track-meta">
+                <div class="notch-track-name" id="notch-exp-track">Moonlit Workspace</div>
+                <div class="notch-track-artist" id="notch-exp-artist">CASA Obsidian Mix</div>
+              </div>
+            </div>
+            <div class="notch-mini-actions">
+              <button type="button" id="notch-music-toggle" class="notch-mini-btn" aria-pressed="false">Play Track</button>
+              <button type="button" id="notch-chime-mini" class="notch-mini-btn">Test Chime</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="notch-exp-body" id="notch-exp-body-music" hidden>
+          <div class="notch-exp-col">
+            <span class="notch-exp-label">Now Playing · LRCLIB</span>
+            <div class="notch-music-card">
+              <div class="notch-album-tile" aria-hidden="true">♪</div>
+              <div class="notch-track-meta">
+                <div class="notch-track-name" id="notch-music-title">Midnight Coding</div>
+                <div class="notch-track-artist" id="notch-music-artist">Lo-Fi Bunny · Spotify SMTC</div>
+                <div class="notch-lyric-line" id="notch-music-lyric">Pure OLED black, zero distractions.</div>
+              </div>
+            </div>
+            <div class="notch-mini-actions">
+              <button type="button" id="notch-prev-track" class="notch-mini-btn">Prev</button>
+              <button type="button" id="notch-play-pause-btn" class="notch-mini-btn">Play / Pause</button>
+              <button type="button" id="notch-next-track" class="notch-mini-btn">Next</button>
+            </div>
+          </div>
+
+          <span class="notch-exp-divider" aria-hidden="true"></span>
+
+          <div class="notch-exp-col">
+            <span class="notch-exp-label">Output &amp; Bluetooth</span>
+            <div class="notch-track-name" id="notch-output-label">Speakers (Realtek Audio)</div>
+            <div class="notch-track-artist" id="notch-bt-label">BT Earphone • 85% Connected</div>
+            <div class="notch-mini-actions">
+              <button type="button" id="notch-hud-bt-mini" class="notch-mini-btn">Sim BT HUD</button>
+              <button type="button" id="notch-hud-out-mini" class="notch-mini-btn">Switch Output</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       HEADER NAV
+       ====================================================================== -->
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="#top" class="brand-link">
+        <img src="./favicon.svg" alt="" class="brand-logo" width="24" height="24" />
+        <span>CASA</span>
+        <span class="brand-version">v2.0.0</span>
+      </a>
+
+      <nav class="header-nav" aria-label="Navigasi Utama">
+        <a href="#simulator">Simulator</a>
+        <a href="#architecture">Arsitektur</a>
+        <a href="#download">Unduh</a>
+        <a href="#feedback">Feedback</a>
       </nav>
+
+      <a
+        href="https://github.com/Farhanpratama09/casa-app"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="header-cta"
+      >
+        <span>GitHub</span>
+        <span aria-hidden="true">↗</span>
+      </a>
     </div>
   </header>
 
-  <!-- Hero Section -->
-  <main class="max-w-4xl mx-auto px-6 pt-20 pb-24 text-center">
-    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900 border border-slate-700/60 text-xs text-slate-300 mb-8 font-mono">
-      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-      Rilis Stabil Windows 64-bit Resmi Mengudara
-    </div>
-
-    <h1 class="text-4xl sm:text-6xl font-bold tracking-tight text-white mb-6 leading-tight">
-      Musik Desktop dengan Jiwa <br/>
-      <span class="bg-gradient-to-r from-cyan-400 via-sky-300 to-teal-400 bg-clip-text text-transparent">Cyber Moon Rabbit.</span>
-    </h1>
-
-    <p class="text-base sm:text-lg text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed">
-      Dynamic Island modern untuk Windows. Sinkronisasi Spotify SMTC instan, pemutaran audio YouTube bebas hambatan, serta lirik berjalan real-time dalam kemasan super ringan 3.84 MB.
-    </p>
-
-    <!-- Download Box CTA -->
-    <div class="flex flex-col sm:flex-row items-center justify-center gap-4 mb-6">
-      <a href="https://github.com/Farhanpratama09/casa-app/releases/download/v1.0.0/CASA_1.0.0_x64-setup.exe"
-         class="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold flex items-center justify-center gap-2.5 transition-all shadow-lg shadow-cyan-500/25 active:scale-95">
-        <i data-lucide="download" class="w-5 h-5"></i>
-        <span>Unduh CASA untuk Windows</span>
-      </a>
-      <a href="https://github.com/Farhanpratama09/casa-app" target="_blank"
-         class="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-slate-200 font-medium flex items-center justify-center gap-2 transition-all">
-        <i data-lucide="code-2" class="w-4 h-4 text-slate-400"></i>
-        <span>Source Code</span>
-      </a>
-    </div>
-
-    <p class="text-xs text-slate-500 font-mono">
-      Versi 1.0.0 &bull; Ukuran 3.84 MiB &bull; Mendukung Windows 10 & 11 (64-bit)
-    </p>
-
-    <!-- Visual Interactive Island Mockup -->
-    <div class="mt-16 p-4 sm:p-8 rounded-2xl bg-cyber-surface/60 border border-slate-800/80 neon-border">
-      <div class="flex items-center justify-between pb-4 border-b border-slate-800/60 mb-6 text-xs text-slate-400 font-mono">
-        <span class="flex items-center gap-1.5">
-          <span class="w-2.5 h-2.5 rounded-full bg-slate-700 inline-block"></span>
-          Simulasi Dynamic Island Desktop
-        </span>
-        <span>Native Tauri 2.0 + Rust</span>
-      </div>
-
-      <!-- Preview Dynamic Island -->
-      <div class="py-6 flex flex-col items-center justify-center gap-6">
-        <!-- Active Playing Island -->
-        <div class="w-full max-w-md h-10 px-4 rounded-full bg-black/90 border border-slate-800 flex items-center justify-between shadow-2xl">
-          <div class="flex items-center gap-2.5">
-            <!-- Bunny with Headphones -->
-            <svg viewBox="0 0 24 24" class="w-5 h-5 drop-shadow-[0_0_6px_rgba(34,211,238,0.9)]">
-              <path d="M 5,12 C 5,6 19,6 19,12" fill="none" stroke="#22d3ee" stroke-width="1.8"/>
-              <rect x="3" y="10" width="3" height="6" rx="1.5" fill="#22d3ee"/>
-              <rect x="18" y="10" width="3" height="6" rx="1.5" fill="#22d3ee"/>
-              <path d="M 8.5,14 Q 10,12.5 11.5,14 M 12.5,14 Q 14,12.5 15.5,14" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
-            <span class="text-slate-600 text-xs">|</span>
-            <span class="text-xs font-medium text-white truncate max-w-[140px]">XXL &bull; LANY</span>
+  <main id="top">
+    <!-- ====================================================================
+         HERO + TRANSPARENT OBSIDIAN BUNNY CENTERPIECE
+         ==================================================================== -->
+    <section class="hero-section">
+      <div class="hero-glow" aria-hidden="true"></div>
+      <div class="container hero-grid">
+        <div>
+          <div class="hero-pill">
+            <span class="hero-pill-dot" aria-hidden="true"></span>
+            <span>Windows 11 · Tauri 2 + Rust · 4px Smart-Tuck</span>
           </div>
-          <div class="flex items-center gap-3">
-            <div class="flex items-end gap-0.5 h-3">
-              <span class="w-0.5 h-2 bg-cyan-400 rounded-full animate-bounce"></span>
-              <span class="w-0.5 h-3 bg-cyan-400 rounded-full animate-bounce" style="animation-delay: 0.15s"></span>
-              <span class="w-0.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" style="animation-delay: 0.3s"></span>
-            </div>
-            <div class="w-4 h-4 rounded-full border-2 border-emerald-400 border-t-transparent flex items-center justify-center">
-              <i data-lucide="zap" class="w-2.5 h-2.5 text-emerald-400"></i>
-            </div>
-            <span class="text-[11px] font-mono text-slate-300">77%</span>
+
+          <h1 class="hero-title">
+            Pure OLED Notch Companion.<br />
+            <span class="hero-title-accent">Zero Desktop Bloat.</span>
+          </h1>
+
+          <p class="hero-lead">
+            CASA mengubah bibir atas monitor Windows menjadi kapsul OLED interaktif yang hidup.
+            Kontrol musik Spotify SMTC &amp; lirik LRCLIB, Focus Pomodoro dengan alarm Web Audio,
+            telemetri baterai Bluetooth, dan auto smart-tuck 4px saat layar penuh — semua dalam installer 4.43 MB.
+          </p>
+
+          <div class="hero-actions">
+            <a href="#download" id="hero-download-btn" class="btn-primary">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>Download CASA v2.0.0 (.exe)</span>
+            </a>
+
+            <button type="button" id="hero-toggle-notch-btn" class="btn-secondary">
+              <span>Toggle Notch Preview</span>
+              <span class="hero-hotkey">Alt + Space</span>
+            </button>
+          </div>
+
+          <div class="hero-meta-strip">
+            <span class="hero-meta-item">• 64-bit Windows 10/11</span>
+            <span class="hero-meta-item">• &lt; 50 MB RAM Idle</span>
+            <span class="hero-meta-item" id="hero-downloads-summary">• Total Unduhan: memuat...</span>
           </div>
         </div>
 
-        <p class="text-xs text-slate-400">Kapsul melayang di sudut layar, responsif, dan bebas distorsi.</p>
+        <!-- Obsidian Bunny Mascot Centerpiece (Transparent SVG, Floating + 3D Parallax Tilt + Reactive Eyes) -->
+        <div class="mascot-stage">
+          <div class="mascot-card" id="mascot-card">
+            <div class="bunny-float-wrap">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 240 240"
+                class="bunny-hero-svg"
+                role="img"
+                aria-label="Maskot Obsidian Bunny CASA v2.0.0"
+              >
+                <defs>
+                  <radialGradient id="heroObsidianHeadGrad" cx="38%" cy="22%" r="78%">
+                    <stop offset="0%" stop-color="#3E3E48" />
+                    <stop offset="45%" stop-color="#18181E" />
+                    <stop offset="85%" stop-color="#09090C" />
+                    <stop offset="100%" stop-color="#030305" />
+                  </radialGradient>
+                  <radialGradient id="heroForeheadLight" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.14" />
+                    <stop offset="65%" stop-color="#FFFFFF" stop-opacity="0.04" />
+                    <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+                  </radialGradient>
+                  <linearGradient id="heroObsidianEarGrad" x1="15%" y1="0%" x2="85%" y2="100%">
+                    <stop offset="0%" stop-color="#363640" />
+                    <stop offset="55%" stop-color="#141419" />
+                    <stop offset="100%" stop-color="#060608" />
+                  </linearGradient>
+                  <linearGradient id="heroObsidianFlapGrad" x1="20%" y1="0%" x2="85%" y2="100%">
+                    <stop offset="0%" stop-color="#444450" />
+                    <stop offset="50%" stop-color="#1B1B22" />
+                    <stop offset="100%" stop-color="#08080B" />
+                  </linearGradient>
+                  <linearGradient id="heroInnerEarWhite" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stop-color="#FFFFFF" />
+                    <stop offset="100%" stop-color="#D4D4D8" />
+                  </linearGradient>
+                  <filter id="heroBunnyDepthShadow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000000" flood-opacity="0.85" />
+                  </filter>
+                  <filter id="heroWhiteEyeGlow" x="-35%" y="-35%" width="170%" height="170%">
+                    <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#FFFFFF" flood-opacity="0.5" />
+                  </filter>
+                </defs>
+
+                <g transform="translate(-5, 6)">
+                  <g filter="url(#heroBunnyDepthShadow)">
+                    <path d="M 86 116 C 72 86, 56 46, 68 25 C 76 13, 95 25, 105 60 C 110 78, 112 96, 112 114 Z" fill="url(#heroObsidianEarGrad)" />
+                    <path d="M 90 104 C 81 82, 71 52, 77 38 C 81 31, 90 39, 97 62 C 101 77, 103 91, 103 103 Z" fill="url(#heroInnerEarWhite)" />
+                    <path d="M 125 114 C 129 82, 140 48, 158 48 C 172 48, 173 66, 160 106 L 155 116 Z" fill="url(#heroObsidianEarGrad)" />
+                    <path d="M 134 106 C 137 91, 141 78, 145 68 L 161 80 C 157 91, 154 101, 151 110 Z" fill="url(#heroInnerEarWhite)" />
+                    <path d="M 145 67 L 165 83 L 162 89 L 143 73 Z" fill="#000000" fill-opacity="0.72" />
+                    <path d="M 132 74 C 138 56, 147 48, 158 48 C 179 48, 195 70, 200 94 C 201 100, 194 103, 186 98 C 174 91, 160 79, 146 66 Z" fill="url(#heroObsidianFlapGrad)" />
+                    <ellipse cx="120" cy="112" rx="46" ry="8" fill="#000000" fill-opacity="0.45" />
+                    <path d="M 120 106 C 157 106, 185 124, 185 155 C 185 184, 158 200, 120 200 C 82 200, 55 184, 55 155 C 55 124, 83 106, 120 106 Z" fill="url(#heroObsidianHeadGrad)" />
+                    <ellipse cx="116" cy="121" rx="46" ry="13" fill="url(#heroForeheadLight)" />
+                  </g>
+
+                  <g id="hero-eye-left" class="hero-eye-group" filter="url(#heroWhiteEyeGlow)"></g>
+                  <g id="hero-eye-right" class="hero-eye-group" filter="url(#heroWhiteEyeGlow)"></g>
+                </g>
+              </svg>
+            </div>
+
+            <div class="mascot-status-badge">
+              <span>Ekspresi:</span>
+              <span id="mascot-expression-label" class="mascot-status-accent">× ♥ Idle</span>
+              <span>·</span>
+              <span id="mascot-placement-label">Docked 0px</span>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+    </section>
+
+    <!-- ====================================================================
+         LIVE INTERACTIVE NOTCH SIMULATOR PLAYGROUND
+         ==================================================================== -->
+    <section id="simulator" class="section-block">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-eyebrow">Interactive Playground</span>
+          <h2 class="section-title">Coba Kapsul CASA Langsung di Browser</h2>
+          <p class="section-desc">
+            Arahkan kursor ke kapsul di tepi atas layar atau tekan <strong class="font-mono">Alt + Space</strong>.
+            Ubah tema, mode posisi, ekspresi mata Obsidian Bunny, simulasi audio chime, hingga notifikasi perangkat keras secara real-time.
+          </p>
+        </div>
+
+        <div class="playground-grid">
+          <!-- Theme Switcher -->
+          <div class="oled-card span-6">
+            <h3 class="control-card-title">
+              <span>Dynamic Theme Switcher</span>
+              <span class="release-pill" id="theme-status-pill">Warm Amber</span>
+            </h3>
+            <p class="control-card-hint">
+              Selaras dengan Settings Hub v2.0.0: mengubah palet timer, indikator Notch, dan aksen seluruh halaman secara instan.
+            </p>
+            <div class="segmented-group" role="group" aria-label="Pilih tema warna">
+              <button type="button" class="sim-btn" data-theme-btn="default" aria-pressed="true">
+                <span class="swatch-dot swatch-amber" aria-hidden="true"></span>
+                <span>Default Amber</span>
+              </button>
+              <button type="button" class="sim-btn" data-theme-btn="monochrome" aria-pressed="false">
+                <span class="swatch-dot swatch-mono" aria-hidden="true"></span>
+                <span>Monochrome</span>
+              </button>
+              <button type="button" class="sim-btn" data-theme-btn="colorblind" aria-pressed="false">
+                <span class="swatch-dot swatch-cyan" aria-hidden="true"></span>
+                <span>Colorblind Safe</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Placement & Fullscreen Smart-Tuck -->
+          <div class="oled-card span-6">
+            <h3 class="control-card-title">
+              <span>Placement &amp; 4px Smart-Tuck</span>
+              <span class="release-pill" id="placement-status-pill">Docked 0px</span>
+            </h3>
+            <p class="control-card-hint">
+              Uji mode menempel di bibir atas (Docked dengan lekuk notch), melayang (Floating 12px), atau garis 4px Fullscreen Smart-Tuck.
+            </p>
+            <div class="segmented-group" role="group" aria-label="Pilih posisi kapsul">
+              <button type="button" class="sim-btn" data-placement-btn="docked" aria-pressed="true">
+                <span>Docked (0px)</span>
+              </button>
+              <button type="button" class="sim-btn" data-placement-btn="floating" aria-pressed="false">
+                <span>Floating (12px)</span>
+              </button>
+              <button type="button" id="sim-tuck-btn" class="sim-btn" aria-pressed="false">
+                <span>Preview 4px Smart-Tuck</span>
+              </button>
+              <button type="button" id="sim-expand-btn" class="sim-btn" aria-pressed="false">
+                <span>Expand Mode 6</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Reactive Eye Expressions -->
+          <div class="oled-card span-6">
+            <h3 class="control-card-title">
+              <span>Ekspresi Mata Reaktif</span>
+              <span class="release-pill accent" id="expr-code-pill">× ♥ Idle</span>
+            </h3>
+            <p class="control-card-hint">
+              Geometri SVG murni yang Sinkron otomatis antara Notch di atas layar dan maskot Obsidian Bunny.
+            </p>
+            <div class="segmented-group" role="group" aria-label="Pilih ekspresi mata">
+              <button type="button" class="sim-btn" data-expr-btn="idle" aria-pressed="true">× ♥ Idle</button>
+              <button type="button" class="sim-btn" data-expr-btn="dual_active" aria-pressed="false">•̀ ♪ Focus+Musik</button>
+              <button type="button" class="sim-btn" data-expr-btn="focus" aria-pressed="false">•̀ ♥ Focus</button>
+              <button type="button" class="sim-btn" data-expr-btn="music" aria-pressed="false">♪ ♥ Musik</button>
+              <button type="button" class="sim-btn" data-expr-btn="awake_lock" aria-pressed="false">✦ ♥ Keep Awake</button>
+              <button type="button" class="sim-btn" data-expr-btn="alarm" aria-pressed="false">&gt; &lt; Alarm</button>
+            </div>
+          </div>
+
+          <!-- Synthesized Chime + Hardware HUD Simulation -->
+          <div class="oled-card span-6">
+            <h3 class="control-card-title">
+              <span>Web Audio Chime &amp; Hardware HUD</span>
+              <span class="release-pill">Zero External Audio</span>
+            </h3>
+            <p class="control-card-hint">
+              Arpeggio harmonik C5→E5→G5→B5 disintesis via Web Audio API, plus simulasi deteksi Bluetooth Battery &amp; Audio Output.
+            </p>
+            <div class="segmented-group" role="group" aria-label="Simulasi alarm dan hardware">
+              <button type="button" id="sim-chime-btn" class="sim-btn">Test Alarm Chime</button>
+              <button type="button" id="sim-bt-btn" class="sim-btn">BT Connected (85%)</button>
+              <button type="button" id="sim-output-btn" class="sim-btn">Audio Output: Wired / Speaker</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         ARCHITECTURE & FEATURES SHOWCASE
+         ==================================================================== -->
+    <section id="architecture" class="section-block">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-eyebrow">v2.0.0 Engineering</span>
+          <h2 class="section-title">Presisi Win32 Native di Atas Fondasi Tauri 2</h2>
+          <p class="section-desc">
+            Setiap piksel dan polling telemetri dirancang hemat daya agar aman menyala terus-menerus selama sesi kerja maupun gaming.
+          </p>
+        </div>
+
+        <div class="feature-grid">
+          <article class="oled-card">
+            <div class="feature-icon-box" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2" />
+                <path d="M8 4v3a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V4" />
+              </svg>
+            </div>
+            <h3 class="feature-title">4px Fullscreen Smart-Tuck</h3>
+            <p class="feature-copy">
+              Saat video atau game layar penuh aktif, kapsul menciut presisi menjadi garis OLED 4px di y=0 tanpa clipping lintas monitor &amp; DPI.
+            </p>
+            <span class="feature-tag">Win32 · SetWindowRgn + DWM</span>
+          </article>
+
+          <article class="oled-card">
+            <div class="feature-icon-box" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m7 7 10 10-5 5V2l5 5L7 17" />
+              </svg>
+            </div>
+            <h3 class="feature-title">BT Battery &amp; Audio Output</h3>
+            <p class="feature-copy">
+              Deteksi otomatis status koneksi perangkat Bluetooth lengkap dengan persentase baterai dan perpindahan output audio WASAPI.
+            </p>
+            <span class="feature-tag">Rust Telemetry · Zero Polling Spike</span>
+          </article>
+
+          <article class="oled-card">
+            <div class="feature-icon-box" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="9" />
+                <polyline points="12 7 12 12 15 14" />
+              </svg>
+            </div>
+            <h3 class="feature-title">Focus Timer &amp; Custom Alarm</h3>
+            <p class="feature-copy">
+              Pomodoro interaktif dengan banner takeover Time's Up (+5m/Dismiss), Web Audio chime bawaan, serta upload audio kustom 15 detik.
+            </p>
+            <span class="feature-tag">Web Audio API · IndexedDB WAV</span>
+          </article>
+
+          <article class="oled-card">
+            <div class="feature-icon-box" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 18V5l12-2v13" />
+                <circle cx="6" cy="18" r="3" />
+                <circle cx="18" cy="16" r="3" />
+              </svg>
+            </div>
+            <h3 class="feature-title">Spotify SMTC &amp; Lirik LRCLIB</h3>
+            <p class="feature-copy">
+              Baca sesi pemutaran Windows secara native, tampilkan lirik tersinkronisasi di idle pill, kelola antrean, dan susun custom playlist.
+            </p>
+            <span class="feature-tag">GSMTC · Shared Pub-Sub Store</span>
+          </article>
+
+          <article class="oled-card">
+            <div class="feature-icon-box" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <line x1="9" y1="4" x2="9" y2="20" />
+              </svg>
+            </div>
+            <h3 class="feature-title">Two-Column Settings &amp; Hotkey</h3>
+            <p class="feature-copy">
+              Jendela pengaturan desktop terpisah 760×520 dengan live preview serta pintasan global Alt + Space untuk membuka atau menutup kapsul.
+            </p>
+            <span class="feature-tag">Multi-Window · Global Shortcut</span>
+          </article>
+
+          <article class="oled-card">
+            <div class="feature-icon-box" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+            </div>
+            <h3 class="feature-title">CSP Ketat &amp; Zero Telemetry</h3>
+            <p class="feature-copy">
+              Seluruh kode sumber terbuka untuk diaudit. Tanpa pelacak eksternal, tanpa kebocoran token, dan diverifikasi SHA-256 checksum.
+            </p>
+            <span class="feature-tag">Strict CSP · MIT Open Source</span>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         SMART RELEASE HUB & VERIFICATION
+         ==================================================================== -->
+    <section id="download" class="section-block">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-eyebrow">Smart Release Hub</span>
+          <h2 class="section-title">Unduh CASA untuk Windows 64-bit</h2>
+          <p class="section-desc">
+            Otomatis membaca aset rilis terbaru dari GitHub API lengkap dengan statistik unduhan dan arsip versi sebelumnya.
+          </p>
+        </div>
+
+        <div class="release-grid">
+          <div class="oled-card">
+            <div class="release-badge-row">
+              <span class="release-pill accent" id="release-version-badge">v2.0.0 Latest</span>
+              <span class="release-pill">Windows 10 / 11 x64</span>
+              <span class="release-pill" id="release-date-badge">Rilis Siap Unduh</span>
+            </div>
+
+            <div class="release-cta-group">
+              <a
+                href="https://github.com/Farhanpratama09/casa-app/releases/latest"
+                target="_blank"
+                rel="noopener noreferrer"
+                id="primary-download-btn"
+                class="btn-primary"
+              >
+                <span>Download CASA v2.0.0 for Windows (64-bit .exe • 4.43 MB)</span>
+              </a>
+
+              <a
+                href="https://github.com/Farhanpratama09/casa-app/releases"
+                target="_blank"
+                rel="noopener noreferrer"
+                id="msi-download-btn"
+                class="btn-secondary"
+              >
+                <span>Unduh .msi (6.41 MB)</span>
+              </a>
+            </div>
+
+            <p class="release-status-note" id="release-status-note">
+              Memeriksa aset rilis terbaru dari github.com/Farhanpratama09/casa-app...
+            </p>
+
+            <div class="release-stats">
+              <div class="stat-tile">
+                <div class="stat-value tabular" id="stat-exe-size">4.43 MB</div>
+                <div class="stat-label">NSIS Setup (.exe)</div>
+              </div>
+              <div class="stat-tile">
+                <div class="stat-value tabular" id="stat-msi-size">6.41 MB</div>
+                <div class="stat-label">MSI Package (.msi)</div>
+              </div>
+              <div class="stat-tile">
+                <div class="stat-value tabular" id="stat-total-downloads">—</div>
+                <div class="stat-label">Total Unduhan GitHub</div>
+              </div>
+            </div>
+
+            <div class="checksum-box">
+              <div class="checksum-header">
+                <span>SHA-256 · CASA_2.0.0_x64-setup.exe</span>
+                <button type="button" id="copy-sha-btn" class="copy-mini-btn">Salin Hash</button>
+              </div>
+              <p class="checksum-code" id="sha-value-exe">
+                4C645813B62C339000F6078855185B2F901F63F4624FA7189CA28FFB4EC1388B
+              </p>
+            </div>
+          </div>
+
+          <div class="oled-card">
+            <div class="smartscreen-guide">
+              <strong>Panduan Windows SmartScreen</strong>
+              <span>
+                Karena CASA merupakan proyek open-source independen tanpa sertifikat EV korporat Microsoft,
+                saat dialog biru SmartScreen muncul cukup klik <strong>"More info"</strong> lalu pilih <strong>"Run anyway"</strong>.
+              </span>
+            </div>
+
+            <h3 class="control-card-title">
+              <span>Arsip Rilis Sebelumnya</span>
+              <span class="release-pill">v1.x History</span>
+            </h3>
+            <p class="control-card-hint">
+              Daftar rilis historis dipopulasi langsung dari GitHub Releases.
+            </p>
+
+            <ul id="archive-release-list" class="archive-list">
+              <li class="archive-item">
+                <div class="archive-item-meta">
+                  <strong>Memuat arsip rilis...</strong>
+                  <span class="archive-item-sub">github.com/Farhanpratama09/casa-app/releases</span>
+                </div>
+                <a
+                  href="https://github.com/Farhanpratama09/casa-app/releases"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="archive-link"
+                >
+                  Buka Releases ↗
+                </a>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         DUAL-PATH FEEDBACK & FEATURE REQUESTS
+         ==================================================================== -->
+    <section id="feedback" class="section-block">
+      <div class="container">
+        <div class="feedback-grid">
+          <div>
+            <span class="section-eyebrow">Community &amp; Triage</span>
+            <h2 class="section-title">Feedback &amp; Feature Requests</h2>
+            <p class="section-desc">
+              Temukan bug monitor multi-DPI, ingin mengusulkan integrasi skill baru, atau punya masukan antarmuka?
+              Kirim langsung — jika form langsung belum dikonfigurasi, browser akan otomatis membuka template GitHub Issue siap kirim.
+            </p>
+          </div>
+
+          <div class="oled-card">
+            <form id="feedback-form" class="feedback-form" novalidate>
+              <div class="field-row">
+                <div class="field-group">
+                  <label for="fb-name" class="field-label">Nama / Handle (opsional)</label>
+                  <input
+                    id="fb-name"
+                    name="name"
+                    type="text"
+                    maxlength="64"
+                    class="field-input"
+                    placeholder="cth. @farhan"
+                    autocomplete="name"
+                  />
+                </div>
+
+                <div class="field-group">
+                  <label for="fb-category" class="field-label">Kategori</label>
+                  <select id="fb-category" name="category" class="field-select">
+                    <option value="Bug Report">Bug Report</option>
+                    <option value="Ide Fitur">Ide Fitur</option>
+                    <option value="Masukan UI">Masukan UI</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="field-group">
+                <label for="fb-message" class="field-label">Pesan / Detail Lingkungan</label>
+                <textarea
+                  id="fb-message"
+                  name="message"
+                  required
+                  maxlength="1500"
+                  class="field-textarea"
+                  placeholder="Jelaskan masalah, ide fitur, atau detail monitor Windows kamu..."
+                ></textarea>
+              </div>
+
+              <div>
+                <button type="submit" id="fb-submit-btn" class="btn-primary">
+                  <span>Kirim Feedback</span>
+                </button>
+              </div>
+
+              <p id="fb-status" class="feedback-status" role="status" aria-live="polite"></p>
+              <div id="fb-fallback-container"></div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
 
-  <!-- Showcase 3 Mode -->
-  <section id="modes" class="border-t border-slate-800/80 py-20 bg-cyber-surface/30">
-    <div class="max-w-5xl mx-auto px-6">
-      <div class="text-center max-w-xl mx-auto mb-16">
-        <h2 class="text-2xl sm:text-3xl font-bold text-white mb-3">Tiga Mode Visual Cerdas</h2>
-        <p class="text-slate-400 text-sm">CASA beradaptasi secara dinamis dengan aktivitas musik dan kondisi desktop kamu.</p>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <!-- Mode 1 -->
-        <div class="p-6 rounded-xl bg-cyber-surface border border-slate-800/80 flex flex-col justify-between">
-          <div>
-            <div class="h-14 flex items-center justify-center bg-black/40 rounded-lg border border-slate-800/60 mb-5">
-              <!-- Resting Visor -->
-              <div class="flex items-center gap-2">
-                <div class="px-2 py-0.5 rounded border border-cyan-500/40 text-cyan-400 text-xs font-mono">C ×</div>
-                <div class="px-2 py-0.5 rounded border border-cyan-500/40 text-cyan-400 text-xs font-mono">♥ Ɔ</div>
-              </div>
-            </div>
-            <h3 class="text-lg font-semibold text-white mb-2">1. Resting Mode</h3>
-            <p class="text-slate-400 text-xs leading-relaxed">
-              Saat hening, kacamata visor futuristik terpusat dengan bulan sabit montok dan retikel holografik yang tenang di layar.
-            </p>
-          </div>
-          <span class="text-[11px] font-mono text-cyan-400/80 mt-4 block">&bull; Visor Panoramik 44×26</span>
-        </div>
-
-        <!-- Mode 2 -->
-        <div class="p-6 rounded-xl bg-cyber-surface border border-cyan-900/40 neon-border flex flex-col justify-between">
-          <div>
-            <div class="h-14 flex items-center justify-center bg-black/40 rounded-lg border border-slate-800/60 mb-5">
-              <i data-lucide="headphones" class="w-6 h-6 text-cyan-400 animate-pulse"></i>
-            </div>
-            <h3 class="text-lg font-semibold text-white mb-2">2. Song Bobbing Mode</h3>
-            <p class="text-slate-400 text-xs leading-relaxed">
-              Ketika lagu berputar, maskot memasang cyber headphone dan mengangguk berirama mengikuti ketukan lagu.
-            </p>
-          </div>
-          <span class="text-[11px] font-mono text-cyan-400 mt-4 block">&bull; Rhythmic Head-Bobbing</span>
-        </div>
-
-        <!-- Mode 3 -->
-        <div class="p-6 rounded-xl bg-cyber-surface border border-slate-800/80 flex flex-col justify-between">
-          <div>
-            <div class="h-14 flex items-center justify-center bg-black/40 rounded-lg border border-slate-800/60 mb-5">
-              <div class="flex items-center gap-2 text-xs text-slate-300 font-mono">
-                <span class="text-cyan-400">&bull;﹏&bull;</span>
-                <span>|</span>
-                <span>19:25 &bull; 77%</span>
-              </div>
-            </div>
-            <h3 class="text-lg font-semibold text-white mb-2">3. Compact Status Bar</h3>
-            <p class="text-slate-400 text-xs leading-relaxed">
-              Saat siaga tanpa musik, pulau menciut menjadi status bar ringkas yang memuat jam, tanggal, dan baterai tanpa ruang kosong.
-            </p>
-          </div>
-          <span class="text-[11px] font-mono text-cyan-400/80 mt-4 block">&bull; Kapsul Ringkas 240px</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Fitur Utama -->
-  <section id="features" class="py-20 border-t border-slate-800/80">
-    <div class="max-w-5xl mx-auto px-6">
-      <div class="text-center max-w-xl mx-auto mb-16">
-        <h2 class="text-2xl sm:text-3xl font-bold text-white mb-3">Arsitektur Cepat & Hemat Daya</h2>
-        <p class="text-slate-400 text-sm">Dibangun di atas fondasi Tauri 2.0 dan Rust, tanpa bloatware Electron yang rakus memori.</p>
-      </div>
-
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-        <div class="p-6 rounded-xl bg-slate-900/40 border border-slate-800/80">
-          <div class="w-9 h-9 rounded-lg bg-cyan-950/80 border border-cyan-800/50 flex items-center justify-center text-cyan-400 mb-4">
-            <i data-lucide="radio" class="w-5 h-5"></i>
-          </div>
-          <h3 class="text-base font-semibold text-white mb-2">Spotify SMTC Real-Time</h3>
-          <p class="text-slate-400 text-xs leading-relaxed">Membaca sesi pemutaran Windows secara native tanpa perlu token berulang. Kontrol play, pause, dan ganti lagu langsung dari kapsul.</p>
-        </div>
-
-        <div class="p-6 rounded-xl bg-slate-900/40 border border-slate-800/80">
-          <div class="w-9 h-9 rounded-lg bg-cyan-950/80 border border-cyan-800/50 flex items-center justify-center text-cyan-400 mb-4">
-            <i data-lucide="file-text" class="w-5 h-5"></i>
-          </div>
-          <h3 class="text-base font-semibold text-white mb-2">Sinkronisasi Lirik LRCLIB</h3>
-          <p class="text-slate-400 text-xs leading-relaxed">Menampilkan lirik berjalan otomatis baris demi baris, bersih dari script berbahaya dan ter-render mulus di layar.</p>
-        </div>
-
-        <div class="p-6 rounded-xl bg-slate-900/40 border border-slate-800/80">
-          <div class="w-9 h-9 rounded-lg bg-cyan-950/80 border border-cyan-800/50 flex items-center justify-center text-cyan-400 mb-4">
-            <i data-lucide="cpu" class="w-5 h-5"></i>
-          </div>
-          <h3 class="text-base font-semibold text-white mb-2">Ringan: Hanya 3.84 MB</h3>
-          <p class="text-slate-400 text-xs leading-relaxed">Ukuran unduhan installer hanya 3.84 MB dengan konsumsi RAM di bawah 50 MB, aman dijalankan bersamaan dengan game berat.</p>
-        </div>
-
-        <div class="p-6 rounded-xl bg-slate-900/40 border border-slate-800/80">
-          <div class="w-9 h-9 rounded-lg bg-cyan-950/80 border border-cyan-800/50 flex items-center justify-center text-cyan-400 mb-4">
-            <i data-lucide="shield-check" class="w-5 h-5"></i>
-          </div>
-          <h3 class="text-base font-semibold text-white mb-2">Keamanan Teruji (68/69 Bersih)</h3>
-          <p class="text-slate-400 text-xs leading-relaxed">Kebijakan CSP ketat, zero telemetry mencurigakan, dan 68 dari 69 vendor keamanan VirusTotal memvalidasi biner bersih.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Keamanan & Checksum Section -->
-  <section id="checksum" class="py-20 border-t border-slate-800/80 bg-cyber-surface/40">
-    <div class="max-w-3xl mx-auto px-6">
-      <div class="text-center mb-10">
-        <h2 class="text-2xl font-bold text-white mb-2">Transparansi & Verifikasi Berkas</h2>
-        <p class="text-slate-400 text-xs">CASA adalah aplikasi open-source independen. Pastikan integritas berkas unduhan kamu melalui nilai hash berikut.</p>
-      </div>
-
-      <!-- Hash Card -->
-      <div class="p-5 rounded-xl bg-slate-950 border border-slate-800">
-        <div class="flex items-center justify-between mb-3 text-xs text-slate-400 font-mono">
-          <span>SHA-256 (CASA_1.0.0_x64-setup.exe)</span>
-          <button id="copy-btn" onclick="copyHash()" class="flex items-center gap-1.5 text-cyan-400 hover:text-cyan-300 transition-colors">
-            <i data-lucide="copy" class="w-3.5 h-3.5"></i>
-            <span id="copy-text">Salin Hash</span>
-          </button>
-        </div>
-        <p id="hash-val" class="font-mono text-xs sm:text-sm text-slate-300 break-all select-all bg-slate-900/80 p-3 rounded border border-slate-800">
-          46825A6646B7CE52CD19849C2E6FC18887D0C1566946CE43C7473C528D41D2D9
-        </p>
-      </div>
-
-      <!-- SmartScreen Guide Note -->
-      <div class="mt-6 p-4 rounded-xl bg-cyan-950/20 border border-cyan-800/40 text-xs text-slate-300 flex items-start gap-3">
-        <i data-lucide="info" class="w-4 h-4 text-cyan-400 shrink-0 mt-0.5"></i>
-        <div>
-          <strong class="text-white block mb-0.5">Muncul jendela biru Windows SmartScreen?</strong>
-          Karena CASA belum menggunakan sertifikat berbayar korporat Microsoft, cukup klik <span class="text-cyan-300 font-medium">"More Info"</span> lalu pilih <span class="text-cyan-300 font-medium">"Run anyway"</span>. Seluruh kode sumber terbuka untuk diaudit di GitHub.
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Footer -->
-  <footer class="border-t border-slate-800/80 py-10 bg-cyber-base">
-    <div class="max-w-5xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
-      <p>&copy; 2026 Farhan Pratama. Dilindungi hak cipta.</p>
-      <div class="flex items-center gap-6">
-        <a href="https://github.com/Farhanpratama09/casa-app" target="_blank" class="hover:text-cyan-400 transition-colors">GitHub Repository</a>
-        <a href="https://github.com/Farhanpratama09/casa-app/releases" target="_blank" class="hover:text-cyan-400 transition-colors">Release Notes</a>
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <p>&copy; 2026 Farhan Pratama · CASA v2.0.0 · Obsidian Edition</p>
+      <div class="footer-links">
+        <a href="https://github.com/Farhanpratama09/casa-app" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
+        <a href="https://github.com/Farhanpratama09/casa-app/releases" target="_blank" rel="noopener noreferrer">Releases</a>
+        <a href="https://github.com/Farhanpratama09/casa-app/issues" target="_blank" rel="noopener noreferrer">Issues</a>
       </div>
     </div>
   </footer>
 
-  <script>
-    lucide.createIcons();
-
-    function copyHash() {
-      const hash = document.getElementById('hash-val').innerText.trim();
-      navigator.clipboard.writeText(hash).then(() => {
-        const text = document.getElementById('copy-text');
-        text.innerText = 'Tersalin!';
-        setTimeout(() => { text.innerText = 'Salin Hash'; }, 2000);
-      });
-    }
-  </script>
+  <script src="./app.js" defer></script>
 </body>
 </html>
