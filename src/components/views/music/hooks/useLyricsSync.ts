@@ -2,6 +2,11 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { LyricLine, parseTimeToSeconds } from '../../../../utils/lyricsService';
 import { PlaybackSource } from '../constants';
 import {
+  PlaybackClockSnapshot,
+  computeInterpolatedPositionMs,
+  EXTERNAL_SEEK_SNAP_THRESHOLD_MS,
+} from '../../../../features/media/playbackClock';
+import {
   isWithinPlayGuardWindow,
   markUserInitiatedPlayback,
   setLastKnownPositionMs,
@@ -14,6 +19,7 @@ export interface UseLyricsSyncParams {
   audioRef: React.RefObject<HTMLAudioElement | null>;
   isPlaying: boolean;
   playbackSource: PlaybackSource;
+  playbackClock?: PlaybackClockSnapshot;
   currentTrackId?: string | null;
   displayLines: Array<{
     id: string;
@@ -37,7 +43,7 @@ export interface UseLyricsSyncParams {
   isDesktopSpotify?: boolean;
   isUserConnected?: boolean;
   currentSessionId?: string;
-  onSeekExternal?: (targetMs: number) => Promise<void> | void;
+  onSeekExternal?: (targetMs: number) => Promise<boolean | void> | boolean | void;
 }
 
 export function useLyricsSync(params: UseLyricsSyncParams) {
@@ -45,6 +51,7 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
     audioRef,
     isPlaying,
     playbackSource,
+    playbackClock,
     currentTrackId = null,
     displayLines,
     durationMs = 0,
@@ -63,15 +70,29 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
     onSeekExternal,
   } = params;
 
+  const initialTimeMs =
+    playbackSource !== 'native' && hasActiveSession
+      ? playbackClock
+        ? computeInterpolatedPositionMs(playbackClock)
+        : Math.round(Math.max(0, currentTimeSeconds || externalCurrentTimeSeconds || 0) * 1000)
+      : 0;
+
   const [activeLyricIndex, setActiveLyricIndex] = useState<number>(-1);
-  const [preciseTimeMs, setPreciseTimeMs] = useState<number>(0);
+  const [preciseTimeMs, setPreciseTimeMs] = useState<number>(initialTimeMs);
   const [nativeProgressMs, setNativeProgressMs] = useState<number>(0);
 
   // Monotonic progress & hysteresis locks
+  const playbackClockRef = useRef<PlaybackClockSnapshot | undefined>(playbackClock);
+  playbackClockRef.current = playbackClock;
+  const hasPlaybackClock = playbackClock !== undefined;
   const lastActiveIndexRef = useRef<number>(-1);
   const lastSeekTimeRef = useRef<number>(0);
   const lastSyncLocalTime = useRef<number>(performance.now());
-  const lastReportedTimeMs = useRef<number>(0);
+  const lastReportedTimeMs = useRef<number>(initialTimeMs);
+  const preciseTimeMsRef = useRef<number>(initialTimeMs);
+  const durationLimitMsRef = useRef<number>(
+    durationMs > 0 ? durationMs : durationSeconds > 0 ? Math.round(durationSeconds * 1000) : 0
+  );
   const isSeekingRef = useRef<boolean>(false);
   const seekLockTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSongTitleRef = useRef<string>(externalTitle);
@@ -79,6 +100,15 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
   const prevTrackIdRef = useRef<string | null | undefined>(currentTrackId);
   const prevSourceRef = useRef<PlaybackSource>(playbackSource);
   const isTrackChangingRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    preciseTimeMsRef.current = preciseTimeMs;
+  }, [preciseTimeMs]);
+
+  useEffect(() => {
+    durationLimitMsRef.current =
+      durationMs > 0 ? durationMs : durationSeconds > 0 ? Math.round(durationSeconds * 1000) : 0;
+  }, [durationMs, durationSeconds]);
 
   // Stale Clock Guard on Track Change or Source Switch: Immediately flush activeLyricIndex to -1
   useEffect(() => {
@@ -273,9 +303,9 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
 
   // Handle manual seek from lyric row or scrubber (Pure Float Seconds Contract)
   const handleLyricLineSeek = useCallback(
-    async (rawTargetSeconds: number) => {
+    async (rawTargetSeconds: number): Promise<boolean> => {
       const targetSeconds = parseTimeToSeconds(rawTargetSeconds);
-      if (targetSeconds < 0) return;
+      if (targetSeconds < 0) return false;
       const targetMs = Math.round(targetSeconds * 1000);
       isTrackChangingRef.current = false;
 
@@ -294,6 +324,7 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
       lastReportedTimeMs.current = targetMs;
       // Shift sync baseline by +120ms so local ticker doesn't run ahead while browser buffers audio
       lastSyncLocalTime.current = performance.now() + 120;
+      preciseTimeMsRef.current = targetMs;
       setPreciseTimeMs(targetMs);
       applyProgressUpdate(targetMs, true);
 
@@ -302,27 +333,32 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
         if (audioRef.current) {
           audioRef.current.currentTime = targetSeconds;
           setNativeProgressMs(targetMs);
+          preciseTimeMsRef.current = targetMs;
           setPreciseTimeMs(targetMs);
           lastSeekTimeRef.current = performance.now();
           const newIdx = computeRawLyricIndex(displayLines, getLyricAdjustedTime(targetMs, true));
           lastActiveIndexRef.current = newIdx;
           setActiveLyricIndex(newIdx);
+          return true;
         }
-        return;
+        return false;
       }
 
       if (onSeekExternal) {
-        await onSeekExternal(targetMs);
-      } else {
-        const canAccessSpotify = isUserConnected && (isDesktopSpotify || isBrowserSpotify);
-        if (canAccessSpotify) {
-          await seekSpotifyPlayback(targetMs);
-        } else if (currentSessionId) {
-          await seekMediaSession(currentSessionId, targetMs);
-        } else {
-          await seekMediaSession('', targetMs);
-        }
+        const res = await onSeekExternal(targetMs);
+        return res !== false;
       }
+
+      const canAccessSpotify = isUserConnected && (isDesktopSpotify || isBrowserSpotify);
+      if (canAccessSpotify) {
+        const spotifyOk = await seekSpotifyPlayback(targetMs);
+        if (spotifyOk) return true;
+      }
+      if (currentSessionId) {
+        const gsmtcOk = await seekMediaSession(currentSessionId, targetMs);
+        if (gsmtcOk) return true;
+      }
+      return await seekMediaSession('', targetMs);
     },
     [
       playbackSource,
@@ -340,10 +376,37 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
     ]
   );
 
+  // Single Source of Truth Clock Sync: follow interpolated MediaSkill playbackClock & snap on external seeks (>1500ms)
+  useEffect(() => {
+    playbackClockRef.current = playbackClock;
+    if (playbackSource === 'native' || !playbackClock) return;
+    if (isSeekingRef.current) return;
+
+    const interpolatedMs = computeInterpolatedPositionMs(playbackClock, Date.now());
+    const prevMs = preciseTimeMsRef.current;
+
+    if (Math.abs(interpolatedMs - prevMs) > EXTERNAL_SEEK_SNAP_THRESHOLD_MS) {
+      lastSeekTimeRef.current = performance.now();
+    }
+
+    lastReportedTimeMs.current = interpolatedMs;
+    lastSyncLocalTime.current = performance.now();
+    preciseTimeMsRef.current = interpolatedMs;
+    setPreciseTimeMs(interpolatedMs);
+    setLastKnownPositionMs(interpolatedMs);
+
+    const newIdx = computeRawLyricIndex(displayLines, getLyricAdjustedTime(interpolatedMs));
+    if (newIdx !== lastActiveIndexRef.current) {
+      lastActiveIndexRef.current = newIdx;
+      setActiveLyricIndex(newIdx);
+    }
+  }, [playbackSource, playbackClock, displayLines, computeRawLyricIndex, getLyricAdjustedTime]);
+
   // Sync baseline whenever GSMTC/Spotify emits an update or track/play state changes
   useEffect(() => {
     // Complete Isolation: In Native mode, ignore all external GSMTC/Spotify baseline syncs!
     if (playbackSource === 'native') return;
+    if (hasPlaybackClock) return;
 
     // Anti-Rubber-Banding: Reject incoming stale GSMTC updates during active seek lock window
     if (isSeekingRef.current) return;
@@ -358,6 +421,7 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
       if (isBrowserSpotify) {
         lastReportedTimeMs.current = 0;
         lastSyncLocalTime.current = performance.now();
+        preciseTimeMsRef.current = 0;
         setPreciseTimeMs(0);
         applyProgressUpdate(0, true);
       } else {
@@ -365,7 +429,7 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
       }
     } else if (playStateChanged) {
       if (!isPlaying) {
-        lastReportedTimeMs.current = preciseTimeMs;
+        lastReportedTimeMs.current = preciseTimeMsRef.current;
         lastSyncLocalTime.current = performance.now();
       } else {
         lastSyncLocalTime.current = performance.now();
@@ -375,23 +439,23 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
       if (isBrowserSpotify) {
         return;
       }
-      if (isBrowser && externalCurrentTimeSeconds === 0 && preciseTimeMs > 2000) {
+      if (isBrowser && externalCurrentTimeSeconds === 0 && preciseTimeMsRef.current > 2000) {
         return;
       }
       applyProgressUpdate(externalCurrentTimeSeconds * 1000, false);
     }
   }, [
     playbackSource,
+    hasPlaybackClock,
     externalCurrentTimeSeconds,
     isPlaying,
     externalTitle,
     applyProgressUpdate,
     isBrowser,
     isBrowserSpotify,
-    preciseTimeMs,
   ]);
 
-  // High-precision 60FPS interpolation ticker while playing (monotonic line progression)
+  // Lightweight 250ms Single-Source Clock Ticker while playing (synced time labels, progress bar, & lyrics)
   useEffect(() => {
     const isPlayingNow =
       playbackSource === 'native'
@@ -400,17 +464,24 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
 
     if (!isPlayingNow) return;
 
-    let animId: number;
-    const loop = () => {
+    const tick = () => {
       let currentMs: number;
       if (playbackSource === 'native') {
         // Direct hardware HTML5 audio clock without GSMTC latency or extrapolation
         currentMs = audioRef.current ? audioRef.current.currentTime * 1000 : 0;
         setNativeProgressMs(currentMs);
+        preciseTimeMsRef.current = currentMs;
         setPreciseTimeMs(currentMs);
       } else {
-        const elapsed = Math.max(0, performance.now() - lastSyncLocalTime.current);
-        currentMs = lastReportedTimeMs.current + elapsed;
+        currentMs = playbackClockRef.current
+          ? computeInterpolatedPositionMs(playbackClockRef.current, Date.now())
+          : (() => {
+              const elapsed = Math.max(0, performance.now() - lastSyncLocalTime.current);
+              const rawMs = lastReportedTimeMs.current + elapsed;
+              const limitMs = durationLimitMsRef.current;
+              return limitMs > 0 ? Math.min(limitMs, rawMs) : rawMs;
+            })();
+        preciseTimeMsRef.current = currentMs;
         setPreciseTimeMs(currentMs);
       }
 
@@ -419,14 +490,15 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
         if (currentMs <= 1000) {
           isTrackChangingRef.current = false;
         } else {
-          lastActiveIndexRef.current = -1;
-          setActiveLyricIndex(-1);
-          animId = requestAnimationFrame(loop);
+          if (lastActiveIndexRef.current !== -1) {
+            lastActiveIndexRef.current = -1;
+            setActiveLyricIndex(-1);
+          }
           return;
         }
       }
 
-      // Monotonic lyric advancement during continuous 60FPS playback (+75ms perception offset)
+      // Monotonic lyric advancement (+75ms perception offset)
       const adjustedTime = getLyricAdjustedTime(currentMs);
       const rawIdx = computeRawLyricIndex(displayLines, adjustedTime);
 
@@ -437,18 +509,18 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
           setActiveLyricIndex(rawIdx);
         }
       } else {
-        // Strict Monotonic Guard: Rollback is ONLY permitted within 800ms of explicit user manual seek
+        // Rollback is permitted within 800ms of explicit user manual seek or external Spotify seek snap
         if (performance.now() - lastSeekTimeRef.current < 800) {
           lastActiveIndexRef.current = rawIdx;
           setActiveLyricIndex(rawIdx);
         }
       }
-
-      animId = requestAnimationFrame(loop);
     };
 
-    animId = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(animId);
+    tick();
+    const intervalMs = playbackSource === 'native' ? 150 : 250;
+    const timer = setInterval(tick, intervalMs);
+    return () => clearInterval(timer);
   }, [
     playbackSource,
     isPlaying,
@@ -459,10 +531,10 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
     audioRef,
   ]);
 
-  // Calibrate preciseTimeMs with genuine Spotify Web API progress_ms (Single Source of Truth for Spotify Web)
+  // Calibrate preciseTimeMs with genuine Spotify Web API progress_ms (fallback only when playbackClock is not provided)
   useEffect(() => {
-    // Complete Isolation: In Native mode, completely ignore Spotify Web API progress calibration!
-    if (playbackSource === 'native') return;
+    // Complete Isolation: In Native mode, or when global MediaSkill playbackClock handles polling, skip duplicate polling!
+    if (playbackSource === 'native' || hasPlaybackClock) return;
 
     let isMounted = true;
     if (isUserConnected && isPlaying && (isDesktopSpotify || isBrowserSpotify)) {

@@ -405,17 +405,11 @@ export const TwinEqualizerGlyph: React.FC<{
   className?: string;
 }> = ({ active = true, isMuted = false, isSpotify = false, className = '' }) => {
   const isPlaying = active && !isMuted;
-  const barBg = isSpotify ? 'bg-[#10b981]' : 'bg-[#38bdf8]';
-  const filterGlow = isPlaying
-    ? isSpotify
-      ? 'drop-shadow(0 0 4px rgba(16, 185, 129, 0.5))'
-      : 'drop-shadow(0 0 4px rgba(56, 189, 248, 0.45))'
-    : 'none';
+  const barBg = isSpotify ? 'bg-[#10b981]' : 'bg-white';
 
   return (
     <div
       className={`flex items-end gap-[2px] h-[12px] shrink-0 select-none ${className}`}
-      style={{ filter: filterGlow }}
       aria-hidden="true"
     >
       <span

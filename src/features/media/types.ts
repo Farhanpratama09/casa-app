@@ -2,11 +2,21 @@ import { SongMetadata, AudioOutputDevice, MediaSessionItem } from '../../types/i
 import { MusicSubPanel } from '../../components/views/MusicCardView';
 import { LyricResult } from '../../utils/lyricsService';
 import type { NativeTrack } from '../../services/nativeAudioService';
+import type { PlaybackClockSnapshot } from './playbackClock';
 
-export type { SongMetadata, AudioOutputDevice, MusicSubPanel, LyricResult, MediaSessionItem, NativeTrack };
+export type {
+  SongMetadata,
+  AudioOutputDevice,
+  MusicSubPanel,
+  LyricResult,
+  MediaSessionItem,
+  NativeTrack,
+  PlaybackClockSnapshot,
+};
 
 export interface MediaSkillState {
   song: SongMetadata;
+  playbackClock?: PlaybackClockSnapshot;
   hasNativeMedia: boolean;
   isShuffle: boolean;
   activeSubPanel: MusicSubPanel;
@@ -19,4 +29,5 @@ export interface MediaSkillState {
   playbackSource?: 'companion' | 'native';
   nativeTrack?: NativeTrack | null;
   isNativePlaying?: boolean;
+  showIdleLyrics?: boolean;
 }

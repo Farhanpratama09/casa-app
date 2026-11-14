@@ -36,6 +36,7 @@ export const DevTriggerBar: React.FC<DevTriggerBarProps> = ({
       'expanded_music',
       'expanded_timer',
       'expanded_todo',
+      'expanded_control',
       'drop_zone',
     ];
     const currentIndex = order.indexOf(currentMode);
@@ -79,9 +80,10 @@ export const DevTriggerBar: React.FC<DevTriggerBarProps> = ({
   return (
     <aside
       ref={devTriggerRef}
+      data-dev-trigger="true"
       onWheel={handleWheel}
       aria-label="Developer State Testing Controls"
-      className={`mt-3 flex items-center justify-center gap-2 px-4 py-2 bg-[#09090b] rounded-full border border-[#27272a] shadow-[0_8px_24px_rgba(0,0,0,0.85)] select-none max-w-full overflow-x-auto no-scrollbar pointer-events-auto ${className}`.trim()}
+      className={`fixed top-[200px] left-1/2 -translate-x-1/2 z-50 flex items-center justify-center gap-2 px-4 py-2 bg-[#09090b] rounded-full border border-[#27272a] shadow-[0_8px_24px_rgba(0,0,0,0.85)] select-none max-w-[940px] overflow-x-auto no-scrollbar pointer-events-auto ${className}`.trim()}
     >
       <span className="text-[9px] font-semibold tracking-wider text-island-secondary uppercase mr-1 border-r border-white/10 pr-2">
         DEV TRIGGER
@@ -110,6 +112,7 @@ export const DevTriggerBar: React.FC<DevTriggerBarProps> = ({
       {triggerItem('🎵 Music', 'expanded_music', undefined, currentMode === 'expanded_music')}
       {triggerItem('⏱ Timer', 'expanded_timer', undefined, currentMode === 'expanded_timer')}
       {triggerItem('✓ To-Do', 'expanded_todo', undefined, currentMode === 'expanded_todo')}
+      {triggerItem('🎛 Control', 'expanded_control', undefined, currentMode === 'expanded_control')}
       {triggerItem('📦 Drop Zone', 'drop_zone', undefined, currentMode === 'drop_zone')}
 
       <div className="w-[1px] h-3 bg-white/20 mx-1" />

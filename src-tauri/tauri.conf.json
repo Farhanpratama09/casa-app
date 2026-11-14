@@ -1,7 +1,15 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "CASA",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/Farhanpratama09/casa-app/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "identifier": "com.farhanpratama.casa",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -10,12 +18,13 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "withGlobalTauri": false,
     "windows": [
       {
         "label": "main",
         "title": "CASA",
-        "width": 620,
-        "height": 250,
+        "width": 1100,
+        "height": 340,
         "resizable": false,
         "fullscreen": false,
         "transparent": true,
@@ -27,11 +36,16 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.scdn.co https://*.spotifycdn.com https://*.ytimg.com https://*.googleusercontent.com; media-src 'self' data: blob: http://127.0.0.1:* https://*.googlevideo.com; connect-src 'self' ipc: http://127.0.0.1:* ws://127.0.0.1:* https://api.spotify.com https://accounts.spotify.com https://lrclib.net; font-src 'self' data:;"
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      },
+      "csp": "default-src 'self'; object-src 'none'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost https://asset.localhost https://*.scdn.co https://*.spotifycdn.com https://*.ytimg.com https://*.googleusercontent.com; media-src 'self' data: blob: asset: http://asset.localhost https://asset.localhost http://127.0.0.1:* https://*.googlevideo.com; connect-src 'self' ipc: http://127.0.0.1:* ws://127.0.0.1:* https://api.spotify.com https://accounts.spotify.com https://lrclib.net; font-src 'self' data:;"
     }
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": false,
     "targets": ["nsis", "msi"],
     "icon": [
       "icons/32x32.png",

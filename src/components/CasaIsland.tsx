@@ -1,24 +1,48 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { listen } from '@tauri-apps/api/event';
 import { IslandMode, CompactSubtype, HardwareMetrics, IslandState } from '../types/island';
 import { IdlePillView } from './views/IdlePillView';
-import { CompactStripView } from './views/CompactStripView';
 import { DropZoneView } from './views/DropZoneView';
-import { MicroStatusHeader } from './views/MicroStatusHeader';
-import { IslandBubbleSkillSlot } from './shell/IslandSkillSlot';
+import { Mode6TopNav } from './views/Mode6TopNav';
+import { Mode6ControlCenterView } from './views/mode6/Mode6ControlCenterView';
+import { FocusHoverPeekCard } from './views/FocusHoverPeekCard';
+import { useSystemHardware } from '../hooks/useSystemHardware';
+import { useTimerState } from '../features/timer/useTimerState';
+import { useTodoState } from '../features/todo/useTodoState';
 import { MediaExpandedView } from '../features/media/MediaExpandedView';
 import { TimerExpandedView } from '../features/timer/TimerExpandedView';
 import { TodoExpandedView } from '../features/todo/TodoExpandedView';
-import { SatelliteDisc } from './views/SatelliteDisc';
-import { setSmartIgnoreCursorEvents, playChimeCue, adjustWindowSize, updateIslandHitbox } from '../utils/tauriBridge';
+import {
+  setSmartIgnoreCursorEvents,
+  playChimeCue,
+  adjustWindowSize,
+  updateIslandHitboxes,
+  setIslandPinned,
+  focusIslandWindow,
+  alignWindowTop,
+  setWindowVisibility,
+  HitRect,
+} from '../utils/tauriBridge';
 import { useSkillStore } from '../skills/store';
 import { useDropZoneStore } from '../stores/useDropZoneStore';
+import { useSettingsStore, CasaHorizontalAlign } from '../stores/useSettingsStore';
+import {
+  isSpotifyUserConnected,
+  isSpotifyPremiumRestricted,
+  subscribeSpotifyPremiumRestriction,
+} from '../utils/spotifyService';
 import {
   registerIslandTransitionHook,
   unregisterIslandTransitionHook,
   recordCanvasResizeCall,
 } from '../utils/islandStressTester';
+import {
+  ISLAND_DIMENSIONS,
+  resolveEffectiveIslandLayout,
+  snapEvenDimension,
+} from '../utils/islandLayoutState';
 
 interface CasaIslandProps {
   mode: IslandMode;
@@ -37,6 +61,25 @@ const doubleRaf = (callback: () => void) => {
   });
 };
 
+const AUTO_TUCK_IDLE_DELAY_MS = 10000;
+
+const computeCenterOffsetX = (
+  align: CasaHorizontalAlign,
+  capsuleW: number,
+  leftPodOpen = false,
+  rightPodOpen = false
+): number => {
+  if (align === 'left') {
+    const leftMargin = leftPodOpen ? 230 : 28;
+    return Math.round(leftMargin + capsuleW / 2 - 550);
+  }
+  if (align === 'right') {
+    const rightMargin = rightPodOpen ? 230 : 28;
+    return Math.round(1100 - rightMargin - capsuleW / 2 - 550);
+  }
+  return 0;
+};
+
 export const CasaIsland: React.FC<CasaIslandProps> = ({
   mode,
   compactSubtype,
@@ -46,16 +89,39 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   onToggleDevTrigger,
 }) => {
   // Live Skill State from Central Skill Store
-  const isMusicPlaying = useSkillStore((s) => {
-    const media = s.skillStates['core.media'];
-    if (media?.playbackSource === 'native') {
-      return Boolean(media.isNativePlaying && media.nativeTrack);
-    }
-    return media?.song?.isPlaying ?? false;
-  });
-  const isTimerActive = useSkillStore(
-    (s) => Boolean(s.skillStates['core.timer']?.isActive)
+  const mediaState = useSkillStore((s) => s.skillStates['core.media']);
+  const [isSpotifyFreeRestricted, setIsSpotifyFreeRestricted] = useState<boolean>(() =>
+    isSpotifyPremiumRestricted()
   );
+
+  useEffect(() => {
+    return subscribeSpotifyPremiumRestriction((restricted) => {
+      setIsSpotifyFreeRestricted(restricted);
+    });
+  }, []);
+
+  const isMusicPlaying = (() => {
+    if (mediaState?.playbackSource === 'native') {
+      return Boolean(mediaState.isNativePlaying && mediaState.nativeTrack);
+    }
+    return mediaState?.song?.isPlaying ?? false;
+  })();
+  const idleTimerState = useSkillStore((s) => s.skillStates['core.timer']);
+  const isTimerActive = Boolean(idleTimerState?.isActive);
+  const isAlarmRinging = Boolean(idleTimerState?.isAlarmRinging);
+  const isAlarmRingingRef = useRef<boolean>(isAlarmRinging);
+  isAlarmRingingRef.current = isAlarmRinging;
+  const { hudAlert, telemetry } = useSystemHardware();
+  const isKeepAwake = Boolean(telemetry.stay_awake);
+  const { settings } = useSettingsStore();
+  const placementMode = settings.placementMode;
+  const isFloatingMode = placementMode === 'floating';
+  const horizontalAlign = settings.horizontalAlign;
+  const hoverDelayMs = settings.hoverDelayMs;
+  const autoTuckIdle = settings.autoTuckIdle;
+  const fullscreenBehavior = settings.fullscreenBehavior;
+  const isFullscreenActive = Boolean(telemetry.is_fullscreen_active);
+  const isExternalDragOver = useDropZoneStore((s) => s.isDragging && !s.isInternalDragging);
   const activeSkillId = useSkillStore((s) => s.activeSkillId);
   const secondaryBubbleSkillId = useSkillStore(
     (s) => s.secondarySkillId || s.secondaryBubbleSkillId
@@ -117,6 +183,24 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   const collapseTimerRef = useRef<NodeJS.Timeout | null>(null);
   const dropTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const restingSleepTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const autoTuckIdleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const wasTuckedByFullscreenRef = useRef<boolean>(false);
+  const wasHiddenByFullscreenRef = useRef<boolean>(false);
+  const prevIsFullscreenActiveRef = useRef<boolean>(false);
+  const fullscreenExitCooldownUntilRef = useRef<number>(0);
+  const [fullscreenExitTick, setFullscreenExitTick] = useState<number>(0);
+  const isFloatingModeRef = useRef<boolean>(isFloatingMode);
+  isFloatingModeRef.current = isFloatingMode;
+  const horizontalAlignRef = useRef<CasaHorizontalAlign>(horizontalAlign);
+  horizontalAlignRef.current = horizontalAlign;
+  const hoverDelayMsRef = useRef(hoverDelayMs);
+  hoverDelayMsRef.current = hoverDelayMs;
+  const autoTuckIdleRef = useRef<boolean>(autoTuckIdle);
+  autoTuckIdleRef.current = autoTuckIdle;
+  const fullscreenBehaviorRef = useRef(fullscreenBehavior);
+  fullscreenBehaviorRef.current = fullscreenBehavior;
+  const isFullscreenActiveRef = useRef<boolean>(isFullscreenActive);
+  isFullscreenActiveRef.current = isFullscreenActive;
   const isWakingUpRef = useRef<boolean>(false);
   const wakeUpTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isRestingSleepRef = useRef<boolean>(false);
@@ -146,36 +230,73 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     isRestingSleepRef.current = isRestingSleep;
   }, [isRestingSleep]);
 
+  const isMusicPlayingRef = useRef<boolean>(isMusicPlaying);
+  const isTimerActiveRef = useRef<boolean>(isTimerActive);
+  const isKeepAwakeRef = useRef<boolean>(isKeepAwake);
+  useEffect(() => {
+    isMusicPlayingRef.current = isMusicPlaying;
+  }, [isMusicPlaying]);
+  useEffect(() => {
+    isTimerActiveRef.current = isTimerActive;
+  }, [isTimerActive]);
+  useEffect(() => {
+    isKeepAwakeRef.current = isKeepAwake;
+  }, [isKeepAwake]);
+
+  const clearAutoTuckIdleTimer = useCallback(() => {
+    if (autoTuckIdleTimerRef.current) {
+      clearTimeout(autoTuckIdleTimerRef.current);
+      autoTuckIdleTimerRef.current = null;
+    }
+  }, []);
+
   const resetRestingSleepTimer = useCallback(() => {
     if (restingSleepTimerRef.current) {
       clearTimeout(restingSleepTimerRef.current);
       restingSleepTimerRef.current = null;
     }
-    // ISOLASI STATE GUARD: Timer resting HANYA BOLEH AKTIF jika islandState === 'idle' DAN hening total
-    if (islandStateRef.current !== 'idle' || isMusicPlaying || isTimerActive) {
-      isRestingSleepRef.current = false;
-      setIsRestingSleep(false);
+
+    if (isAlarmRingingRef.current) {
       return;
     }
-    // Jika sudah dalam mode resting sleep, jangan reset atau bangunkan via hover/leave
+    // ISOLASI STATE GUARD: Timer auto-resting hanya berjalan saat idle hening total, Keep Awake mati, DAN kursor di luar kapsul
+    if (
+      islandStateRef.current !== 'idle' ||
+      isMusicPlaying ||
+      isTimerActive ||
+      isKeepAwake ||
+      isCursorInsideRef.current
+    ) {
+      if (isMusicPlaying || isTimerActive || isKeepAwake) {
+        isRestingSleepRef.current = false;
+        setIsRestingSleep(false);
+      }
+      return;
+    }
     if (isRestingSleepRef.current) {
       return;
     }
 
     restingSleepTimerRef.current = setTimeout(() => {
-      if (islandStateRef.current === 'idle' && !isMusicPlaying && !isTimerActive) {
+      if (
+        islandStateRef.current === 'idle' &&
+        !isMusicPlayingRef.current &&
+        !isTimerActiveRef.current &&
+        !isKeepAwakeRef.current &&
+        !isCursorInsideRef.current
+      ) {
         isCollapsingRef.current = true;
         isRestingSleepRef.current = true;
         setIsRestingSleep(true);
       }
       restingSleepTimerRef.current = null;
     }, 5500);
-  }, [isMusicPlaying, isTimerActive]);
+  }, [isMusicPlaying, isTimerActive, isKeepAwake]);
 
-  // Sinkronisasi status aktivitas (musik / timer):
-  // Jika ada aktivitas (isMusicPlaying || isTimerActive), matikan/pause timer auto-sleep 5.5s total.
+  // Sinkronisasi status aktivitas (musik / timer / Keep Awake):
+  // Jika ada aktivitas atau Keep Awake aktif, matikan/pause timer auto-sleep 5.5s dan tahan mata tetap terjaga.
   useEffect(() => {
-    if (isMusicPlaying || isTimerActive) {
+    if (isMusicPlaying || isTimerActive || isKeepAwake) {
       isRestingSleepRef.current = false;
       setIsRestingSleep(false);
       if (restingSleepTimerRef.current) {
@@ -185,7 +306,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     } else if (islandStateRef.current === 'idle') {
       resetRestingSleepTimer();
     }
-  }, [isMusicPlaying, isTimerActive, resetRestingSleepTimer]);
+  }, [isMusicPlaying, isTimerActive, isKeepAwake, resetRestingSleepTimer]);
 
   // Initial countdown on mount
   useEffect(() => {
@@ -196,17 +317,91 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     modeRef.current = mode;
   }, [mode]);
 
-  const IDLE_AWAKE_NO_MUSIC_WIDTH = 240; // Dipangkas ke 240px agar compact & memeluk konten rapat (Anti-Kopong)
-  const IDLE_AWAKE_TIMER_ONLY_WIDTH = 350;
-  const IDLE_AWAKE_WITH_MUSIC_WIDTH = 380;
-  const TRUE_RESTING_WIDTH = 168;
-  const TUCKED_WIDTH = 180;
-  const TUCKED_SENSOR_WIDTH = 120;
-  const TUCKED_SENSOR_HEIGHT = 10;
-  const EXPANDED_WIDTH = 620;
-  const EXPANDED_HEIGHT = 168;
-  const IDLE_PHYSICAL_HEIGHT = 38;
-  const IDLE_WINDOW_HEIGHT = 42; // 38px physical capsule + 4px tight buffer (anti browser tab block)
+  // Fluid hug-content notch dimensions (single source of truth in ISLAND_DIMENSIONS)
+  const TUCKED_WIDTH = ISLAND_DIMENSIONS.TUCKED_WIDTH;
+  const TUCKED_HEIGHT = ISLAND_DIMENSIONS.TUCKED_HEIGHT;
+  const TUCKED_SENSOR_WIDTH = ISLAND_DIMENSIONS.TUCKED_SENSOR_WIDTH;
+  const TUCKED_SENSOR_HEIGHT = ISLAND_DIMENSIONS.TUCKED_SENSOR_HEIGHT;
+  const EXPANDED_WIDTH = ISLAND_DIMENSIONS.EXPANDED_DROPZONE_WIDTH;
+  const IDLE_WINDOW_HEIGHT = ISLAND_DIMENSIONS.IDLE_WINDOW_HEIGHT;
+
+  // Hardware HUD, Focus Timer & To-Do State (single shared listeners)
+  const hasHudAlert = hudAlert !== null;
+  const hasHudAlertRef = useRef<boolean>(false);
+  hasHudAlertRef.current = hasHudAlert;
+
+  const resetAutoTuckIdleTimer = useCallback(() => {
+    clearAutoTuckIdleTimer();
+    if (
+      !autoTuckIdleRef.current ||
+      islandStateRef.current !== 'idle' ||
+      isMusicPlayingRef.current ||
+      isTimerActiveRef.current ||
+      isAlarmRingingRef.current ||
+      isKeepAwakeRef.current ||
+      hasHudAlertRef.current ||
+      isCursorInsideRef.current ||
+      (isFullscreenActiveRef.current && fullscreenBehaviorRef.current !== 'always-visible')
+    ) {
+      return;
+    }
+
+    autoTuckIdleTimerRef.current = setTimeout(() => {
+      autoTuckIdleTimerRef.current = null;
+      if (
+        autoTuckIdleRef.current &&
+        islandStateRef.current === 'idle' &&
+        !isMusicPlayingRef.current &&
+        !isTimerActiveRef.current &&
+        !isAlarmRingingRef.current &&
+        !isKeepAwakeRef.current &&
+        !hasHudAlertRef.current &&
+        !isCursorInsideRef.current &&
+        !isTransitioningRef.current &&
+        !(isFullscreenActiveRef.current && fullscreenBehaviorRef.current !== 'always-visible')
+      ) {
+        setIsPeeking(false);
+        isPeekingRef.current = false;
+        isCollapsingRef.current = true;
+        setIsLandingComplete(false);
+        islandStateRef.current = 'tucked';
+        setIslandState('tucked');
+      }
+    }, AUTO_TUCK_IDLE_DELAY_MS);
+  }, [clearAutoTuckIdleTimer]);
+  const focusTimer = useTimerState();
+  const focusTodos = useTodoState();
+  const focusedTaskId = focusTimer.focusedTaskId;
+  const hasFocusedTask = Boolean(
+    focusedTaskId && focusTodos.todos.some((t) => !t.completed && t.id === focusedTaskId)
+  );
+  const hasFocusedTaskRef = useRef<boolean>(false);
+  hasFocusedTaskRef.current = hasFocusedTask;
+  const isFocusTimerActive = Boolean(
+    focusedTaskId !== null && hasFocusedTask && (focusTimer.isActive || focusTimer.isPaused)
+  );
+  const isFocusTimerActiveRef = useRef<boolean>(false);
+  isFocusTimerActiveRef.current = isFocusTimerActive;
+
+  // Detached Satellite Pod & On-Demand Lyrics States
+  const [podHostEl, setPodHostEl] = useState<HTMLDivElement | null>(null);
+  const [isSearchPodOpen, setIsSearchPodOpen] = useState<boolean>(false);
+  const [isQueuePodOpen, setIsQueuePodOpen] = useState<boolean>(false);
+  const [isWifiPodOpen, setIsWifiPodOpen] = useState<boolean>(false);
+  const [isBtPodOpen, setIsBtPodOpen] = useState<boolean>(false);
+  const [isLyricsOpen, setIsLyricsOpen] = useState<boolean>(false);
+  const isLyricsOpenRef = useRef<boolean>(false);
+  isLyricsOpenRef.current = isLyricsOpen;
+  const podStateRef = useRef({ search: false, queue: false, wifi: false, bt: false });
+
+  const [measuredPillWidth, setMeasuredPillWidth] = useState<number>(240);
+  const measuredPillWidthRef = useRef<number>(240);
+
+  const handleMeasuredPillWidth = useCallback((w: number) => {
+    const evenW = Math.max(88, Math.ceil(w / 2) * 2);
+    measuredPillWidthRef.current = evenW;
+    setMeasuredPillWidth((prev) => (prev === evenW ? prev : evenW));
+  }, []);
 
   const isDualIdleActive = isMusicPlaying && isTimerActive;
   const hasSecondaryBubble =
@@ -214,90 +409,201 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     secondaryBubbleSkillId !== null ||
     mode === 'dual_bubble' ||
     (mode as string) === 'dual_idle';
-  const currentIdleWidth = isMusicPlaying
-    ? IDLE_AWAKE_WITH_MUSIC_WIDTH
-    : isTimerActive
-    ? IDLE_AWAKE_TIMER_ONLY_WIDTH
-    : isRestingSleep
-    ? TRUE_RESTING_WIDTH
-    : IDLE_AWAKE_NO_MUSIC_WIDTH;
-  // Dynamic native canvas width in idle/resting mode (tight fit to free browser tab clicks on left & right):
-  // - Mode Resting: 180px (height 42px)
-  // - Mode Idle (Compact 240px): 260px (height 42px)
-  // - Mode Satelit Aktif: tambahkan padding kanvas +48px di sisi kanan agar lingkaran satelit tidak terpotong
+
+  const ALARM_BANNER_WIDTH = ISLAND_DIMENSIONS.ALARM_BANNER_WIDTH;
+  const idleWindowWidth = resolveEffectiveIslandLayout({
+    islandState: 'idle',
+    expandedMode: 'idle',
+    measuredPillWidth,
+    isFloatingMode,
+    hasHudAlert,
+    isAlarmRinging,
+    isRestingSleep,
+    isLyricsOpen: false,
+    isFocusHoverPeek: false,
+  }).width;
+
   const getActiveIdleWindowWidth = useCallback(() => {
-    if (isRestingSleep || isRestingSleepRef.current) {
-      return 180;
-    }
-    if (hasSecondaryBubble) {
-      const baseW = isMusicPlaying
-        ? IDLE_AWAKE_WITH_MUSIC_WIDTH
-        : isTimerActive
-        ? IDLE_AWAKE_TIMER_ONLY_WIDTH
-        : IDLE_AWAKE_NO_MUSIC_WIDTH;
-      return baseW + 48 + 48;
-    }
-    if (isTimerActive) {
-      return IDLE_AWAKE_TIMER_ONLY_WIDTH + 20;
-    }
-    return 260;
-  }, [isRestingSleep, hasSecondaryBubble, isMusicPlaying, isTimerActive]);
+    return resolveEffectiveIslandLayout({
+      islandState: 'idle',
+      expandedMode: 'idle',
+      measuredPillWidth: measuredPillWidthRef.current,
+      isFloatingMode: isFloatingModeRef.current,
+      hasHudAlert: hasHudAlertRef.current,
+      isAlarmRinging: isAlarmRingingRef.current,
+      isRestingSleep: isRestingSleepRef.current,
+      isLyricsOpen: false,
+      isFocusHoverPeek: false,
+    }).width;
+  }, []);
 
-  const idleWindowWidth = getActiveIdleWindowWidth();
+  const getActiveIdleHitboxHeight = useCallback(() => IDLE_WINDOW_HEIGHT, []);
 
-  const hasSecondaryBubbleRef = useRef<boolean>(hasSecondaryBubble);
-  useEffect(() => {
-    hasSecondaryBubbleRef.current = hasSecondaryBubble;
-  }, [hasSecondaryBubble]);
+  const buildHitboxRects = useCallback(
+    (
+      capsuleW: number,
+      capsuleH: number,
+      devVisible: boolean,
+      leftPodOpen = false,
+      rightPodOpen = false,
+      tucked = false
+    ): HitRect[] => {
+      const roundedW = Math.max(88, Math.ceil(capsuleW / 2) * 2);
+      const roundedH = Math.round(capsuleH);
+      const isTuckedBar =
+        tucked || (roundedH <= TUCKED_HEIGHT && !leftPodOpen && !rightPodOpen);
+      const isCompactIdlePill = roundedH < 120 && !leftPodOpen && !rightPodOpen;
+      const effectiveW =
+        isCompactIdlePill && isAlarmRingingRef.current
+          ? Math.max(ALARM_BANNER_WIDTH, roundedW)
+          : roundedW;
+      // Hover/touch tolerance: compact on 4px tucked strip (+8px W, +4px H at top_offset: 0), +8px L/R & +6px bottom on Idle pills
+      const hitW = isTuckedBar
+        ? effectiveW + 8
+        : isCompactIdlePill
+        ? effectiveW + 16
+        : roundedW;
+      const hitH = isTuckedBar
+        ? Math.max(4, roundedH + 4)
+        : isCompactIdlePill
+        ? roundedH + 6
+        : roundedH;
+      const topOffset = isTuckedBar ? 0 : isFloatingModeRef.current ? 12 : 0;
+      const centerOffsetX = computeCenterOffsetX(
+        horizontalAlignRef.current,
+        roundedW,
+        leftPodOpen,
+        rightPodOpen
+      );
+      const POD_WIDTH = 204;
+      const podOffsetX = Math.round(roundedW / 2 + 10 + POD_WIDTH / 2);
+      const podHitboxTop = topOffset + 14;
+      const podHitboxHeight = Math.max(140, roundedH - 14);
+      const rects: HitRect[] = [
+        {
+          center_offset_x: centerOffsetX,
+          top_offset: topOffset,
+          width: hitW,
+          height: hitH,
+        },
+      ];
+
+      if (leftPodOpen) {
+        // Left Search/Wi-Fi Satellite Pod (204px, 10px gap left of dynamic Mode 6 box)
+        rects.push({
+          center_offset_x: centerOffsetX - podOffsetX,
+          top_offset: podHitboxTop,
+          width: POD_WIDTH,
+          height: podHitboxHeight,
+        });
+      }
+
+      if (rightPodOpen) {
+        // Right Queue/BT Satellite Pod (204px, 10px gap right of dynamic Mode 6 box)
+        rects.push({
+          center_offset_x: centerOffsetX + podOffsetX,
+          top_offset: podHitboxTop,
+          width: POD_WIDTH,
+          height: podHitboxHeight,
+        });
+      }
+
+      if (import.meta.env.DEV && devVisible) {
+        rects.push({
+          center_offset_x: 0,
+          top_offset: 200,
+          width: 760,
+          height: 48,
+        });
+      }
+
+      return rects;
+    },
+    []
+  );
 
   const idleWindowWidthRef = useRef<number>(idleWindowWidth);
   useEffect(() => {
     idleWindowWidthRef.current = idleWindowWidth;
   }, [idleWindowWidth]);
 
-  // Window Size Coordinator Refs to avoid redundant Tauri IPC invocations
-  const currentWinSizeRef = useRef<{ width: number; height: number }>({
+  // Window Hitbox Coordinator Refs to avoid redundant Tauri IPC invocations
+  const currentWinSizeRef = useRef<{ width: number; height: number; key: string }>({
     width: 0,
     height: 0,
+    key: '',
   });
 
   const isCollapsingRef = useRef<boolean>(false);
 
-  const applyWindowSize = (w: number, h: number) => {
-    const roundedW = Math.round(w);
-    const roundedH = Math.round(h);
-    if (
-      currentWinSizeRef.current.width === roundedW &&
-      currentWinSizeRef.current.height === roundedH
-    ) {
+  const syncCompositeHitboxes = useCallback((rects: HitRect[]) => {
+    const primary = rects[0] || { width: 88, height: 40 };
+    const roundedW = Math.max(88, Math.ceil(primary.width / 2) * 2);
+    const roundedH = Math.round(primary.height);
+    const key = rects
+      .map(
+        (r) =>
+          `${Math.round(r.center_offset_x)}:${Math.round(r.top_offset)}:${Math.round(r.width)}x${Math.round(r.height)}`
+      )
+      .join('|');
+
+    if (currentWinSizeRef.current.key === key) {
       return;
     }
-    currentWinSizeRef.current = { width: roundedW, height: roundedH };
+    currentWinSizeRef.current = { width: roundedW, height: roundedH, key };
     lastWindowResizeTimeRef.current = Date.now();
     recordCanvasResizeCall();
-    // Option B: The native Win32 window is permanently locked at 620x250.
-    // We update the active capsule hitbox in Rust backend, enabling the 50Hz poller
-    // to dynamically toggle WS_EX_TRANSPARENT on the wings without any DWM swapchain hitch.
-    updateIslandHitbox(roundedW, roundedH);
-  };
+    updateIslandHitboxes(rects);
+  }, []);
+
+  const applyWindowSize = useCallback(
+    (
+      w: number,
+      h: number,
+      devVisible = false,
+      leftPod = false,
+      rightPod = false,
+      tucked = false
+    ) => {
+      syncCompositeHitboxes(buildHitboxRects(w, h, devVisible, leftPod, rightPod, tucked));
+    },
+    [syncCompositeHitboxes, buildHitboxRects]
+  );
 
   // Register stress testing hook
   useEffect(() => {
     registerIslandTransitionHook((targetState, targetMode, secondaryBubble) => {
-      const targetW =
+      const idleW = getActiveIdleWindowWidth();
+      const isExpandedTarget = targetState === 'expanded' || targetState === 'idle_peek';
+      const targetExpandedDims = isExpandedTarget
+        ? getIslandDimensions(targetState, targetMode || effectiveExpandedMode)
+        : null;
+      const targetCapsuleW =
         targetState === 'tucked'
-          ? TUCKED_SENSOR_WIDTH
-          : EXPANDED_WIDTH;
-      const targetH =
-        targetState === 'expanded' || targetState === 'idle_peek'
-          ? EXPANDED_HEIGHT + 10
-          : targetState === 'tucked'
-          ? (showDevTrigger ? 104 : TUCKED_SENSOR_HEIGHT)
-          : IDLE_WINDOW_HEIGHT;
+          ? TUCKED_WIDTH
+          : targetExpandedDims
+          ? targetExpandedDims.width
+          : idleW;
+      const targetCapsuleH = targetExpandedDims
+        ? targetExpandedDims.height
+        : targetState === 'tucked'
+        ? TUCKED_HEIGHT
+        : IDLE_WINDOW_HEIGHT;
+      const rects = buildHitboxRects(
+        targetCapsuleW,
+        targetCapsuleH,
+        showDevTrigger,
+        false,
+        false,
+        targetState === 'tucked'
+      );
 
-      // Rule: if growing, resize window IMMEDIATELY at t = 0 before visual state updates
-      if (targetW > (currentWinSizeRef.current.width || 0)) {
-        applyWindowSize(targetW, showDevTrigger ? targetH + 70 : targetH);
+      // Rule: if growing, expand hitbox IMMEDIATELY at t = 0 before visual state updates
+      if (
+        rects[0].width > (currentWinSizeRef.current.width || 0) ||
+        rects[0].height > (currentWinSizeRef.current.height || 0)
+      ) {
+        syncCompositeHitboxes(rects);
       }
 
       if (targetState !== 'idle') {
@@ -323,11 +629,13 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     return () => {
       unregisterIslandTransitionHook();
     };
-  }, [onChangeMode, showDevTrigger]);
+  }, [onChangeMode, showDevTrigger, getActiveIdleWindowWidth, buildHitboxRects, syncCompositeHitboxes]);
 
   // Helper to map active skill to its default expanded mode
   const getEffectiveExpandedMode = (skillId: string | null): IslandMode => {
+    if (skillId === 'core.drop_zone') return 'drop_zone';
     if (skillId === 'core.timer' || skillId === 'core.todo') return 'expanded_timer';
+    if (!isMusicPlayingRef.current && isTimerActiveRef.current) return 'expanded_timer';
     return 'expanded_music';
   };
 
@@ -338,6 +646,67 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       : mode.startsWith('expanded_')
       ? mode
       : getEffectiveExpandedMode(activeSkillId);
+
+  const isFocusHoverPeek =
+    islandState !== 'expanded' &&
+    islandState === 'idle_peek' &&
+    isFocusTimerActive;
+  const isFocusHoverPeekRef = useRef<boolean>(false);
+  isFocusHoverPeekRef.current = isFocusHoverPeek;
+
+  const mediaPlaybackSource = mediaState?.playbackSource || 'companion';
+  const mediaSongTitle = mediaState?.song?.title?.trim() || '';
+  const hasActiveExternalMedia = Boolean(
+    mediaPlaybackSource !== 'native' &&
+      mediaSongTitle !== '' &&
+      mediaSongTitle !== 'No Media Playing' &&
+      mediaSongTitle !== 'No Media Active'
+  );
+  const isExternalDesktopSpotify = Boolean(
+    mediaState?.song?.is_spotify ||
+      mediaState?.song?.source_app?.toLowerCase().includes('spotify')
+  );
+  const isExternalBrowserMedia = Boolean(mediaState?.is_browser || mediaState?.song?.is_browser);
+  // Blokir pod Search/Queue di CasaIsland seketika saat media GSMTC eksternal aktif tanpa sesi Spotify Premium Web API
+  const isMusicPodsBlockedAtHost = Boolean(
+    hasActiveExternalMedia &&
+      (!isSpotifyUserConnected() ||
+        isSpotifyFreeRestricted ||
+        (!isExternalDesktopSpotify && !isExternalBrowserMedia))
+  );
+
+  const effectiveLeftPodOpen =
+    (islandState === 'expanded' || (islandState === 'idle_peek' && !isFocusHoverPeek)) &&
+    ((effectiveExpandedMode === 'expanded_music' && !isMusicPodsBlockedAtHost && isSearchPodOpen) ||
+      (effectiveExpandedMode === 'expanded_control' && isWifiPodOpen));
+  const effectiveRightPodOpen =
+    (islandState === 'expanded' || (islandState === 'idle_peek' && !isFocusHoverPeek)) &&
+    ((effectiveExpandedMode === 'expanded_music' && !isMusicPodsBlockedAtHost && isQueuePodOpen) ||
+      (effectiveExpandedMode === 'expanded_control' && isBtPodOpen));
+
+  useEffect(() => {
+    podStateRef.current = {
+      search: effectiveExpandedMode === 'expanded_music' && effectiveLeftPodOpen,
+      queue: effectiveExpandedMode === 'expanded_music' && effectiveRightPodOpen,
+      wifi: effectiveExpandedMode === 'expanded_control' && effectiveLeftPodOpen,
+      bt: effectiveExpandedMode === 'expanded_control' && effectiveRightPodOpen,
+    };
+  }, [effectiveExpandedMode, effectiveLeftPodOpen, effectiveRightPodOpen]);
+
+  // Close satellite pods when leaving their respective Mode 6 module or when GSMTC/Spotify Free restricts pods
+  useEffect(() => {
+    if (
+      effectiveExpandedMode !== 'expanded_music' ||
+      (effectiveExpandedMode === 'expanded_music' && isMusicPodsBlockedAtHost)
+    ) {
+      setIsSearchPodOpen(false);
+      setIsQueuePodOpen(false);
+    }
+    if (effectiveExpandedMode !== 'expanded_control') {
+      setIsWifiPodOpen(false);
+      setIsBtPodOpen(false);
+    }
+  }, [effectiveExpandedMode, isMusicPodsBlockedAtHost]);
 
   // Synchronize state with external mode changes from props (DevTriggerBar, Escape, etc.)
   const prevModeRef = useRef<IslandMode>(mode);
@@ -355,70 +724,102 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     }
   }, [mode]);
 
-  // Dimensions Calculator for Dynamic Resting Capsule (168px), Compact Glance (280px), Normal Idle (440px), and Expanded (700px)
-  const getIslandDimensions = (state: IslandState, targetMode: IslandMode = effectiveExpandedMode) => {
-    if (state === 'tucked') {
-      return { width: TUCKED_WIDTH, height: 8, cornerRadius: 4 };
-    }
-    if (state === 'tucked_peek') {
-      const peekWidth = isMusicPlaying
-        ? IDLE_AWAKE_WITH_MUSIC_WIDTH
-        : isTimerActive
-        ? IDLE_AWAKE_TIMER_ONLY_WIDTH
-        : IDLE_AWAKE_NO_MUSIC_WIDTH;
-      return {
-        width: peekWidth,
-        height: 38,
-        cornerRadius: 20,
-      };
-    }
-    if (state === 'idle') {
-      return {
-        width: currentIdleWidth,
-        height: 38,
-        cornerRadius: 20,
-      };
-    }
-    // For 'idle_peek' and 'expanded':
-    switch (targetMode) {
-      case 'expanded_timer':
-      case 'expanded_todo':
-      case 'drop_zone':
-      case 'expanded_music':
-      default:
-        return { width: EXPANDED_WIDTH, height: EXPANDED_HEIGHT, cornerRadius: 24 };
-    }
+  // Dimensions Calculator: strict single-source-of-truth across Modes 1-7
+  const getIslandDimensions = (
+    state: IslandState,
+    targetMode: IslandMode = effectiveExpandedMode,
+    lyricsOpen: boolean = isLyricsOpenRef.current,
+    focusPeek: boolean = isFocusHoverPeekRef.current,
+    hudWake: boolean = hasHudAlertRef.current
+  ) => {
+    const layout = resolveEffectiveIslandLayout({
+      islandState: state,
+      expandedMode: targetMode,
+      measuredPillWidth: measuredPillWidthRef.current,
+      isFloatingMode: isFloatingModeRef.current,
+      hasHudAlert: hudWake,
+      isAlarmRinging: isAlarmRingingRef.current,
+      isRestingSleep: isRestingSleepRef.current,
+      isLyricsOpen: lyricsOpen,
+      isFocusHoverPeek: focusPeek,
+    });
+    return {
+      width: layout.width,
+      height: layout.height,
+      cornerRadius: layout.bottomCornerRadius,
+      isTucked: layout.isTucked,
+    };
   };
 
-  const { width, height, cornerRadius } = getIslandDimensions(islandState, effectiveExpandedMode);
+  const effectiveLayout = resolveEffectiveIslandLayout({
+    islandState,
+    expandedMode: effectiveExpandedMode,
+    measuredPillWidth: Math.max(88, snapEvenDimension(measuredPillWidth)),
+    isFloatingMode,
+    hasHudAlert,
+    isAlarmRinging,
+    isRestingSleep,
+    isLyricsOpen,
+    isFocusHoverPeek,
+  });
+  const {
+    width,
+    height,
+    topPx: activeTopPx,
+    isTucked: isPureTucked,
+    isExpandedView,
+    bottomCornerRadius,
+    topCornerRadius,
+  } = effectiveLayout;
 
-  const isExpandedView =
-    islandState === 'expanded' ||
-    islandState === 'idle_peek' ||
-    mode === 'drop_zone' ||
-    mode.startsWith('expanded_');
+  const containerBoxRef = useRef<HTMLDivElement>(null);
+  const [measuredPillBox, setMeasuredPillBox] = useState<{ width: number; height: number }>({
+    width: 0,
+    height: 0,
+  });
 
-  // Secondary Bubble HANYA BOLEH dirender jika dan hanya jika pulau berada dalam status idle murni
-  // dan pendaratan penyusutan pil utama telah selesai sempurna di lebar 396px.
-  const shouldShowSecondaryBubble =
-    hasSecondaryBubble &&
-    !isExpandedView &&
+  const isIdleTimerPerimeterVisible =
     islandState === 'idle' &&
-    isLandingComplete;
+    !isExpandedView &&
+    !hasHudAlert &&
+    !isAlarmRinging &&
+    isTimerActive &&
+    (idleTimerState?.totalSeconds ?? 0) > 0;
+  const isIdleTimerPaused = Boolean(idleTimerState?.isPaused);
+  const idleTimerRemainingPct =
+    idleTimerState && idleTimerState.totalSeconds > 0
+      ? Math.min(
+          100,
+          Math.max(0, (idleTimerState.remainingSeconds / idleTimerState.totalSeconds) * 100)
+        )
+      : 0;
 
-  // Dynamic Hover Sensor Dimensions: anti ghost trigger on tucked and resting
+  useEffect(() => {
+    const el = containerBoxRef.current;
+    if (!el || !isIdleTimerPerimeterVisible) return;
+
+    const syncBox = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setMeasuredPillBox({
+          width: Math.round(rect.width * 10) / 10,
+          height: Math.round(rect.height * 10) / 10,
+        });
+      }
+    };
+
+    syncBox();
+    const observer = new ResizeObserver(() => {
+      syncBox();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isIdleTimerPerimeterVisible]);
+
+  // Dynamic Hover Sensor Dimensions tightly hugging capsule bounds so screen wings stay 100% click-through
   const getSensorDimensions = () => {
-    if (islandState === 'tucked') {
+    if (isPureTucked) {
       return { width: TUCKED_SENSOR_WIDTH, height: TUCKED_SENSOR_HEIGHT };
-    }
-    if (islandState === 'idle' && isRestingSleep && isLandingComplete) {
-      return { width: TRUE_RESTING_WIDTH, height: IDLE_PHYSICAL_HEIGHT };
-    }
-    if (isExpandedView || !isLandingComplete) {
-      return { width: EXPANDED_WIDTH, height: EXPANDED_HEIGHT };
-    }
-    if (hasSecondaryBubble || shouldShowSecondaryBubble) {
-      return { width: width + 48 + 16, height };
     }
     return { width, height };
   };
@@ -427,71 +828,286 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
 
   // Initial Window Setup on Mount
   useEffect(() => {
-    // Option B: Lock native Win32 window at 620x250 permanently to eliminate DWM ResizeBuffers hitch
-    adjustWindowSize(620, 250);
-    const initialW = idleWindowWidth;
-    const initialH = showDevTrigger ? 104 : IDLE_WINDOW_HEIGHT;
-    applyWindowSize(initialW, initialH);
+    // Native Win32 window locked at 1100x340 (fits 640px Mode 6 + Detached Left/Right 204px Floating Satellite Pods)
+    void adjustWindowSize(1100, 340).then(() => {
+      void alignWindowTop(horizontalAlignRef.current);
+    });
+    applyWindowSize(idleWindowWidth, getActiveIdleHitboxHeight(), showDevTrigger, false, false);
   }, []);
+
+  // Align native Win32 1100px window horizontally when Left/Center/Right setting changes
+  useEffect(() => {
+    void alignWindowTop(horizontalAlign);
+  }, [horizontalAlign]);
+
+  // Re-sync hitboxes immediately when Floating Mode / Horizontal Alignment changes
+  useLayoutEffect(() => {
+    if (isCollapsingRef.current) return;
+    if (islandState === 'tucked' && !hasHudAlert) {
+      applyWindowSize(TUCKED_WIDTH, TUCKED_HEIGHT, showDevTrigger, false, false, true);
+      return;
+    }
+    if (islandState === 'idle' || islandState === 'tucked_peek') {
+      applyWindowSize(
+        getActiveIdleWindowWidth(),
+        getActiveIdleHitboxHeight(),
+        showDevTrigger,
+        false,
+        false
+      );
+      return;
+    }
+    if (islandState === 'expanded' || islandState === 'idle_peek') {
+      applyWindowSize(width, height, showDevTrigger, effectiveLeftPodOpen, effectiveRightPodOpen);
+    }
+  }, [
+    placementMode,
+    horizontalAlign,
+    islandState,
+    hasHudAlert,
+    width,
+    height,
+    showDevTrigger,
+    effectiveLeftPodOpen,
+    effectiveRightPodOpen,
+    applyWindowSize,
+    getActiveIdleWindowWidth,
+    getActiveIdleHitboxHeight,
+  ]);
+
+  // Auto-Tuck Quiet Idle Scheduler (10s after quiet idle if setting enabled)
+  useEffect(() => {
+    resetAutoTuckIdleTimer();
+  }, [
+    autoTuckIdle,
+    islandState,
+    isMusicPlaying,
+    isTimerActive,
+    isAlarmRinging,
+    isKeepAwake,
+    hasHudAlert,
+    isFullscreenActive,
+    fullscreenBehavior,
+    resetAutoTuckIdleTimer,
+  ]);
+
+  // Fullscreen App Behavior Enforcement (smart-tuck / total-hide / always-visible)
+  useEffect(() => {
+    const wasFullscreen = prevIsFullscreenActiveRef.current;
+    prevIsFullscreenActiveRef.current = isFullscreenActive;
+
+    const clearHoverAndPeekTimers = () => {
+      if (tuckedEnterTimerRef.current) {
+        clearTimeout(tuckedEnterTimerRef.current);
+        tuckedEnterTimerRef.current = null;
+      }
+      if (intensiveHoverTimerRef.current) {
+        clearTimeout(intensiveHoverTimerRef.current);
+        intensiveHoverTimerRef.current = null;
+      }
+      if (hoverLeaveTimerRef.current) {
+        clearTimeout(hoverLeaveTimerRef.current);
+        hoverLeaveTimerRef.current = null;
+      }
+      if (leaveTimeoutRef.current) {
+        clearTimeout(leaveTimeoutRef.current);
+        leaveTimeoutRef.current = null;
+      }
+      if (collapseTimerRef.current) {
+        clearTimeout(collapseTimerRef.current);
+        collapseTimerRef.current = null;
+      }
+      clearAutoTuckIdleTimer();
+    };
+
+    if (fullscreenBehavior === 'total-hide' && isFullscreenActive) {
+      clearHoverAndPeekTimers();
+      if (restingSleepTimerRef.current) {
+        clearTimeout(restingSleepTimerRef.current);
+        restingSleepTimerRef.current = null;
+      }
+      wasTuckedByFullscreenRef.current = false;
+      if (!wasHiddenByFullscreenRef.current) {
+        wasHiddenByFullscreenRef.current = true;
+        void setWindowVisibility(false);
+      }
+      return;
+    }
+
+    if (wasHiddenByFullscreenRef.current) {
+      wasHiddenByFullscreenRef.current = false;
+      void setWindowVisibility(true);
+    }
+
+    if (fullscreenBehavior === 'smart-tuck' && isFullscreenActive) {
+      clearHoverAndPeekTimers();
+
+      if (modeRef.current.startsWith('expanded_') || modeRef.current === 'drop_zone') {
+        onChangeModeRef.current(hasSecondaryBubble ? 'dual_bubble' : 'idle');
+      }
+
+      if (!hasHudAlert && !isAlarmRinging && islandStateRef.current !== 'tucked') {
+        wasTuckedByFullscreenRef.current = true;
+        setIsPeeking(false);
+        isPeekingRef.current = false;
+        setIsSearchPodOpen(false);
+        setIsQueuePodOpen(false);
+        setIsWifiPodOpen(false);
+        setIsBtPodOpen(false);
+        isCollapsingRef.current = true;
+        setIsLandingComplete(false);
+        islandStateRef.current = 'tucked';
+        setIslandState('tucked');
+      }
+      return;
+    }
+
+    const exitedFullscreen = wasFullscreen && !isFullscreenActive;
+    if (exitedFullscreen) {
+      // Prevent synthetic Windows/WebView mousemove during fullscreen exit from auto-expanding Mode 6
+      fullscreenExitCooldownUntilRef.current =
+        Date.now() + ISLAND_DIMENSIONS.POST_FULLSCREEN_HOVER_COOLDOWN_MS;
+    }
+
+    if (wasTuckedByFullscreenRef.current || (exitedFullscreen && fullscreenBehavior === 'smart-tuck')) {
+      wasTuckedByFullscreenRef.current = false;
+      clearHoverAndPeekTimers();
+      hoverSuppressedRef.current = false;
+      setIsPeeking(false);
+      isPeekingRef.current = false;
+      setIsSearchPodOpen(false);
+      setIsQueuePodOpen(false);
+      setIsWifiPodOpen(false);
+      setIsBtPodOpen(false);
+      isCollapsingRef.current = false;
+      unlockTransition();
+      isRestingSleepRef.current = false;
+      setIsRestingSleep(false);
+
+      if (modeRef.current.startsWith('expanded_') || modeRef.current === 'drop_zone') {
+        onChangeModeRef.current(hasSecondaryBubble ? 'dual_bubble' : 'idle');
+      }
+
+      islandStateRef.current = 'idle';
+      setIslandState('idle');
+      setFullscreenExitTick((t) => t + 1);
+
+      const syncIdleHitboxes = () => {
+        if (islandStateRef.current !== 'idle') return;
+        const targetIdleW = Math.max(
+          getActiveIdleWindowWidth(),
+          ISLAND_DIMENSIONS.IDLE_MIN_AWAKE_WIDTH
+        );
+        applyWindowSize(
+          targetIdleW,
+          getActiveIdleHitboxHeight(),
+          showDevTriggerRef.current,
+          false,
+          false,
+          false
+        );
+      };
+
+      syncIdleHitboxes();
+      requestAnimationFrame(syncIdleHitboxes);
+      resetRestingSleepTimer();
+    }
+  }, [
+    fullscreenBehavior,
+    isFullscreenActive,
+    hasHudAlert,
+    isAlarmRinging,
+    hasSecondaryBubble,
+    clearAutoTuckIdleTimer,
+    applyWindowSize,
+    getActiveIdleWindowWidth,
+    getActiveIdleHitboxHeight,
+    resetRestingSleepTimer,
+  ]);
 
   const prevIslandStateRef = useRef<IslandState>('idle');
 
-  // Strict Lifecycle Sync for Native Win32 Window Canvas (runs before paint)
+  // Strict Lifecycle Sync for composite multi-rect Win32 click-through hitboxes (runs before paint)
   useLayoutEffect(() => {
     const prevState = prevIslandStateRef.current;
     const wasExpanded =
       prevState === 'expanded' || prevState === 'idle_peek';
 
     try {
+      void setIslandPinned(islandState === 'expanded');
+
       if (islandState !== 'idle' || isExpandedView) {
         setIsLandingComplete(false);
       }
 
       if (islandState === 'tucked') {
-        // SEDANG MENYUSUT: DILARANG KERAS mengecilkan jendela Win32 di frame 0 saat animasi mulai!
-        // Biarkan jendela tetap di ukuran sebelumnya sampai onAnimationComplete selesai 100%.
-        isCollapsingRef.current = true;
+        if (hasHudAlert) {
+          isCollapsingRef.current = false;
+          applyWindowSize(
+            Math.max(getActiveIdleWindowWidth(), 244),
+            IDLE_WINDOW_HEIGHT,
+            showDevTrigger,
+            false,
+            false
+          );
+        } else {
+          isCollapsingRef.current = true;
+        }
         return;
       }
 
       if (islandState === 'tucked_peek') {
         isCollapsingRef.current = false;
-        applyWindowSize(getActiveIdleWindowWidth(), showDevTrigger ? 104 : IDLE_WINDOW_HEIGHT);
+        applyWindowSize(getActiveIdleWindowWidth(), IDLE_WINDOW_HEIGHT, showDevTrigger, false, false);
         return;
       }
 
       if (islandState === 'idle_peek' || islandState === 'expanded') {
         isCollapsingRef.current = false;
-        const { width: targetW, height: targetH } = getIslandDimensions(islandState, effectiveExpandedMode);
-        applyWindowSize(targetW, showDevTrigger ? targetH + 70 : targetH);
+        const { width: targetW, height: targetH } = getIslandDimensions(
+          islandState,
+          effectiveExpandedMode,
+          isLyricsOpen,
+          isFocusHoverPeek,
+          hasHudAlert
+        );
+        applyWindowSize(targetW, targetH, showDevTrigger, effectiveLeftPodOpen, effectiveRightPodOpen);
         return;
       }
 
       if (islandState === 'idle') {
         const curH = currentWinSizeRef.current.height;
         const curW = currentWinSizeRef.current.width || EXPANDED_WIDTH;
-        const targetH = showDevTrigger ? 104 : IDLE_WINDOW_HEIGHT;
         const targetW = getActiveIdleWindowWidth();
+        const targetH = getActiveIdleHitboxHeight();
 
-        if (wasExpanded || isCollapsingRef.current || targetW < curW) {
-          // SEDANG MENYUSUT (dari expanded ke idle, atau dari idle 310px ke resting 180px):
-          // DILARANG memanggil applyWindowSize di frame 0!
-          // Biarkan kanvas tetap sampai animasi menyusut selesai 100% di onAnimationComplete.
+        if (wasExpanded || targetW < curW || targetH < curH) {
+          // Wait for Framer Motion collapse animation to finish in onAnimationComplete before shrinking hitbox
           isCollapsingRef.current = true;
           return;
         }
 
-        // Jika membesar saat idle (misal bangun dari resting 180px ke idle 310px), perbesar kanvas jendela
-        if (targetW > curW) {
-          applyWindowSize(targetW, targetH);
-        } else if (curH !== targetH) {
-          applyWindowSize(curW, targetH);
-        }
+        isCollapsingRef.current = false;
+        applyWindowSize(targetW, targetH, showDevTrigger, false, false);
       }
     } finally {
       prevIslandStateRef.current = islandState;
     }
-  }, [islandState, effectiveExpandedMode, showDevTrigger, hasSecondaryBubble, idleWindowWidth, getActiveIdleWindowWidth]);
+  }, [
+    islandState,
+    effectiveExpandedMode,
+    isLyricsOpen,
+    isFocusHoverPeek,
+    hasHudAlert,
+    isAlarmRinging,
+    showDevTrigger,
+    measuredPillWidth,
+    effectiveLeftPodOpen,
+    effectiveRightPodOpen,
+    getActiveIdleWindowWidth,
+    getActiveIdleHitboxHeight,
+    applyWindowSize,
+  ]);
 
   // Dynamic Dual-Bubble Synchronization when Idle
   useEffect(() => {
@@ -523,8 +1139,11 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       clearTimeout(hoverLeaveTimerRef.current);
       hoverLeaveTimerRef.current = null;
     }
+    clearAutoTuckIdleTimer();
     setIsPeeking(false);
     isPeekingRef.current = false;
+    setIsSearchPodOpen(false);
+    setIsQueuePodOpen(false);
     hoverSuppressedRef.current = true;
     lockTransition(500);
     isCollapsingRef.current = true;
@@ -535,50 +1154,86 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     playChimeCue('tap');
     onChangeMode(hasSecondaryBubble ? 'dual_bubble' : 'idle');
     resetRestingSleepTimer();
-  }, [hasSecondaryBubble, onChangeMode, resetRestingSleepTimer]);
+    resetAutoTuckIdleTimer();
+  }, [
+    hasSecondaryBubble,
+    onChangeMode,
+    resetRestingSleepTimer,
+    clearAutoTuckIdleTimer,
+    resetAutoTuckIdleTimer,
+  ]);
 
   // Helper to lock preview into permanent expanded state
-  const handleLockExpanded = useCallback(() => {
-    if (tuckedEnterTimerRef.current) {
-      clearTimeout(tuckedEnterTimerRef.current);
-      tuckedEnterTimerRef.current = null;
-    }
-    if (intensiveHoverTimerRef.current) {
-      clearTimeout(intensiveHoverTimerRef.current);
-      intensiveHoverTimerRef.current = null;
-    }
-    if (leaveTimeoutRef.current) {
-      clearTimeout(leaveTimeoutRef.current);
-      leaveTimeoutRef.current = null;
-    }
-    if (hoverLeaveTimerRef.current) {
-      clearTimeout(hoverLeaveTimerRef.current);
-      hoverLeaveTimerRef.current = null;
-    }
-    hoverSuppressedRef.current = false;
-    setIsPeeking(false);
-    isPeekingRef.current = false;
-    if (islandStateRef.current === 'tucked' || islandStateRef.current === 'tucked_peek') {
-      lockTransition(500);
-      islandStateRef.current = 'idle';
-      setIslandState('idle');
-      setIsRestingSleep(false);
-      resetRestingSleepTimer();
-      playChimeCue('tap');
-      return;
-    }
-    setIsLandingComplete(false);
-    const targetMode = getEffectiveExpandedMode(activeSkillId);
-    const { width: targetW, height: targetH } = getIslandDimensions('expanded', targetMode);
-    applyWindowSize(targetW, showDevTrigger ? targetH + 70 : targetH);
+  const handleLockExpanded = useCallback(
+    (forcedMode?: IslandMode) => {
+      if (tuckedEnterTimerRef.current) {
+        clearTimeout(tuckedEnterTimerRef.current);
+        tuckedEnterTimerRef.current = null;
+      }
+      if (intensiveHoverTimerRef.current) {
+        clearTimeout(intensiveHoverTimerRef.current);
+        intensiveHoverTimerRef.current = null;
+      }
+      if (leaveTimeoutRef.current) {
+        clearTimeout(leaveTimeoutRef.current);
+        leaveTimeoutRef.current = null;
+      }
+      if (hoverLeaveTimerRef.current) {
+        clearTimeout(hoverLeaveTimerRef.current);
+        hoverLeaveTimerRef.current = null;
+      }
+      clearAutoTuckIdleTimer();
+      hoverSuppressedRef.current = false;
+      setIsPeeking(false);
+      isPeekingRef.current = false;
+      if (!forcedMode && islandStateRef.current === 'expanded') {
+        return;
+      }
+      if (islandStateRef.current === 'tucked' || islandStateRef.current === 'tucked_peek') {
+        lockTransition(500);
+        islandStateRef.current = 'idle';
+        setIslandState('idle');
+        setIsRestingSleep(false);
+        resetRestingSleepTimer();
+        playChimeCue('tap');
+        return;
+      }
+      const wasFocusPeek = isFocusHoverPeekRef.current;
+      setIsLandingComplete(false);
+      const preservedExpandedMode =
+        modeRef.current.startsWith('expanded_') || modeRef.current === 'drop_zone'
+          ? modeRef.current
+          : null;
+      const targetMode =
+        forcedMode ??
+        (wasFocusPeek ? 'expanded_timer' : null) ??
+        preservedExpandedMode ??
+        getEffectiveExpandedMode(activeSkillId);
+      if (targetMode === 'expanded_timer' || targetMode === 'expanded_todo') {
+        useSkillStore.getState().setActiveSkillId('core.timer');
+      }
+      const { width: targetW, height: targetH } = getIslandDimensions(
+        'expanded',
+        targetMode,
+        isLyricsOpenRef.current,
+        false,
+        hasHudAlertRef.current
+      );
+      const nextLeftPod =
+        (targetMode === 'expanded_music' && podStateRef.current.search) ||
+        (targetMode === 'expanded_control' && podStateRef.current.wifi);
+      const nextRightPod =
+        (targetMode === 'expanded_music' && podStateRef.current.queue) ||
+        (targetMode === 'expanded_control' && podStateRef.current.bt);
+      applyWindowSize(targetW, targetH, showDevTrigger, nextLeftPod, nextRightPod);
 
-    requestAnimationFrame(() => {
       islandStateRef.current = 'expanded';
       setIslandState('expanded');
       onChangeMode(targetMode);
       playChimeCue('tap');
-    });
-  }, [activeSkillId, onChangeMode, resetRestingSleepTimer, showDevTrigger]);
+    },
+    [activeSkillId, onChangeMode, resetRestingSleepTimer, showDevTrigger, applyWindowSize]
+  );
 
   // Helper to expand card permanently: coordinates state cleanly without synchronous frame-0 resize jolt
   const expandToSkill = useCallback(
@@ -615,8 +1270,16 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       setIsLandingComplete(false);
       playChimeCue('tap');
       const targetMode = getEffectiveExpandedMode(targetSkillId);
+      if (targetMode !== 'expanded_music') {
+        setIsSearchPodOpen(false);
+        setIsQueuePodOpen(false);
+      }
+      if (targetMode !== 'expanded_control') {
+        setIsWifiPodOpen(false);
+        setIsBtPodOpen(false);
+      }
       const { width: targetW, height: targetH } = getIslandDimensions('expanded', targetMode);
-      applyWindowSize(targetW, showDevTrigger ? targetH + 70 : targetH);
+      applyWindowSize(targetW, targetH, showDevTrigger, false, false);
 
       requestAnimationFrame(() => {
         islandStateRef.current = 'expanded';
@@ -624,7 +1287,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         onChangeMode(targetMode);
       });
     },
-    [onChangeMode, resetRestingSleepTimer, showDevTrigger]
+    [onChangeMode, resetRestingSleepTimer, showDevTrigger, applyWindowSize]
   );
 
   const handleExpandSkill = useCallback(
@@ -657,47 +1320,17 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     [expandToSkill, resetRestingSleepTimer]
   );
 
-  const handleSecondaryBubbleClick = useCallback(() => {
-    if (isTransitioningRef.current) return;
-    if (tuckedEnterTimerRef.current) {
-      clearTimeout(tuckedEnterTimerRef.current);
-      tuckedEnterTimerRef.current = null;
-    }
-    if (intensiveHoverTimerRef.current) {
-      clearTimeout(intensiveHoverTimerRef.current);
-      intensiveHoverTimerRef.current = null;
-    }
-    if (leaveTimeoutRef.current) {
-      clearTimeout(leaveTimeoutRef.current);
-      leaveTimeoutRef.current = null;
-    }
-    setIsPeeking(false);
-    isPeekingRef.current = false;
-    if (islandStateRef.current === 'tucked' || islandStateRef.current === 'tucked_peek') {
-      lockTransition(500);
-      islandStateRef.current = 'idle';
-      setIslandState('idle');
-      setIsRestingSleep(false);
-      resetRestingSleepTimer();
-      playChimeCue('tap');
-      return;
-    }
-    const targetSkill = isTimerActive ? 'core.timer' : (secondaryBubbleSkillId || 'core.media');
-    expandToSkill(targetSkill);
-  }, [expandToSkill, secondaryBubbleSkillId, resetRestingSleepTimer, isTimerActive]);
+  const collapseToIdleRef = useRef<() => void>(() => {});
 
   const handleHeaderClick = useCallback(
     (e?: React.MouseEvent) => {
       if (e) e.stopPropagation();
-      // Jika masih dalam status intip / belum terkunci, klik harus MENGUNCI mekar
+      // Mode 6 tetap persistent: klik area header hanya mengunci peek preview jika masih peeking
       if (isPeeking || isPeekingRef.current || islandState !== 'expanded') {
         handleLockExpanded();
-      } else {
-        // Hanya ciutkan ke idle jika status SUDAH terkunci di expanded
-        collapseToIdle();
       }
     },
-    [isPeeking, islandState, handleLockExpanded, collapseToIdle]
+    [isPeeking, islandState, handleLockExpanded]
   );
 
   const handleSelectMode = useCallback(
@@ -708,31 +1341,158 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       if (islandStateRef.current === 'idle_peek') {
         handleLockExpanded();
       }
-      const targetSkill =
-        newMode === 'expanded_timer'
-          ? 'core.timer'
-          : newMode === 'expanded_todo'
-          ? 'core.todo'
-          : 'core.media';
-      useSkillStore.getState().setActiveSkillId(targetSkill);
-      const { width: targetW, height: targetH } = getIslandDimensions(islandStateRef.current, newMode);
-      applyWindowSize(targetW, showDevTrigger ? targetH + 70 : targetH);
+      if (newMode !== 'expanded_music') {
+        setIsSearchPodOpen(false);
+        setIsQueuePodOpen(false);
+      }
+      if (newMode !== 'expanded_control') {
+        setIsWifiPodOpen(false);
+        setIsBtPodOpen(false);
+      }
+      if (newMode === 'expanded_timer') {
+        useSkillStore.getState().setActiveSkillId('core.timer');
+      } else if (newMode === 'expanded_todo') {
+        useSkillStore.getState().setActiveSkillId('core.todo');
+      } else if (newMode === 'expanded_music') {
+        useSkillStore.getState().setActiveSkillId('core.media');
+      }
+      const { width: targetW, height: targetH } = getIslandDimensions(
+        'expanded',
+        newMode,
+        isLyricsOpenRef.current,
+        false,
+        hasHudAlertRef.current
+      );
+      const nextLeftPod =
+        (newMode === 'expanded_music' && podStateRef.current.search) ||
+        (newMode === 'expanded_control' && podStateRef.current.wifi);
+      const nextRightPod =
+        (newMode === 'expanded_music' && podStateRef.current.queue) ||
+        (newMode === 'expanded_control' && podStateRef.current.bt);
+      applyWindowSize(targetW, targetH, showDevTrigger, nextLeftPod, nextRightPod);
       onChangeMode(newMode);
     },
-    [showDevTrigger, onChangeMode, handleLockExpanded]
+    [showDevTrigger, onChangeMode, handleLockExpanded, applyWindowSize]
   );
 
-  // Hover Interaction State Machine (Dual-Tier with ISOLASI MUTLAK & Exit-Gate Lock)
+  // Shared hover-peek state machine for both mouseEnter and mouseMove
+  const scheduleHoverPeek = useCallback(
+    (allowIdleHoverRestart: boolean) => {
+      if (Date.now() < fullscreenExitCooldownUntilRef.current) {
+        return;
+      }
+
+      if (isAlarmRinging || isAlarmRingingRef.current) {
+        return;
+      }
+
+      if (
+        hoverDelayMsRef.current < 0 ||
+        (isFullscreenActiveRef.current && fullscreenBehaviorRef.current === 'smart-tuck')
+      ) {
+        return;
+      }
+
+      const peekDelayMs = Math.max(0, hoverDelayMsRef.current);
+      const currentState = islandStateRef.current;
+
+      if (currentState === 'tucked') {
+        if (allowIdleHoverRestart || (!tuckedEnterTimerRef.current && !isCollapsingRef.current && !isTransitioningRef.current)) {
+          if (!tuckedEnterTimerRef.current) {
+            tuckedEnterTimerRef.current = setTimeout(() => {
+              if (islandStateRef.current === 'tucked' && !hoverSuppressedRef.current) {
+                setIsPeeking(true);
+                isPeekingRef.current = true;
+                isRestingSleepRef.current = false;
+                setIsRestingSleep(false);
+                islandStateRef.current = 'tucked_peek';
+                setIslandState('tucked_peek');
+                playChimeCue('tap');
+              }
+              tuckedEnterTimerRef.current = null;
+            }, peekDelayMs);
+          }
+        }
+        return;
+      }
+
+      if (currentState === 'tucked_peek') {
+        if (allowIdleHoverRestart) {
+          setIsPeeking(true);
+          isPeekingRef.current = true;
+        }
+        return;
+      }
+
+      if (currentState === 'idle') {
+        if (isRestingSleep || isRestingSleepRef.current) {
+          return;
+        }
+
+        if (
+          !isAlarmRinging &&
+          !isAlarmRingingRef.current &&
+          !intensiveHoverTimerRef.current &&
+          !isCollapsingRef.current &&
+          !isTransitioningRef.current
+        ) {
+          intensiveHoverTimerRef.current = setTimeout(() => {
+            if (
+              Date.now() >= fullscreenExitCooldownUntilRef.current &&
+              islandStateRef.current === 'idle' &&
+              !isAlarmRingingRef.current &&
+              !hoverSuppressedRef.current &&
+              !isRestingSleepRef.current
+            ) {
+              const focusPeekNext = isFocusTimerActiveRef.current;
+              const targetMode = focusPeekNext
+                ? 'expanded_timer'
+                : getEffectiveExpandedMode(activeSkillId);
+              const { width: targetW, height: targetH } = getIslandDimensions(
+                'idle_peek',
+                targetMode,
+                isLyricsOpenRef.current,
+                focusPeekNext,
+                hasHudAlertRef.current
+              );
+              applyWindowSize(targetW, targetH, showDevTrigger, false, false);
+
+              requestAnimationFrame(() => {
+                if (
+                  Date.now() >= fullscreenExitCooldownUntilRef.current &&
+                  islandStateRef.current === 'idle' &&
+                  !isAlarmRingingRef.current &&
+                  !hoverSuppressedRef.current &&
+                  !isRestingSleepRef.current
+                ) {
+                  setIsPeeking(true);
+                  isPeekingRef.current = true;
+                  setIsLandingComplete(false);
+                  islandStateRef.current = 'idle_peek';
+                  setIslandState('idle_peek');
+                }
+              });
+            }
+            intensiveHoverTimerRef.current = null;
+          }, peekDelayMs);
+        }
+      }
+    },
+    [isAlarmRinging, isRestingSleep, activeSkillId, showDevTrigger, applyWindowSize]
+  );
+
+  // Hover Interaction State Machine: Hover-to-Peek + Anti-Double-Jump Guard
   const handleMouseEnter = useCallback(() => {
     isCursorInsideRef.current = true;
 
-    // Redam Flap Sintetis: Abaikan event jika dipicu dalam jeda < 120ms pasca-resize jendela native Win32
-    if (Date.now() - lastWindowResizeTimeRef.current < 120) {
-      hoverSuppressedRef.current = true;
+    // Redam flap singkat pasca update hitbox atau post-fullscreen cooldown tanpa mengunci hover permanen
+    if (
+      Date.now() - lastWindowResizeTimeRef.current < 80 ||
+      Date.now() < fullscreenExitCooldownUntilRef.current
+    ) {
       return;
     }
 
-    // EXIT-GATE LOCK: Selama gembok aktif pasca-ciut, dilarang keras memicu idle_peek atau tucked_peek
     if (hoverSuppressedRef.current) {
       return;
     }
@@ -756,89 +1516,19 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       clearTimeout(restingSleepTimerRef.current);
       restingSleepTimerRef.current = null;
     }
-
-    const currentState = islandStateRef.current;
-
-    // 1. Status 'tucked' (minimize bar): Transisi responsif ke mode intip (tucked_peek) dalam 50ms
-    if (currentState === 'tucked') {
-      tuckedEnterTimerRef.current = setTimeout(() => {
-        if (islandStateRef.current === 'tucked' && !hoverSuppressedRef.current) {
-          setIsPeeking(true);
-          isPeekingRef.current = true;
-          setIsRestingSleep(false);
-          islandStateRef.current = 'tucked_peek';
-          setIslandState('tucked_peek');
-          playChimeCue('tap');
-        }
-        tuckedEnterTimerRef.current = null;
-      }, 50);
-      return;
-    }
-
-    // 2. ISOLASI MUTLAK:
-    // Selama status bernilai 'tucked_peek', event hover tingkat 2 (pembuka preview) DIBLOKIR TOTAL.
-    if (currentState === 'tucked_peek') {
-      setIsPeeking(true);
-      isPeekingRef.current = true;
-      return;
-    }
-
-    // 3. Status 'idle' (standard pill): Transisi responsif ke mode intip (idle_peek) dalam 60ms
-    if (currentState === 'idle') {
-      // WAKE-ON-CLICK ONLY: Saat isRestingSleep === true, matikan pemicu bangun dari onMouseEnter!
-      // Kursor lewat atau diam di atas mata TIDAK BOLEH membangunkan CASA ke Idle.
-      if (isRestingSleep || isRestingSleepRef.current) {
-        return;
-      }
-
-      // Selama masa cooldown bangun dari resting (isWakingUpRef true), abaikan pemicu hover intip/mekar
-      if (isWakingUpRef.current) {
-        return;
-      }
-
-      intensiveHoverTimerRef.current = setTimeout(() => {
-        if (
-          islandStateRef.current === 'idle' &&
-          !hoverSuppressedRef.current &&
-          !isWakingUpRef.current &&
-          !isRestingSleepRef.current
-        ) {
-          const targetMode = getEffectiveExpandedMode(activeSkillId);
-          const { width: targetW, height: targetH } = getIslandDimensions('idle_peek', targetMode);
-          applyWindowSize(targetW, showDevTrigger ? targetH + 70 : targetH);
-
-          requestAnimationFrame(() => {
-            if (
-              islandStateRef.current === 'idle' &&
-              !hoverSuppressedRef.current &&
-              !isWakingUpRef.current &&
-              !isRestingSleepRef.current
-            ) {
-              setIsPeeking(true);
-              isPeekingRef.current = true;
-              setIsLandingComplete(false);
-              islandStateRef.current = 'idle_peek';
-              setIslandState('idle_peek');
-            }
-          });
-        }
-        intensiveHoverTimerRef.current = null;
-      }, 60);
-      return;
-    }
-
-    // In 'idle_peek' or 'expanded', cursor movements stay within current state
-  }, [isRestingSleep, activeSkillId, showDevTrigger]);
+    clearAutoTuckIdleTimer();
+    scheduleHoverPeek(true);
+  }, [clearAutoTuckIdleTimer, scheduleHoverPeek]);
 
   const handleMouseMove = useCallback(() => {
     isCursorInsideRef.current = true;
 
-    // EXIT-GATE LOCK: Selama gembok aktif pasca-ciut, dilarang keras memicu idle_peek atau tucked_peek
-    if (hoverSuppressedRef.current) {
+    if (
+      hoverSuppressedRef.current ||
+      Date.now() < fullscreenExitCooldownUntilRef.current
+    ) {
       return;
     }
-
-    const currentState = islandStateRef.current;
 
     if (leaveTimeoutRef.current) {
       clearTimeout(leaveTimeoutRef.current);
@@ -848,65 +1538,13 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       clearTimeout(hoverLeaveTimerRef.current);
       hoverLeaveTimerRef.current = null;
     }
-
-    if (currentState === 'idle') {
-      // WAKE-ON-CLICK ONLY: Saat isRestingSleep === true, matikan pemicu bangun dari onMouseMove!
-      if (isRestingSleep || isRestingSleepRef.current) {
-        return;
-      }
-
-      // Selama masa cooldown bangun dari resting, abaikan pemicu hover intip/mekar
-      if (isWakingUpRef.current) {
-        return;
-      }
-
-      if (!intensiveHoverTimerRef.current && !isCollapsingRef.current && !isTransitioningRef.current) {
-        intensiveHoverTimerRef.current = setTimeout(() => {
-          if (
-            islandStateRef.current === 'idle' &&
-            !hoverSuppressedRef.current &&
-            !isWakingUpRef.current &&
-            !isRestingSleepRef.current
-          ) {
-            const targetMode = getEffectiveExpandedMode(activeSkillId);
-            const { width: targetW, height: targetH } = getIslandDimensions('idle_peek', targetMode);
-            applyWindowSize(targetW, showDevTrigger ? targetH + 70 : targetH);
-
-            requestAnimationFrame(() => {
-              if (
-                islandStateRef.current === 'idle' &&
-                !hoverSuppressedRef.current &&
-                !isWakingUpRef.current &&
-                !isRestingSleepRef.current
-              ) {
-                setIsPeeking(true);
-                isPeekingRef.current = true;
-                setIsLandingComplete(false);
-                islandStateRef.current = 'idle_peek';
-                setIslandState('idle_peek');
-              }
-            });
-          }
-          intensiveHoverTimerRef.current = null;
-        }, 60);
-      }
-    } else if (currentState === 'tucked') {
-      if (!tuckedEnterTimerRef.current && !isCollapsingRef.current && !isTransitioningRef.current) {
-        tuckedEnterTimerRef.current = setTimeout(() => {
-          if (islandStateRef.current === 'tucked' && !hoverSuppressedRef.current) {
-            setIsPeeking(true);
-            isPeekingRef.current = true;
-            isRestingSleepRef.current = false;
-            setIsRestingSleep(false);
-            islandStateRef.current = 'tucked_peek';
-            setIslandState('tucked_peek');
-            playChimeCue('tap');
-          }
-          tuckedEnterTimerRef.current = null;
-        }, 50);
-      }
+    if (restingSleepTimerRef.current) {
+      clearTimeout(restingSleepTimerRef.current);
+      restingSleepTimerRef.current = null;
     }
-  }, [isRestingSleep]);
+    clearAutoTuckIdleTimer();
+    scheduleHoverPeek(false);
+  }, [clearAutoTuckIdleTimer, scheduleHoverPeek]);
 
   const handleMouseLeave = useCallback(() => {
     isCursorInsideRef.current = false;
@@ -926,6 +1564,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     // Jika status aktif permanen adalah 'idle' atau 'expanded', ABAIKAN SEPENUHNYA auto-minimize!
     if (currentState === 'idle') {
       resetRestingSleepTimer();
+      resetAutoTuckIdleTimer();
       return;
     }
     if (currentState === 'expanded') {
@@ -968,16 +1607,22 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           islandStateRef.current = 'idle';
           setIslandState('idle');
           resetRestingSleepTimer();
+          resetAutoTuckIdleTimer();
         }
         hoverLeaveTimerRef.current = null;
       }, 180);
       return;
     }
-  }, [resetRestingSleepTimer]);
+  }, [resetRestingSleepTimer, resetAutoTuckIdleTimer]);
 
   // Click Handler on Notch: One-Click Deterministic Inversion
   const handlePillClick = useCallback(
     (e: React.MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-satellite-pod="true"]')) {
+        e.stopPropagation();
+        return;
+      }
       e.stopPropagation();
       hoverSuppressedRef.current = false;
       if (tuckedEnterTimerRef.current) {
@@ -996,43 +1641,30 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         clearTimeout(hoverLeaveTimerRef.current);
         hoverLeaveTimerRef.current = null;
       }
+      clearAutoTuckIdleTimer();
       if (isTransitioningRef.current) return;
 
       const currentState = islandStateRef.current;
 
-      // Status 'tucked': Klik mengunci status menjadi 'idle' permanen
-      if (currentState === 'tucked') {
+      // 1. Klik pada Mode 7 (Minimize / 'tucked' atau preview 'tucked_peek'):
+      //    Mengunci state ke Modes 2-5 (Idle) dengan Anti-Double-Jump Guard
+      if (currentState === 'tucked' || currentState === 'tucked_peek') {
         hoverSuppressedRef.current = true;
         setIsPeeking(false);
         isPeekingRef.current = false;
-        lockTransition(500);
+        lockTransition(400);
         isRestingSleepRef.current = false;
         setIsRestingSleep(false);
         islandStateRef.current = 'idle';
         setIslandState('idle');
-        resetRestingSleepTimer();
+        if (!isCursorInsideRef.current) {
+          resetRestingSleepTimer();
+        }
         playChimeCue('tap');
         return;
       }
 
-      // Status 'tucked_peek':
-      // REQUIREMENT 3: Klik saat 'tucked_peek' mengunci status menjadi 'idle' permanen
-      if (currentState === 'tucked_peek') {
-        hoverSuppressedRef.current = true;
-        setIsPeeking(false);
-        isPeekingRef.current = false;
-        lockTransition(500);
-        isRestingSleepRef.current = false;
-        setIsRestingSleep(false);
-        islandStateRef.current = 'idle';
-        setIslandState('idle');
-        resetRestingSleepTimer();
-        playChimeCue('tap');
-        return;
-      }
-
-      // Status 'idle_peek':
-      // KLIK SAAT PREVIEW = KUNCI STAY (EXPAND PERMANEN)
+      // Status 'idle_peek' (preview Mode 6): Click-to-Lock Mode 6 permanen
       if (currentState === 'idle_peek') {
         setIsPeeking(false);
         isPeekingRef.current = false;
@@ -1040,23 +1672,18 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         return;
       }
 
-      // Status 'idle':
-      // WAKE-ON-CLICK: Jika dalam mode Resting (isRestingSleep true), klik kiri membangunkannya ke Idle
+      // 2. Status 'idle' dengan Click-to-Lock & Anti-Double-Jump Guard:
+      //    - Dari Mode 1 (Resting): klik mengunci ke Modes 2-5 (Idle aktif) tanpa langsung melompat ke Mode 6
+      //    - Dari Modes 2-5 (Idle): klik mengunci Mode 6 (Mekar) secara persistent
       if (currentState === 'idle') {
         if (isRestingSleep || isRestingSleepRef.current) {
           hoverSuppressedRef.current = true;
           isRestingSleepRef.current = false;
           setIsRestingSleep(false);
-          isWakingUpRef.current = true;
-          if (wakeUpTimerRef.current) {
-            clearTimeout(wakeUpTimerRef.current);
+          if (!isCursorInsideRef.current) {
+            resetRestingSleepTimer();
           }
-          wakeUpTimerRef.current = setTimeout(() => {
-            isWakingUpRef.current = false;
-            wakeUpTimerRef.current = null;
-          }, 350);
           playChimeCue('tap');
-          resetRestingSleepTimer();
           return;
         }
         lockTransition(500);
@@ -1064,14 +1691,12 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         return;
       }
 
-      // Status 'expanded':
-      // Klik pada pill/header menciutkan kembali ke 'idle'
+      // 3. Status 'expanded' (Mode 6 Mekar): Persistent — klik di dalam kapsul TIDAK menutup Mode 6
       if (currentState === 'expanded') {
-        collapseToIdle();
         return;
       }
     },
-    [handleLockExpanded, collapseToIdle, isRestingSleep, resetRestingSleepTimer]
+    [handleLockExpanded, resetRestingSleepTimer, isRestingSleep]
   );
 
   // Right-Click Context Menu: Collapse if expanded/peeking, or tuck away into thin top line if idle/resting
@@ -1099,6 +1724,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         clearTimeout(restingSleepTimerRef.current);
         restingSleepTimerRef.current = null;
       }
+      clearAutoTuckIdleTimer();
       setIsPeeking(false);
       isPeekingRef.current = false;
       if (isTransitioningRef.current) return;
@@ -1120,12 +1746,14 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         playChimeCue('whisper');
       } else if (currentState === 'tucked' || currentState === 'tucked_peek') {
         hoverSuppressedRef.current = true;
-        lockTransition(500);
+        lockTransition(400);
         isRestingSleepRef.current = false;
         setIsRestingSleep(false);
         islandStateRef.current = 'idle';
         setIslandState('idle');
-        resetRestingSleepTimer();
+        if (!isCursorInsideRef.current) {
+          resetRestingSleepTimer();
+        }
         playChimeCue('tap');
       }
     },
@@ -1169,20 +1797,69 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         playChimeCue('whisper');
       } else if (currentState === 'tucked' || currentState === 'tucked_peek') {
         hoverSuppressedRef.current = true;
-        lockTransition(500);
+        lockTransition(400);
         isRestingSleepRef.current = false;
         setIsRestingSleep(false);
         islandStateRef.current = 'idle';
         setIslandState('idle');
-        resetRestingSleepTimer();
+        if (!isCursorInsideRef.current) {
+          resetRestingSleepTimer();
+        }
         playChimeCue('tap');
       }
     }
   }, [resetRestingSleepTimer]);
 
-  // Global click-outside & Escape listeners to collapse unpinned or active floating card
+  // Wake tucked/peeking notch cleanly to Idle when Focus Alarm starts ringing so banner takeover stays clickable
+  useEffect(() => {
+    if (!isAlarmRinging) return;
+
+    if (tuckedEnterTimerRef.current) {
+      clearTimeout(tuckedEnterTimerRef.current);
+      tuckedEnterTimerRef.current = null;
+    }
+    if (intensiveHoverTimerRef.current) {
+      clearTimeout(intensiveHoverTimerRef.current);
+      intensiveHoverTimerRef.current = null;
+    }
+    if (isRestingSleepRef.current) {
+      isRestingSleepRef.current = false;
+      setIsRestingSleep(false);
+    }
+
+    const cur = islandStateRef.current;
+    if (cur === 'tucked' || cur === 'tucked_peek' || cur === 'idle_peek') {
+      islandStateRef.current = 'idle';
+      setIslandState('idle');
+      setIsPeeking(false);
+      isPeekingRef.current = false;
+      if (cur !== 'idle_peek') {
+        applyWindowSize(
+          getActiveIdleWindowWidth(),
+          getActiveIdleHitboxHeight(),
+          showDevTriggerRef.current,
+          false,
+          false
+        );
+      }
+    }
+  }, [isAlarmRinging, applyWindowSize, getActiveIdleWindowWidth, getActiveIdleHitboxHeight]);
+
+  useEffect(() => {
+    collapseToIdleRef.current = collapseToIdle;
+  }, [collapseToIdle]);
+
+  const handleLockExpandedRef = useRef(handleLockExpanded);
+  useEffect(() => {
+    handleLockExpandedRef.current = handleLockExpanded;
+  }, [handleLockExpanded]);
+
+  // Global click-outside (WebView + Win32 OS desktop) & Escape listeners for persistent Mode 6
   useEffect(() => {
     const handleGlobalClick = (e: MouseEvent) => {
+      if ((e.target as HTMLElement)?.closest('[data-dev-trigger="true"]')) {
+        return;
+      }
       if (islandRef.current && !islandRef.current.contains(e.target as Node)) {
         if (isTransitioningRef.current) return;
         if (tuckedEnterTimerRef.current) {
@@ -1194,9 +1871,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           leaveTimeoutRef.current = null;
         }
         const currentState = islandStateRef.current;
-        if (currentState === 'expanded') {
-          collapseToIdle();
-        } else if (currentState === 'idle_peek') {
+        // Mode 6 yang sudah terkunci (expanded) tetap persistent saat klik di luar jendela aplikasi;
+        // hanya preview sementara (idle_peek / tucked_peek) yang menutup otomatis.
+        if (currentState === 'idle_peek') {
           islandStateRef.current = 'idle';
           setIslandState('idle');
         } else if (currentState === 'tucked_peek') {
@@ -1221,7 +1898,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         }
         const currentState = islandStateRef.current;
         if (currentState === 'expanded') {
-          collapseToIdle();
+          collapseToIdleRef.current();
         } else if (currentState === 'idle_peek') {
           islandStateRef.current = 'idle';
           setIslandState('idle');
@@ -1233,11 +1910,18 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         } else if (currentState === 'tucked') {
           setIsPeeking(false);
           isPeekingRef.current = false;
-          lockTransition(500);
+          lockTransition(400);
+          const enterResting =
+            !isMusicPlayingRef.current &&
+            !isTimerActiveRef.current &&
+            !isKeepAwakeRef.current;
+          isRestingSleepRef.current = enterResting;
+          setIsRestingSleep(enterResting);
           islandStateRef.current = 'idle';
           setIslandState('idle');
-          setIsRestingSleep(false);
-          resetRestingSleepTimer();
+          if (!enterResting) {
+            resetRestingSleepTimer();
+          }
           playChimeCue('tap');
         }
       }
@@ -1245,11 +1929,88 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
 
     window.addEventListener('mousedown', handleGlobalClick);
     window.addEventListener('keydown', handleKeyDown);
+
+    let unlistenOutsideClick: (() => void) | undefined;
+    let unlistenToggleShortcut: (() => void) | undefined;
+    let isMounted = true;
+    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      listen('casa://outside-click', () => {
+        if (!isMounted) return;
+        if (isTransitioningRef.current) return;
+        // Pertahankan Mode 6 terkunci ('expanded') tetap terbuka saat pengguna mengklik aplikasi lain;
+        // tutup hanya pratinjau hover sementara ('idle_peek').
+        if (islandStateRef.current === 'idle_peek') {
+          islandStateRef.current = 'idle';
+          setIslandState('idle');
+        }
+      })
+        .then((unlisten) => {
+          if (!isMounted) {
+            unlisten();
+          } else {
+            unlistenOutsideClick = unlisten;
+          }
+        })
+        .catch(() => {});
+
+      listen('casa://toggle-island', () => {
+        if (!isMounted) return;
+        if (tuckedEnterTimerRef.current) {
+          clearTimeout(tuckedEnterTimerRef.current);
+          tuckedEnterTimerRef.current = null;
+        }
+        if (intensiveHoverTimerRef.current) {
+          clearTimeout(intensiveHoverTimerRef.current);
+          intensiveHoverTimerRef.current = null;
+        }
+        if (leaveTimeoutRef.current) {
+          clearTimeout(leaveTimeoutRef.current);
+          leaveTimeoutRef.current = null;
+        }
+        if (hoverLeaveTimerRef.current) {
+          clearTimeout(hoverLeaveTimerRef.current);
+          hoverLeaveTimerRef.current = null;
+        }
+        clearAutoTuckIdleTimer();
+
+        const currentState = islandStateRef.current;
+        if (currentState === 'expanded' || currentState === 'idle_peek') {
+          isTransitioningRef.current = false;
+          collapseToIdleRef.current();
+        } else {
+          if (currentState === 'tucked' || currentState === 'tucked_peek') {
+            islandStateRef.current = 'idle';
+            setIslandState('idle');
+            setIsPeeking(false);
+            isPeekingRef.current = false;
+          }
+          isTransitioningRef.current = false;
+          handleLockExpandedRef.current();
+          void focusIslandWindow();
+        }
+      })
+        .then((unlisten) => {
+          if (!isMounted) {
+            unlisten();
+          } else {
+            unlistenToggleShortcut = unlisten;
+          }
+        })
+        .catch(() => {});
+    }
+
     return () => {
+      isMounted = false;
       window.removeEventListener('mousedown', handleGlobalClick);
       window.removeEventListener('keydown', handleKeyDown);
+      if (unlistenOutsideClick) {
+        unlistenOutsideClick();
+      }
+      if (unlistenToggleShortcut) {
+        unlistenToggleShortcut();
+      }
     };
-  }, [secondaryBubbleSkillId, showDevTrigger]);
+  }, [secondaryBubbleSkillId, showDevTrigger, resetRestingSleepTimer]);
 
   // Hardware Metrics
   const [metrics] = useState<HardwareMetrics>({
@@ -1314,29 +2075,45 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       if (currentState === 'idle' || currentState === 'tucked_peek') {
         useSkillStore.getState().cycleActiveSkill(dirStep);
       } else if (isExpandedView || isPeeking) {
-        const modes: IslandMode[] = ['expanded_music', 'expanded_timer', 'drop_zone'];
+        const modes: IslandMode[] = [
+          'expanded_music',
+          'expanded_timer',
+          'expanded_control',
+          'drop_zone',
+        ];
         const normalizedMode =
           effectiveExpandedMode === 'expanded_todo' ? 'expanded_timer' : effectiveExpandedMode;
         const currentIdx = modes.indexOf(normalizedMode);
         const validIdx = currentIdx >= 0 ? currentIdx : 0;
         const nextIdx = (validIdx + dirStep + modes.length) % modes.length;
         const nextMode = modes[nextIdx];
+        if (nextMode !== 'expanded_music') {
+          setIsSearchPodOpen(false);
+          setIsQueuePodOpen(false);
+        }
+        if (nextMode !== 'expanded_control') {
+          setIsWifiPodOpen(false);
+          setIsBtPodOpen(false);
+        }
         const targetSkill =
           nextMode === 'expanded_timer'
             ? 'core.timer'
             : 'core.media';
         useSkillStore.getState().setActiveSkillId(targetSkill);
         const { width: targetW, height: targetH } = getIslandDimensions('expanded', nextMode);
-        applyWindowSize(targetW, showDevTrigger ? targetH + 70 : targetH);
+        applyWindowSize(targetW, targetH, showDevTrigger, false, false);
         onChangeMode(nextMode);
       }
     },
-    [isExpandedView, effectiveExpandedMode, showDevTrigger, onChangeMode]
+    [isExpandedView, effectiveExpandedMode, showDevTrigger, onChangeMode, applyWindowSize]
   );
 
   // Wheel scroll on idle pill or expanded card to cycle active skills
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
+      if ((e.target as HTMLElement)?.closest('.oled-thin-scrollbar')) {
+        return;
+      }
       const direction = e.deltaY > 0 ? 'next' : 'prev';
       handleNavigate(direction);
     },
@@ -1364,6 +2141,48 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
             useDropZoneStore.getState().setIsDragging(true);
             isDraggingFileRef.current = true;
 
+            if (tuckedEnterTimerRef.current) {
+              clearTimeout(tuckedEnterTimerRef.current);
+              tuckedEnterTimerRef.current = null;
+            }
+            if (intensiveHoverTimerRef.current) {
+              clearTimeout(intensiveHoverTimerRef.current);
+              intensiveHoverTimerRef.current = null;
+            }
+            if (leaveTimeoutRef.current) {
+              clearTimeout(leaveTimeoutRef.current);
+              leaveTimeoutRef.current = null;
+            }
+            if (hoverLeaveTimerRef.current) {
+              clearTimeout(hoverLeaveTimerRef.current);
+              hoverLeaveTimerRef.current = null;
+            }
+            if (collapseTimerRef.current) {
+              clearTimeout(collapseTimerRef.current);
+              collapseTimerRef.current = null;
+            }
+            if (restingSleepTimerRef.current) {
+              clearTimeout(restingSleepTimerRef.current);
+              restingSleepTimerRef.current = null;
+            }
+            clearAutoTuckIdleTimer();
+            if (wakeUpTimerRef.current) {
+              clearTimeout(wakeUpTimerRef.current);
+              wakeUpTimerRef.current = null;
+            }
+
+            hoverSuppressedRef.current = false;
+            isCollapsingRef.current = false;
+            setIsPeeking(false);
+            isPeekingRef.current = false;
+            setIsRestingSleep(false);
+            isRestingSleepRef.current = false;
+
+            setIsSearchPodOpen(false);
+            setIsQueuePodOpen(false);
+            setIsWifiPodOpen(false);
+            setIsBtPodOpen(false);
+
             if (modeRef.current !== 'drop_zone' || islandStateRef.current !== 'expanded') {
               islandStateRef.current = 'expanded';
               setIslandState('expanded');
@@ -1371,7 +2190,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                 previousModeBeforeDragRef.current = modeRef.current;
               }
               const { width: targetW, height: targetH } = getIslandDimensions('expanded', 'drop_zone');
-              applyWindowSize(targetW, showDevTriggerRef.current ? targetH + 70 : targetH);
+              applyWindowSize(targetW, targetH, showDevTriggerRef.current, false, false);
               onChangeModeRef.current?.('drop_zone');
               playChimeCue('whisper');
             }
@@ -1381,13 +2200,19 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           } else if (payload.type === 'drop') {
             isDraggingFileRef.current = false;
             useDropZoneStore.getState().setIsDragging(false);
+            setIsSearchPodOpen(false);
+            setIsQueuePodOpen(false);
+            setIsWifiPodOpen(false);
+            setIsBtPodOpen(false);
             const paths = payload.paths;
             if (paths && paths.length > 0) {
-              for (const filePath of paths) {
-                const fileName = filePath.replace(/^.*[\\/]/, '') || filePath;
-                setStagedDroppedFile(fileName);
-                await useDropZoneStore.getState().addDroppedPath(filePath);
-              }
+              const lastFile = paths[paths.length - 1];
+              const fileName = lastFile.replace(/^.*[\\/]/, '') || lastFile;
+              setStagedDroppedFile(fileName);
+              await useDropZoneStore.getState().addDroppedPaths(paths);
+              islandStateRef.current = 'expanded';
+              setIslandState('expanded');
+              onChangeModeRef.current?.('drop_zone');
               playChimeCue('ding');
             }
           }
@@ -1421,18 +2246,39 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       if (intensiveHoverTimerRef.current) clearTimeout(intensiveHoverTimerRef.current);
       if (dropTimeoutRef.current) clearTimeout(dropTimeoutRef.current);
       if (restingSleepTimerRef.current) clearTimeout(restingSleepTimerRef.current);
+      if (autoTuckIdleTimerRef.current) clearTimeout(autoTuckIdleTimerRef.current);
       if (wakeUpTimerRef.current) clearTimeout(wakeUpTimerRef.current);
     };
   }, []);
 
+  const activeCenterOffsetX = computeCenterOffsetX(
+    horizontalAlign,
+    width,
+    effectiveLeftPodOpen,
+    effectiveRightPodOpen
+  );
+
   return (
     <div
       ref={islandRef}
-      className="fixed top-0 left-1/2 -translate-x-1/2 flex items-start justify-center select-none z-40 pointer-events-none"
+      style={{
+        top: activeTopPx,
+        left: `calc(50% + ${activeCenterOffsetX}px)`,
+      }}
+      className="fixed -translate-x-1/2 flex items-start justify-center select-none z-40 pointer-events-none transition-[top] duration-150 ease-out"
     >
-      {/* Dynamic Hover Sensor Wrapper: Anti-Ghost Trigger on Tucked & Resting */}
+      {/* Detached Satellite Pod Portal Host (outside overflow-clip container, inside islandRef outside-click guard) */}
+      <div
+        ref={setPodHostEl}
+        data-satellite-pod-host="true"
+        className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-[1100px] h-[196px] z-40"
+      />
+
+      {/* Dynamic Hover Sensor Wrapper tightly embracing capsule */}
       <div
         data-island-hover-sensor="true"
+        onPointerEnter={handleMouseEnter}
+        onPointerLeave={handleMouseLeave}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         onMouseMove={handleMouseMove}
@@ -1444,232 +2290,440 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
             handlePillClick(e);
           }
         }}
-        className="relative flex items-start justify-center pointer-events-auto bg-transparent overflow-visible"
+        className="relative flex items-start justify-center pointer-events-auto bg-transparent overflow-visible touch-manipulation"
         style={{
           width: sensorWidth,
           height: sensorHeight,
+          touchAction: 'manipulation',
         }}
       >
-        {/* Main Hardware Notch Shell (Docked to Top Bezel) with Frosted Glass */}
-        <motion.div
-          data-island-container="true"
-          onWheel={handleWheel}
-          onMouseDown={handleMouseDown}
-          onClick={handlePillClick}
-          onContextMenu={handlePillContextMenu}
-          animate={{
-            width,
-            height,
-          }}
-          transition={{
-            type: 'spring',
-            stiffness: 260,
-            damping: 25,
-            mass: 0.8,
-          }}
-          onAnimationComplete={() => {
-            unlockTransition();
-            if (isCollapsingRef.current) {
-              isCollapsingRef.current = false;
-              if (isCursorInsideRef.current) {
-                hoverSuppressedRef.current = true;
-              }
-              doubleRaf(() => {
-                if (islandStateRef.current === 'tucked') {
-                  applyWindowSize(TUCKED_WIDTH, showDevTrigger ? 104 : 14);
-                  isRestingSleepRef.current = false;
-                  setIsRestingSleep(false);
-                } else if (islandStateRef.current === 'idle') {
-                  if (isRestingSleepRef.current) {
-                    applyWindowSize(180, showDevTrigger ? 104 : 42);
-                  } else {
-                    const targetW = getActiveIdleWindowWidth();
-                    const targetH = showDevTrigger ? 104 : 42;
-                    applyWindowSize(targetW, targetH);
-                  }
-                }
-              });
-            }
-            if (islandStateRef.current === 'idle' && !isExpandedView) {
-              setIsLandingComplete((prev) => (prev ? prev : true));
-            }
-          }}
-          style={{
-            borderRadius: isExpandedView ? 24 : 20,
-            overflow: 'clip',
-          }}
-          className={`relative flex flex-col pointer-events-auto shrink-0 border border-[#27272a] overflow-clip ${
-            islandState === 'tucked'
-              ? 'bg-[#09090b] shadow-[0_4px_16px_rgba(0,0,0,0.85)] hover:border-zinc-700 cursor-pointer'
-              : isExpandedView
-              ? 'bg-[#09090b] shadow-[0_12px_40px_rgba(0,0,0,0.85)]'
-              : 'bg-[#09090b] shadow-[0_12px_40px_rgba(0,0,0,0.85)] cursor-pointer hover:border-zinc-700'
-          }`}
-          title={
-            islandState === 'tucked'
-              ? 'CASA (Arahkan kursor untuk mengintip / Klik untuk membuka)'
-              : undefined
-          }
-        >
-          {/* Internal Content Animated with Clean Lifecycle & Overflow Clip */}
-          <div className="relative w-full h-full overflow-clip" style={{ overflow: 'clip' }}>
-            {/* Layer 0: Tucked Stealth Notch Accent Line */}
-            <motion.div
-              data-island-view="tucked"
-              initial={false}
-              animate={{
-                opacity: islandState === 'tucked' ? 1 : 0,
-              }}
-              transition={{ duration: 0.10, ease: 'easeOut' }}
-              className="absolute inset-0 w-full h-[8px] flex items-center justify-center pointer-events-none"
-            >
-              <div className="w-8 h-[2px] bg-white/30 rounded-full transition-colors" />
-            </motion.div>
-
-            {/* Layer 1: Expanded View (Unmounted cleanly when !isExpandedView to prevent ghost RAFs & layout overflow) */}
-            <AnimatePresence initial={false}>
-              {isExpandedView && (
-                <motion.div
-                  key="expanded-layer"
-                  data-island-view="expanded"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.12, ease: 'easeOut' }}
-                  onDragOver={(e) => {
-                    if (useDropZoneStore.getState().isInternalDragging) return;
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'copy';
-                  }}
-                  onDrop={async (e) => {
-                    if (useDropZoneStore.getState().isInternalDragging) return;
-                    e.preventDefault();
-                    useDropZoneStore.getState().setIsDragging(false);
-                    const text = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text/uri-list');
-                    if (text && text.trim()) {
-                      await useDropZoneStore.getState().addItem(text.trim());
-                      playChimeCue('ding');
-                      return;
-                    }
-                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                      for (let i = 0; i < e.dataTransfer.files.length; i++) {
-                        const file = e.dataTransfer.files[i];
-                        const path = (file as any).path || file.name;
-                        await useDropZoneStore.getState().addItem(path, file.size);
-                      }
-                      playChimeCue('ding');
-                    }
-                  }}
-                  onClick={(e) => {
-                    // KLIK SAAT PREVIEW = KUNCI STAY (EXPAND PERMANEN)
-                    if (islandStateRef.current === 'idle_peek') {
-                      e.stopPropagation();
-                      handleLockExpanded();
-                      return;
-                    }
-                    e.stopPropagation();
-                  }}
-                  className="absolute inset-0 w-full h-full flex flex-col justify-start overflow-visible select-none z-20"
-                  style={{
-                    overflow: 'visible',
-                    pointerEvents: 'auto',
-                  }}
-                >
-                  <MicroStatusHeader
-                    currentMode={effectiveExpandedMode}
-                    onSelectMode={handleSelectMode}
-                    onPrev={() => handleNavigate('prev')}
-                    onNext={() => handleNavigate('next')}
-                    isPlaying={isMusicPlaying}
-                    batteryPct={metrics.batteryPct}
-                    showDevTrigger={showDevTrigger}
-                    onToggleDevTrigger={onToggleDevTrigger}
-                    onHeaderClick={handleHeaderClick}
-                    isPeekPreview={islandState === 'idle_peek'}
-                  />
-
-                  <div
-                    className="w-full flex-1 min-h-0 flex flex-col justify-center overflow-visible relative z-20"
-                    style={{ overflow: 'visible' }}
-                  >
-                    {effectiveExpandedMode === 'expanded_music' && (
-                      <MediaExpandedView onCollapse={collapseToIdle} />
-                    )}
-
-                    {effectiveExpandedMode === 'expanded_timer' && (
-                      <TimerExpandedView onCollapse={collapseToIdle} />
-                    )}
-
-                    {effectiveExpandedMode === 'expanded_todo' && (
-                      <TodoExpandedView onCollapse={collapseToIdle} />
-                    )}
-
-                    {effectiveExpandedMode === 'drop_zone' && (
-                      <DropZoneView />
-                    )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Layer 2: Idle View */}
-            <motion.div
-              data-island-view="idle"
-              initial={false}
-              animate={{
-                opacity: isExpandedView || islandState === 'tucked' ? 0 : 1,
-              }}
-              transition={
-                isExpandedView || islandState === 'tucked'
-                  ? { duration: 0.06, ease: 'easeIn' }
-                  : { duration: 0.10, delay: 0.06, ease: 'easeOut' }
-              }
-              className={`absolute inset-0 w-full h-full mx-auto flex items-center justify-center shrink-0 overflow-clip ${
-                isExpandedView ? 'z-10' : 'z-20'
-              }`}
-              style={{
-                overflow: 'clip',
-                pointerEvents: isExpandedView || islandState === 'tucked' ? 'none' : 'auto',
-              }}
-            >
-              <IdlePillView
-                isDualBubble={hasSecondaryBubble}
-                isExpanded={isExpandedView}
-                isRestingSleep={isRestingSleep}
-                isTuckedPeek={islandState === 'tucked_peek'}
-                onExpandSkill={handleExpandSkill}
-              />
-            </motion.div>
-          </div>
-        </motion.div>
-
-        {/* Piringan Satelit Kanan (Natural Sibling Layout - Anti Desync / Zero Shift) */}
-        <div
-          className="w-0 flex-shrink-0 flex items-start justify-start overflow-visible pointer-events-none"
-          style={{ height: IDLE_PHYSICAL_HEIGHT }}
-        >
-          <AnimatePresence>
-            {shouldShowSecondaryBubble && (
-              <motion.div
-                data-island-bubble="secondary"
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{
-                  scale: 1,
-                  opacity: 1,
-                }}
-                exit={{ opacity: 0, scale: 0.5, transition: { duration: 0.08, ease: 'easeIn' } }}
-                transition={{
-                  type: 'spring',
-                  stiffness: 260,
-                  damping: 25,
-                  mass: 0.8,
-                }}
-                className="pointer-events-auto ml-[10px] shrink-0"
+        {/* Top-Flush Notch Assembly + Left/Right Concave Inverse Corner Radius Shoulders (hidden when tucked or floating) */}
+        <div className="relative inline-flex items-start justify-center overflow-visible">
+          {!isFloatingMode && !isPureTucked && (
+            <>
+              {/* Bahu Kiri Inverse Corner Radius (#000000 + 1px inner bleed overlap) */}
+              <svg
+                width="11"
+                height="10"
+                viewBox="0 0 11 10"
+                fill="none"
+                aria-hidden="true"
+                className="pointer-events-none absolute top-0 -left-[10px] z-30 transition-opacity duration-150 opacity-100"
               >
-                <SatelliteDisc onClick={handleSecondaryBubbleClick} />
-              </motion.div>
+                <path d="M 0,0 H 11 V 10 H 10 A 10,10 0 0 0 0,0 Z" fill="#000000" />
+              </svg>
+
+              {/* Bahu Kanan Inverse Corner Radius (#000000 + 1px inner bleed overlap) */}
+              <svg
+                width="11"
+                height="10"
+                viewBox="0 0 11 10"
+                fill="none"
+                aria-hidden="true"
+                className="pointer-events-none absolute top-0 -right-[10px] z-30 transition-opacity duration-150 opacity-100"
+              >
+                <path d="M 0,0 H 11 A 10,10 0 0 0 1,10 H 0 V 0 Z" fill="#000000" />
+              </svg>
+            </>
+          )}
+
+          {/* Main Pure Black Notch Container (#000000, border-t-0, sharp top, rounded bottom) */}
+          <motion.div
+            ref={containerBoxRef}
+            data-island-container="true"
+            onWheel={handleWheel}
+            onMouseDown={handleMouseDown}
+            onClick={handlePillClick}
+            onContextMenu={handlePillContextMenu}
+            animate={{
+              width,
+              height,
+            }}
+            transition={
+              isLandingComplete && islandState === 'idle' && !hasHudAlert
+                ? {
+                    width: { duration: 0.3, ease: [0.22, 1, 0.36, 1] },
+                    height: { type: 'spring', stiffness: 260, damping: 28, mass: 0.8 },
+                  }
+                : {
+                    type: 'spring',
+                    stiffness: 260,
+                    damping: 28,
+                    mass: 0.8,
+                  }
+            }
+            onAnimationComplete={() => {
+              unlockTransition();
+              if (isCollapsingRef.current) {
+                isCollapsingRef.current = false;
+                if (isCursorInsideRef.current && islandStateRef.current === 'tucked') {
+                  hoverSuppressedRef.current = true;
+                }
+                doubleRaf(() => {
+                  const devVis = showDevTriggerRef.current;
+                  if (islandStateRef.current === 'tucked') {
+                    if (hasHudAlertRef.current) {
+                      applyWindowSize(
+                        Math.max(getActiveIdleWindowWidth(), 244),
+                        IDLE_WINDOW_HEIGHT,
+                        devVis,
+                        false,
+                        false
+                      );
+                    } else {
+                      applyWindowSize(TUCKED_WIDTH, TUCKED_HEIGHT, devVis, false, false, true);
+                      isRestingSleepRef.current = false;
+                      setIsRestingSleep(false);
+                    }
+                  } else if (islandStateRef.current === 'idle') {
+                    applyWindowSize(
+                      getActiveIdleWindowWidth(),
+                      getActiveIdleHitboxHeight(),
+                      devVis,
+                      false,
+                      false
+                    );
+                  }
+                });
+              }
+              if (islandStateRef.current === 'idle' && !isExpandedView) {
+                setIsLandingComplete((prev) => (prev ? prev : true));
+              }
+            }}
+            style={{
+              borderTopLeftRadius: topCornerRadius,
+              borderTopRightRadius: topCornerRadius,
+              borderBottomLeftRadius: bottomCornerRadius,
+              borderBottomRightRadius: bottomCornerRadius,
+              boxShadow: isPureTucked
+                ? 'none'
+                : isExternalDragOver
+                ? '0 0 16px rgba(99, 102, 241, 0.28), 0 8px 28px rgba(0, 0, 0, 0.65)'
+                : isAlarmRinging && !isExpandedView && islandState !== 'tucked'
+                ? '0 0 20px var(--casa-timer-glow, rgba(245, 158, 11, 0.45)), 0 8px 28px rgba(0, 0, 0, 0.75)'
+                : isIdleTimerPerimeterVisible
+                ? idleTimerState?.mode === 'rest'
+                  ? '0 0 10px color-mix(in srgb, var(--casa-rest, #10B981) 28%, transparent), 0 8px 28px rgba(0, 0, 0, 0.65)'
+                  : '0 0 12px var(--casa-timer-glow, rgba(245, 158, 11, 0.18)), 0 8px 28px rgba(0, 0, 0, 0.65)'
+                : '0 8px 28px rgba(0, 0, 0, 0.65)',
+              overflow: 'clip',
+              touchAction: 'manipulation',
+            }}
+            className={`relative flex flex-col box-border pointer-events-auto shrink-0 bg-[#000000] overflow-clip touch-manipulation transition-shadow duration-200 ${
+              isPureTucked
+                ? 'h-[4px] pt-0 rounded-t-none rounded-b-full border-t-0 border-x-0 border-b border-white/15'
+                : `${isFloatingMode ? 'pt-0' : 'pt-[1px]'} border-0`
+            } ${
+              isPureTucked
+                ? ''
+                : isExternalDragOver
+                ? 'ring-1 ring-indigo-500/60'
+                : isAlarmRinging && !isExpandedView && islandState !== 'tucked'
+                ? 'ring-1 ring-[color:var(--casa-timer)]'
+                : ''
+            } ${
+              isExpandedView ? '' : 'cursor-pointer'
+            }`}
+            title={
+              islandState === 'tucked'
+                ? 'CASA (Arahkan kursor untuk mengintip / Klik untuk membuka)'
+                : undefined
+            }
+          >
+            {/* Electric Indigo Magnetic Drag-Over Tint Overlay */}
+            {isExternalDragOver && (
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 bg-indigo-500/[0.08] z-30"
+              />
             )}
-          </AnimatePresence>
+
+            {/* Idle Timer Perimeter Progress Border (Open U-Shape Docked / Closed Pill Floating) */}
+            {isIdleTimerPerimeterVisible && (() => {
+              const perimeterW = measuredPillBox.width > 0 ? measuredPillBox.width : width;
+              const perimeterH = measuredPillBox.height > 0 ? measuredPillBox.height : height;
+              const strokeInset = 0.75;
+              const clampedW = Math.max(4, perimeterW);
+              const clampedH = Math.max(4, perimeterH);
+              const maxCornerX = Math.max(2, (clampedW - strokeInset * 2) / 2);
+              const maxCornerY = isFloatingMode
+                ? Math.max(2, (clampedH - strokeInset * 2) / 2)
+                : Math.max(2, clampedH - strokeInset * 2);
+              const cornerR = Math.max(
+                2,
+                Math.min(bottomCornerRadius - strokeInset, maxCornerX, maxCornerY)
+              );
+              const leftX = strokeInset;
+              const rightX = clampedW - strokeInset;
+              const topY = strokeInset;
+              const bottomY = clampedH - strokeInset;
+              const uPathD = `M ${leftX},0 L ${leftX},${bottomY - cornerR} A ${cornerR},${cornerR} 0 0 0 ${leftX + cornerR},${bottomY} L ${rightX - cornerR},${bottomY} A ${cornerR},${cornerR} 0 0 0 ${rightX},${bottomY - cornerR} L ${rightX},0`;
+              const midX = clampedW / 2;
+              const floatingPathD = `M ${midX},${topY} L ${rightX - cornerR},${topY} A ${cornerR},${cornerR} 0 0 1 ${rightX},${topY + cornerR} L ${rightX},${bottomY - cornerR} A ${cornerR},${cornerR} 0 0 1 ${rightX - cornerR},${bottomY} L ${leftX + cornerR},${bottomY} A ${cornerR},${cornerR} 0 0 1 ${leftX},${bottomY - cornerR} L ${leftX},${topY + cornerR} A ${cornerR},${cornerR} 0 0 1 ${leftX + cornerR},${topY} Z`;
+              const perimeterPathD = isFloatingMode ? floatingPathD : uPathD;
+              const perimeterStrokeColor =
+                idleTimerState?.mode === 'rest'
+                  ? 'var(--casa-rest, #10B981)'
+                  : 'var(--casa-timer, #F59E0B)';
+              return (
+                <svg
+                  className={`pointer-events-none absolute inset-0 w-full h-full z-30 transition-opacity duration-200 ${
+                    isIdleTimerPaused ? 'opacity-55' : 'opacity-100'
+                  }`}
+                  viewBox={`0 0 ${clampedW} ${clampedH}`}
+                  aria-hidden="true"
+                >
+                  <path
+                    d={perimeterPathD}
+                    fill="none"
+                    stroke={perimeterStrokeColor}
+                    strokeWidth={1.5}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    pathLength={100}
+                    strokeDasharray="100 100"
+                    strokeDashoffset={100 - idleTimerRemainingPct}
+                    className="transition-[stroke-dashoffset] duration-700 ease-linear"
+                  />
+                </svg>
+              );
+            })()}
+
+            {/* Internal Content Animated with Clean Lifecycle & Overflow Clip */}
+            <div
+              className={`relative w-full h-full overflow-clip ${
+                isPureTucked ? 'opacity-0 pointer-events-none invisible' : ''
+              }`}
+              style={{ overflow: 'clip' }}
+            >
+              {/* Layer 0 (4px OLED Tucked Bezel): empty sleek line with 0 inner elements to avoid clipping */}
+
+              {/* Layer 1: Mode 6 Expanded View (Unmounted cleanly when !isExpandedView) */}
+              <AnimatePresence initial={false}>
+                {isExpandedView && (
+                  <motion.div
+                    key="expanded-layer"
+                    data-island-view="expanded"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.12, ease: 'easeOut' }}
+                    onDragOver={(e) => {
+                      if (useDropZoneStore.getState().isInternalDragging) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'copy';
+                      useDropZoneStore.getState().setIsDragging(true);
+                    }}
+                    onDragLeave={() => {
+                      if (useDropZoneStore.getState().isInternalDragging) return;
+                      useDropZoneStore.getState().setIsDragging(false);
+                    }}
+                    onDrop={async (e) => {
+                      if (useDropZoneStore.getState().isInternalDragging) return;
+                      e.preventDefault();
+                      useDropZoneStore.getState().setIsDragging(false);
+                      setIsSearchPodOpen(false);
+                      setIsQueuePodOpen(false);
+                      setIsWifiPodOpen(false);
+                      setIsBtPodOpen(false);
+                      onChangeModeRef.current?.('drop_zone');
+                      const text = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text/uri-list');
+                      if (text && text.trim()) {
+                        await useDropZoneStore.getState().addItem(text.trim());
+                        playChimeCue('ding');
+                        return;
+                      }
+                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        const droppedPaths: string[] = [];
+                        for (let i = 0; i < e.dataTransfer.files.length; i++) {
+                          const file = e.dataTransfer.files[i];
+                          const path = (file as any).path || file.name;
+                          if (path) droppedPaths.push(path);
+                        }
+                        if (droppedPaths.length > 0) {
+                          await useDropZoneStore.getState().addDroppedPaths(droppedPaths);
+                          playChimeCue('ding');
+                        }
+                      }
+                    }}
+                    onClickCapture={(e) => {
+                      const target = e.target as HTMLElement;
+                      if (
+                        target.closest('[data-collapse-btn="true"]') ||
+                        target.closest('[data-satellite-pod="true"]') ||
+                        target.closest('[data-focus-peek-card="true"]')
+                      ) {
+                        return;
+                      }
+                      if (islandStateRef.current === 'idle_peek') {
+                        handleLockExpanded();
+                      }
+                    }}
+                    onClick={(e) => {
+                      const target = e.target as HTMLElement;
+                      if (target.closest('[data-satellite-pod="true"]')) {
+                        e.stopPropagation();
+                        return;
+                      }
+                      if (islandStateRef.current === 'idle_peek') {
+                        e.stopPropagation();
+                        handleLockExpanded();
+                        return;
+                      }
+                      e.stopPropagation();
+                    }}
+                    className="absolute inset-0 w-full h-full flex flex-col justify-start overflow-visible select-none z-20"
+                    style={{
+                      overflow: 'visible',
+                      pointerEvents: 'auto',
+                    }}
+                  >
+                    {isFocusHoverPeek && focusTimer.timerState ? (
+                      <FocusHoverPeekCard
+                        timer={focusTimer.timerState}
+                        todos={focusTodos.todos}
+                        onToggleTimer={focusTimer.toggleTimer}
+                        onCompleteTask={(todoId) => {
+                          focusTodos.toggleTodo(todoId);
+                        }}
+                        onStopTimer={focusTimer.stopTimerSession}
+                        onLockExpanded={() => handleLockExpanded('expanded_timer')}
+                      />
+                    ) : (
+                      <>
+                        <Mode6TopNav
+                          currentMode={effectiveExpandedMode}
+                          onSelectMode={handleSelectMode}
+                          onToggleDevTrigger={onToggleDevTrigger}
+                          onCollapse={collapseToIdle}
+                          onHeaderClick={handleHeaderClick}
+                          isPeekPreview={islandState === 'idle_peek'}
+                        />
+
+                        <div
+                          className="w-full flex-1 min-h-0 flex flex-col justify-center overflow-visible relative z-20"
+                          style={{ overflow: 'visible' }}
+                        >
+                          {effectiveExpandedMode === 'expanded_music' && (
+                            <MediaExpandedView
+                              onCollapse={collapseToIdle}
+                              mode6Compact
+                              podHostEl={podHostEl}
+                              isSearchPodOpen={effectiveLeftPodOpen}
+                              isQueuePodOpen={effectiveRightPodOpen}
+                              isLyricsOpen={isLyricsOpen}
+                              onToggleLyrics={() => {
+                                if (islandStateRef.current === 'idle_peek') {
+                                  handleLockExpanded();
+                                }
+                                const nextVal = !isLyricsOpenRef.current;
+                                isLyricsOpenRef.current = nextVal;
+                                setIsLyricsOpen(nextVal);
+                              }}
+                              onToggleSearchPod={() => {
+                                if (islandStateRef.current === 'idle_peek') {
+                                  handleLockExpanded();
+                                }
+                                setIsSearchPodOpen((prev) => !prev);
+                              }}
+                              onToggleQueuePod={() => {
+                                if (islandStateRef.current === 'idle_peek') {
+                                  handleLockExpanded();
+                                }
+                                setIsQueuePodOpen((prev) => !prev);
+                              }}
+                              onCloseSearchPod={() => setIsSearchPodOpen(false)}
+                              onCloseQueuePod={() => setIsQueuePodOpen(false)}
+                              onInteractionLock={handleLockExpanded}
+                            />
+                          )}
+
+                          {effectiveExpandedMode === 'expanded_timer' && (
+                            <TimerExpandedView
+                              onCollapse={collapseToIdle}
+                              onOpenMusic={() => handleSelectMode('expanded_music')}
+                            />
+                          )}
+
+                          {effectiveExpandedMode === 'expanded_todo' && (
+                            <TodoExpandedView
+                              onCollapse={collapseToIdle}
+                              onOpenMusic={() => handleSelectMode('expanded_music')}
+                            />
+                          )}
+
+                          {effectiveExpandedMode === 'expanded_control' && (
+                            <Mode6ControlCenterView
+                              onOpenMusic={() => handleSelectMode('expanded_music')}
+                              podHostEl={podHostEl}
+                              isWifiPodOpen={effectiveLeftPodOpen}
+                              isBtPodOpen={effectiveRightPodOpen}
+                              onToggleWifiPod={() => {
+                                if (islandStateRef.current === 'idle_peek') {
+                                  handleLockExpanded();
+                                }
+                                setIsWifiPodOpen((prev) => !prev);
+                              }}
+                              onToggleBtPod={() => {
+                                if (islandStateRef.current === 'idle_peek') {
+                                  handleLockExpanded();
+                                }
+                                setIsBtPodOpen((prev) => !prev);
+                              }}
+                              onCloseWifiPod={() => setIsWifiPodOpen(false)}
+                              onCloseBtPod={() => setIsBtPodOpen(false)}
+                              onInteractionLock={handleLockExpanded}
+                            />
+                          )}
+
+                          {effectiveExpandedMode === 'drop_zone' && (
+                            <DropZoneView
+                              isLockedExpanded={islandState === 'expanded'}
+                              onOpenMusic={() => handleSelectMode('expanded_music')}
+                            />
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Layer 2: Unified Fluid Hug-Content Modes 1-5 & Transient HUD Wake */}
+              <motion.div
+                data-island-view="idle"
+                initial={false}
+                animate={{
+                  opacity: isExpandedView || isPureTucked ? 0 : 1,
+                }}
+                transition={
+                  isPureTucked
+                    ? { duration: 0 }
+                    : isExpandedView
+                    ? { duration: 0.06, ease: 'easeIn' }
+                    : { duration: 0.10, delay: 0.05, ease: 'easeOut' }
+                }
+                className={`absolute inset-0 w-full h-full mx-auto flex items-center justify-center shrink-0 overflow-clip ${
+                  isExpandedView ? 'z-10' : 'z-20'
+                } ${isPureTucked ? 'pointer-events-none invisible' : ''}`}
+                style={{
+                  overflow: 'clip',
+                  pointerEvents: isExpandedView || isPureTucked ? 'none' : 'auto',
+                }}
+              >
+                <IdlePillView
+                  isDualBubble={hasSecondaryBubble}
+                  isExpanded={isExpandedView}
+                  isRestingSleep={isRestingSleep && !isKeepAwake}
+                  isTucked={isPureTucked}
+                  isTuckedPeek={islandState === 'tucked_peek'}
+                  remeasureKey={fullscreenExitTick}
+                  onExpandSkill={handleExpandSkill}
+                  onContentWidthChange={handleMeasuredPillWidth}
+                />
+              </motion.div>
+            </div>
+          </motion.div>
         </div>
       </div>
     </div>

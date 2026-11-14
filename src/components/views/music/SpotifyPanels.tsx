@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { SpotifyTrackItem, SpotifyPlaylistItem } from '../../../utils/spotifyService';
 import { useQueueStore } from '../../../stores/useQueueStore';
+import { useMusicAffinity } from '../../../hooks/useMusicAffinity';
 
 export interface SpotifyPanelsProps {
   activeSubPanel: 'playlist' | 'queue' | 'search';
@@ -522,6 +523,8 @@ export const SpotifySearchView: React.FC<{
   onFocusInput,
   setIsSearchFocused,
 }) => {
+  const { suggestionChips: adaptiveChips, recordSearchQuery } = useMusicAffinity();
+
   return (
     <div className="relative w-full h-[118px] max-h-[118px] flex flex-col justify-start overflow-hidden select-none">
       {/* Search Input Box */}
@@ -580,17 +583,20 @@ export const SpotifySearchView: React.FC<{
             QUICK SEARCH
           </span>
           <div className="flex items-center flex-nowrap overflow-x-auto cosmic-music-scrollbar py-0.5 gap-1.5 shrink-0 select-none">
-            {['Lofi', 'Synthwave', 'Focus', 'Chill', 'K-Pop', 'Rock', 'Ambient'].map((tag) => (
+            {adaptiveChips.map((chip) => (
               <button
-                key={tag}
+                key={`${chip.kind}-${chip.label}`}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
                 }}
-                onClick={() => onSearchQueryChange(tag)}
+                onClick={() => {
+                  recordSearchQuery(chip.query);
+                  onSearchQueryChange(chip.query);
+                }}
                 className="bg-emerald-950/20 border border-emerald-500/20 text-emerald-300 text-[10px] rounded-lg px-2.5 py-0.5 hover:bg-emerald-900/30 transition-colors cursor-pointer font-sans font-medium shrink-0 whitespace-nowrap"
               >
-                {tag}
+                {chip.label}
               </button>
             ))}
           </div>
@@ -619,6 +625,9 @@ export const SpotifySearchView: React.FC<{
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (searchQuery.trim()) {
+                    recordSearchQuery(searchQuery);
+                  }
                   onPlaySearchTrack(t);
                 }}
                 className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-[#18181c] text-left transition-colors group cursor-pointer shrink-0 border border-transparent hover:border-[#2e2e34]"

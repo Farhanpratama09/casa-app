@@ -58,6 +58,56 @@ const STORAGE_KEY_USER_ACCESS = 'casa_spotify_user_access_token';
 const STORAGE_KEY_USER_REFRESH = 'casa_spotify_user_refresh_token';
 const STORAGE_KEY_USER_EXPIRES = 'casa_spotify_user_expires_at';
 
+const SPOTIFY_PREMIUM_COOLDOWN_MS = 5 * 60 * 1000;
+let spotifyPremiumRestrictedUntil = 0;
+let lastPremiumProbeAt = 0;
+let inFlightPremiumProbe: Promise<boolean> | null = null;
+
+type PremiumRestrictionSubscriber = (restricted: boolean) => void;
+const premiumRestrictionSubscribers = new Set<PremiumRestrictionSubscriber>();
+
+function notifyPremiumRestrictionSubscribers(restricted: boolean): void {
+  premiumRestrictionSubscribers.forEach((sub) => {
+    try {
+      sub(restricted);
+    } catch {}
+  });
+}
+
+export function subscribeSpotifyPremiumRestriction(sub: PremiumRestrictionSubscriber): () => void {
+  premiumRestrictionSubscribers.add(sub);
+  sub(isSpotifyPremiumRestricted());
+  return () => {
+    premiumRestrictionSubscribers.delete(sub);
+  };
+}
+
+/**
+ * Returns true if Spotify recently rejected a playback write request with HTTP 403 (PREMIUM_REQUIRED).
+ */
+export function isSpotifyPremiumRestricted(): boolean {
+  return Date.now() < spotifyPremiumRestrictedUntil;
+}
+
+function markSpotifyPremiumRestricted(context: string): void {
+  const wasRestricted = isSpotifyPremiumRestricted();
+  spotifyPremiumRestrictedUntil = Date.now() + SPOTIFY_PREMIUM_COOLDOWN_MS;
+  console.warn(
+    `[SpotifyService] ${context} failed (403): Spotify Premium required for Web API control. Using Windows GSMTC fallback.`
+  );
+  if (!wasRestricted) {
+    notifyPremiumRestrictionSubscribers(true);
+  }
+}
+
+function clearSpotifyPremiumRestriction(): void {
+  const wasRestricted = isSpotifyPremiumRestricted();
+  spotifyPremiumRestrictedUntil = 0;
+  if (wasRestricted) {
+    notifyPremiumRestrictionSubscribers(false);
+  }
+}
+
 // Automatic migration helper: Migrates legacy asaverse_* localStorage keys to casa_* keys
 function migrateLegacyStorage() {
   if (typeof window === 'undefined' || !window.localStorage) return;
@@ -125,6 +175,8 @@ export function isSpotifyUserConnected(): boolean {
  * Disconnect Spotify user account
  */
 export function disconnectSpotifyUser(): void {
+  lastPremiumProbeAt = 0;
+  clearSpotifyPremiumRestriction();
   if (typeof window === 'undefined') return;
   localStorage.removeItem(STORAGE_KEY_USER_ACCESS);
   localStorage.removeItem(STORAGE_KEY_USER_REFRESH);
@@ -138,6 +190,8 @@ export async function loginSpotifyUser(): Promise<boolean> {
   try {
     const tokens = await startSpotifyLogin(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET);
     if (tokens.access_token) {
+      lastPremiumProbeAt = 0;
+      clearSpotifyPremiumRestriction();
       localStorage.setItem(STORAGE_KEY_USER_ACCESS, tokens.access_token);
       if (tokens.refresh_token) {
         localStorage.setItem(STORAGE_KEY_USER_REFRESH, tokens.refresh_token);
@@ -843,6 +897,8 @@ export async function transferPlaybackToDevice(
   arg2?: string | boolean,
   arg3?: boolean
 ): Promise<boolean> {
+  if (isSpotifyPremiumRestricted()) return false;
+
   let userToken: string | null = null;
   let deviceId: string;
   let play = false;
@@ -875,7 +931,12 @@ export async function transferPlaybackToDevice(
       body: JSON.stringify({ device_ids: [deviceId], play }),
     });
     if (res.status === 204 || res.status === 200 || res.ok) {
+      clearSpotifyPremiumRestriction();
       return true;
+    }
+    if (res.status === 403) {
+      markSpotifyPremiumRestricted('transferPlaybackToDevice');
+      return false;
     }
     console.warn(`[SpotifyService] Transfer playback to device ${deviceId} returned HTTP ${res.status}`);
   } catch (err) {
@@ -1075,6 +1136,11 @@ export async function getRealSpotifyQueue(): Promise<SpotifyRealQueueResult | nu
       finalQueueRes = await fetch('https://api.spotify.com/v1/me/player/queue', { headers });
     }
 
+    if (finalQueueRes.status === 403 || playerRes.status === 403) {
+      markSpotifyPremiumRestricted('getRealSpotifyQueue');
+      return null;
+    }
+
     if (!finalQueueRes.ok || finalQueueRes.status === 204) {
       console.warn(`[SpotifyService] GET /me/player/queue returned HTTP ${finalQueueRes.status}`);
       return null;
@@ -1101,34 +1167,130 @@ export async function getRealSpotifyQueue(): Promise<SpotifyRealQueueResult | nu
   }
 }
 
+export interface SpotifyPlaybackSnapshot {
+  progressMs: number;
+  durationMs: number;
+  isPlaying: boolean;
+  capturedAtMs: number;
+  trackId?: string;
+  title?: string;
+  artist?: string;
+  albumArt?: string;
+}
+
 /**
- * Retrieves high-precision progress_ms directly from Spotify Web API
- * to calibrate local playback interpolation and synchronized lyrics.
+ * Retrieves an authoritative playback snapshot (progress_ms, duration_ms, is_playing, metadata)
+ * from Spotify Web API with RTT-midpoint capture timestamp for deterministic interpolation.
  */
-export async function getSpotifyPlaybackProgressMs(): Promise<number | null> {
-  const userToken = await getValidUserAccessToken();
+export async function getSpotifyPlaybackSnapshot(
+  providedToken?: string
+): Promise<SpotifyPlaybackSnapshot | null> {
+  const userToken = providedToken || (await getValidUserAccessToken());
   if (!userToken) return null;
 
+  const reqStartMs = Date.now();
   try {
     const res = await fetch('https://api.spotify.com/v1/me/player', {
       headers: { Authorization: `Bearer ${userToken}` },
     });
     if (res.ok && res.status !== 204) {
       const data = await res.json();
+      const resEndMs = Date.now();
+      const capturedAtMs = Math.round((reqStartMs + resEndMs) / 2);
+
       if (typeof data?.progress_ms === 'number') {
-        // Guard buffer: Ignore payload progress_ms: 0 within 800ms of play trigger
         if (data.progress_ms === 0 && isWithinPlayGuardWindow(800)) {
           console.debug('[SpotifyService] Guard buffer: ignoring cold-start progress_ms: 0 within 800ms window');
           return null;
         }
         setLastKnownPositionMs(data.progress_ms);
-        return data.progress_ms;
+        const item = data?.item;
+        const durationMs = typeof item?.duration_ms === 'number' && item.duration_ms > 0 ? item.duration_ms : 0;
+        const albumArt =
+          item?.album?.images?.[0]?.url ||
+          item?.album?.images?.[1]?.url ||
+          undefined;
+        const artist = Array.isArray(item?.artists)
+          ? item.artists.map((a: any) => a?.name).filter(Boolean).join(', ')
+          : undefined;
+
+        return {
+          progressMs: data.progress_ms,
+          durationMs,
+          isPlaying: Boolean(data?.is_playing),
+          capturedAtMs,
+          trackId: item?.id,
+          title: item?.name,
+          artist,
+          albumArt,
+        };
       }
     }
   } catch (err) {
-    console.debug('[SpotifyService] getSpotifyPlaybackProgressMs error:', err);
+    console.debug('[SpotifyService] getSpotifyPlaybackSnapshot error:', err);
   }
   return null;
+}
+
+/**
+ * Lightweight check for whether the connected Spotify account supports Premium Web API controls/queue.
+ * Detects Free accounts via `/v1/me` `product` (when `user-read-private` scope is present) or `/v1/me/player/queue` 403.
+ */
+export async function probeSpotifyPremiumAccess(): Promise<boolean> {
+  if (!isSpotifyUserConnected()) return false;
+  if (isSpotifyPremiumRestricted()) return false;
+  if (Date.now() - lastPremiumProbeAt < 60_000) {
+    return !isSpotifyPremiumRestricted();
+  }
+  if (inFlightPremiumProbe) return inFlightPremiumProbe;
+
+  inFlightPremiumProbe = (async (): Promise<boolean> => {
+    try {
+      const userToken = await getValidUserAccessToken();
+      if (!userToken) return false;
+      lastPremiumProbeAt = Date.now();
+      const headers = { Authorization: `Bearer ${userToken}` };
+
+      const meRes = await fetch('https://api.spotify.com/v1/me', { headers });
+      if (meRes.ok) {
+        const meData = await meRes.json().catch(() => null);
+        if (typeof meData?.product === 'string') {
+          if (meData.product.toLowerCase() === 'premium') {
+            clearSpotifyPremiumRestriction();
+            return true;
+          }
+          markSpotifyPremiumRestricted(`account_product_${meData.product}`);
+          return false;
+        }
+      }
+
+      const queueRes = await fetch('https://api.spotify.com/v1/me/player/queue', { headers });
+      if (queueRes.status === 403) {
+        markSpotifyPremiumRestricted('queue_probe_403');
+        return false;
+      }
+      if (queueRes.ok || queueRes.status === 204) {
+        clearSpotifyPremiumRestriction();
+        return true;
+      }
+    } catch (err) {
+      console.debug('[SpotifyService] probeSpotifyPremiumAccess error:', err);
+    }
+    return !isSpotifyPremiumRestricted();
+  })().finally(() => {
+    inFlightPremiumProbe = null;
+  });
+
+  return inFlightPremiumProbe;
+}
+
+/**
+ * Retrieves high-precision progress_ms directly from Spotify Web API
+ * to calibrate local playback interpolation and synchronized lyrics.
+ */
+export async function getSpotifyPlaybackProgressMs(): Promise<number | null> {
+  const snapshot = await getSpotifyPlaybackSnapshot();
+  return snapshot ? snapshot.progressMs : null;
 }
 
 /**
@@ -1160,6 +1322,10 @@ export async function playQueueTrack(
   remainingQueueUris?: string[],
   isBrowser?: boolean
 ): Promise<boolean> {
+  if (isSpotifyPremiumRestricted()) {
+    return false;
+  }
+
   // Fast Session Readiness Check (Up to 1000ms without stalling playback)
   const session = await ensureSpotifySessionReady(1000);
 
@@ -1201,6 +1367,8 @@ export async function playQueueTrack(
  * Add a track to the user's active Spotify playback queue
  */
 export async function addTrackToSpotifyQueue(trackUri: string): Promise<boolean> {
+  if (isSpotifyPremiumRestricted()) return false;
+
   const userToken = await getValidUserAccessToken();
   const normalized = normalizeTrackUri(trackUri);
   if (!userToken || !normalized) return false;
@@ -1214,7 +1382,15 @@ export async function addTrackToSpotifyQueue(trackUri: string): Promise<boolean>
       },
     });
 
-    return res.status === 204 || res.ok;
+    if (res.status === 403) {
+      markSpotifyPremiumRestricted('addTrackToSpotifyQueue');
+      return false;
+    }
+    if (res.status === 204 || res.ok) {
+      clearSpotifyPremiumRestriction();
+      return true;
+    }
+    return false;
   } catch (err) {
     console.warn('[SpotifyService] addTrackToSpotifyQueue error:', err);
     return false;
@@ -1476,6 +1652,10 @@ export interface ExecuteSpotifyPlayOptions {
  * - Normalizes all track IDs/URIs to `spotify:track:<id>` via `normalizeTrackUri`.
  */
 export async function executeSpotifyPlay(options: ExecuteSpotifyPlayOptions): Promise<boolean> {
+  if (isSpotifyPremiumRestricted()) {
+    return false;
+  }
+
   markUserInitiatedPlayback();
 
   function normalizeTrackUriLocal(raw?: string): string | undefined {
@@ -1615,7 +1795,12 @@ export async function executeSpotifyPlay(options: ExecuteSpotifyPlayOptions): Pr
     // Initial play attempt with resolved and locked deviceId
     let res = await sendPlayRequest(deviceId);
     if (res.status === 204 || res.status === 200 || res.ok) {
+      clearSpotifyPremiumRestriction();
       return true;
+    }
+    if (res.status === 403) {
+      markSpotifyPremiumRestricted('executeSpotifyPlay');
+      return false;
     }
 
     // AUTO-RECOVERY ON 404 (Device inactive / sleeping in background / no active device)
@@ -1624,12 +1809,20 @@ export async function executeSpotifyPlay(options: ExecuteSpotifyPlayOptions): Pr
       await new Promise((r) => setTimeout(r, 250));
       deviceId = await getTargetDesktopDeviceId(userToken);
       if (deviceId) {
-        await transferPlaybackToDevice(userToken, deviceId, true);
+        const transferred = await transferPlaybackToDevice(userToken, deviceId, true);
+        if (!transferred && isSpotifyPremiumRestricted()) {
+          return false;
+        }
         await new Promise((r) => setTimeout(r, 150));
         res = await sendPlayRequest(deviceId);
         if (res.status === 204 || res.status === 200 || res.ok) {
+          clearSpotifyPremiumRestriction();
           console.info('[SpotifyService] Play recovery succeeded with active device');
           return true;
+        }
+        if (res.status === 403) {
+          markSpotifyPremiumRestricted('executeSpotifyPlay');
+          return false;
         }
         console.error(`[SpotifyService] Play retry failed with status: ${res.status}`);
       } else {
@@ -1646,7 +1839,12 @@ export async function executeSpotifyPlay(options: ExecuteSpotifyPlayOptions): Pr
         deviceId = await getTargetDesktopDeviceId(userToken);
         res = await sendPlayRequest(deviceId);
         if (res.status === 204 || res.status === 200 || res.ok) {
+          clearSpotifyPremiumRestriction();
           return true;
+        }
+        if (res.status === 403) {
+          markSpotifyPremiumRestricted('executeSpotifyPlay');
+          return false;
         }
       }
     }
@@ -1655,6 +1853,40 @@ export async function executeSpotifyPlay(options: ExecuteSpotifyPlayOptions): Pr
     return false;
   } catch (err) {
     console.error('[SpotifyService] executeSpotifyPlay unexpected error:', err);
+    return false;
+  }
+}
+
+async function sendSpotifyDeviceCommand(
+  actionName: string,
+  endpoint: string,
+  method: 'PUT' | 'POST',
+  targetDeviceId?: string
+): Promise<boolean> {
+  if (isSpotifyPremiumRestricted()) return false;
+
+  const userToken = await getValidUserAccessToken();
+  if (!userToken) return false;
+
+  try {
+    const deviceId = targetDeviceId || (await getTargetDesktopDeviceId(userToken));
+    const url = buildSpotifyUrlWithDevice(endpoint, deviceId);
+
+    const res = await fetch(url, {
+      method,
+      headers: { Authorization: `Bearer ${userToken}` },
+    });
+    if (res.status === 403) {
+      markSpotifyPremiumRestricted(actionName);
+      return false;
+    }
+    if (res.status === 204 || res.status === 200 || res.ok) {
+      clearSpotifyPremiumRestriction();
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.debug(`[SpotifyService] ${actionName} error:`, err);
     return false;
   }
 }
@@ -1687,66 +1919,36 @@ export async function resumeSpotifyPlayback(options?: {
  * Pauses active Spotify playback via Web API with explicit device locking.
  */
 export async function pauseSpotifyPlayback(targetDeviceId?: string): Promise<boolean> {
-  const userToken = await getValidUserAccessToken();
-  if (!userToken) return false;
-
-  try {
-    const deviceId = targetDeviceId || (await getTargetDesktopDeviceId(userToken));
-    const url = buildSpotifyUrlWithDevice('https://api.spotify.com/v1/me/player/pause', deviceId);
-
-    const res = await fetch(url, {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${userToken}` },
-    });
-    return res.status === 204 || res.status === 200 || res.ok;
-  } catch (err) {
-    console.debug('[SpotifyService] pauseSpotifyPlayback error:', err);
-    return false;
-  }
+  return sendSpotifyDeviceCommand(
+    'pauseSpotifyPlayback',
+    'https://api.spotify.com/v1/me/player/pause',
+    'PUT',
+    targetDeviceId
+  );
 }
 
 /**
  * Skips to next track via Spotify Web API with explicit device locking.
  */
 export async function nextSpotifyTrack(targetDeviceId?: string): Promise<boolean> {
-  const userToken = await getValidUserAccessToken();
-  if (!userToken) return false;
-
-  try {
-    const deviceId = targetDeviceId || (await getTargetDesktopDeviceId(userToken));
-    const url = buildSpotifyUrlWithDevice('https://api.spotify.com/v1/me/player/next', deviceId);
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${userToken}` },
-    });
-    return res.status === 204 || res.status === 200 || res.ok;
-  } catch (err) {
-    console.debug('[SpotifyService] nextSpotifyTrack error:', err);
-    return false;
-  }
+  return sendSpotifyDeviceCommand(
+    'nextSpotifyTrack',
+    'https://api.spotify.com/v1/me/player/next',
+    'POST',
+    targetDeviceId
+  );
 }
 
 /**
  * Skips to previous track via Spotify Web API with explicit device locking.
  */
 export async function prevSpotifyTrack(targetDeviceId?: string): Promise<boolean> {
-  const userToken = await getValidUserAccessToken();
-  if (!userToken) return false;
-
-  try {
-    const deviceId = targetDeviceId || (await getTargetDesktopDeviceId(userToken));
-    const url = buildSpotifyUrlWithDevice('https://api.spotify.com/v1/me/player/previous', deviceId);
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${userToken}` },
-    });
-    return res.status === 204 || res.status === 200 || res.ok;
-  } catch (err) {
-    console.debug('[SpotifyService] prevSpotifyTrack error:', err);
-    return false;
-  }
+  return sendSpotifyDeviceCommand(
+    'prevSpotifyTrack',
+    'https://api.spotify.com/v1/me/player/previous',
+    'POST',
+    targetDeviceId
+  );
 }
 
 /**
@@ -1793,6 +1995,8 @@ export async function playSpotifyPlaylist(
  * Seek active playback to specific position in milliseconds
  */
 export async function seekSpotifyPlayback(positionMs: number): Promise<boolean> {
+  if (isSpotifyPremiumRestricted()) return false;
+
   const userToken = await getValidUserAccessToken();
   if (!userToken) return false;
 
@@ -1803,10 +2007,14 @@ export async function seekSpotifyPlayback(positionMs: number): Promise<boolean> 
       headers: { Authorization: `Bearer ${userToken}` },
     });
     if (res.status === 403) {
-      console.warn('[SpotifyService] seekSpotifyPlayback failed (403): Spotify Premium required to control playback via Web API.');
+      markSpotifyPremiumRestricted('seekSpotifyPlayback');
       return false;
     }
-    return res.status === 204 || res.ok;
+    if (res.status === 204 || res.ok) {
+      clearSpotifyPremiumRestriction();
+      return true;
+    }
+    return false;
   } catch (err) {
     console.debug('[SpotifyService] seekSpotifyPlayback error:', err);
     return false;
@@ -1817,6 +2025,8 @@ export async function seekSpotifyPlayback(positionMs: number): Promise<boolean> 
  * Set shuffle state on Spotify playback
  */
 export async function setShufflePlayback(state: boolean): Promise<boolean> {
+  if (isSpotifyPremiumRestricted()) return false;
+
   const userToken = await getValidUserAccessToken();
   if (!userToken) return false;
 
@@ -1827,10 +2037,14 @@ export async function setShufflePlayback(state: boolean): Promise<boolean> {
       headers: { Authorization: `Bearer ${userToken}` },
     });
     if (res.status === 403) {
-      console.warn('[SpotifyService] setShufflePlayback failed (403): Spotify Premium required to control playback via Web API.');
+      markSpotifyPremiumRestricted('setShufflePlayback');
       return false;
     }
-    return res.status === 204 || res.ok;
+    if (res.status === 204 || res.ok) {
+      clearSpotifyPremiumRestriction();
+      return true;
+    }
+    return false;
   } catch (err) {
     console.debug('[SpotifyService] setShufflePlayback error:', err);
     return false;

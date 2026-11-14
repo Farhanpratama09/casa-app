@@ -22,7 +22,7 @@ struct TokenResponse {
 
 const REDIRECT_URI: &str = "http://127.0.0.1:8888/callback";
 const ENCODED_REDIRECT_URI: &str = "http%3A%2F%2F127.0.0.1%3A8888%2Fcallback";
-const ENCODED_SCOPES: &str = "user-read-playback-state%20user-modify-playback-state%20user-read-currently-playing%20playlist-read-private%20playlist-read-collaborative%20user-library-read%20user-library-modify";
+const ENCODED_SCOPES: &str = "user-read-private%20user-read-playback-state%20user-modify-playback-state%20user-read-currently-playing%20playlist-read-private%20playlist-read-collaborative%20user-library-read%20user-library-modify";
 
 /// Starts local HTTP loopback server on 127.0.0.1:8888 and opens user's browser to Spotify authorization
 #[tauri::command]

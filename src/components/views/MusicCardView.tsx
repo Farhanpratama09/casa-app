@@ -6,17 +6,19 @@ import {
   Search,
   Check,
 } from 'lucide-react';
-import { AudioOutputDevice, SongMetadata, MediaSessionItem } from '../../types/island';
+import { AudioOutputDevice, SongMetadata, MediaSessionItem, PlaybackClockSnapshot } from '../../types/island';
+import { markPlaybackManualSeekLock } from '../../features/media/playbackClock';
 
 import { useSkillStore } from '../../skills/store';
 import { useSystemHardware } from '../../hooks/useSystemHardware';
 import { useCasaAudio } from '../../context/CasaAudioContext';
 import { useQueueStore } from '../../stores/useQueueStore';
+import { useMusicAffinityStore } from '../../hooks/useMusicAffinity';
+import { normalizeTrackMetadata } from '../../utils/musicQueueEngine';
 import { listen } from '@tauri-apps/api/event';
 import {
   NativeSearchDrawer,
   NativeQueueDrawer,
-  MOCK_NATIVE_SEARCH_TRACKS,
   LyricsPanel,
   LyricRowItem,
   MarqueeLyric,
@@ -58,6 +60,9 @@ import {
   flushLyricsCache,
   cleanTrackTitleForLyrics,
   parseTimeToSeconds,
+  getCachedLyrics,
+  setCachedLyrics,
+  buildGlobalLyricsCacheKey,
 } from '../../utils/lyricsService';
 import {
   playChimeCue,
@@ -71,7 +76,9 @@ import {
   quickSwapSession,
   seekMediaSession,
   getCurrentMedia,
+  clearManualMediaStopped,
 } from '../../utils/tauriBridge';
+import { Mode6MusicLayout } from './mode6/Mode6MusicLayout';
 import {
   searchSpotifyTracks,
   getSpotifyUserQueue,
@@ -103,6 +110,9 @@ import {
   setLastPlayedTrackUri,
   verifyIsBrowserSpotify,
   pauseSpotifyPlayback,
+  isSpotifyPremiumRestricted,
+  subscribeSpotifyPremiumRestriction,
+  probeSpotifyPremiumAccess,
 } from '../../utils/spotifyService';
 
 // Two-Tier Resilient Memory Cache: maps trackId and title::artist to CDN / GSMTC artwork URLs
@@ -136,8 +146,6 @@ export function clearTrackArtworkCache() {
 export type PlaybackSource = 'companion' | 'native';
 export type { NativeTrack };
 
-export { MOCK_NATIVE_SEARCH_TRACKS };
-
 export type MusicSubPanel = 'none' | 'lyrics' | 'search' | 'queue' | 'playlist';
 
 interface MusicCardViewProps {
@@ -168,6 +176,20 @@ interface MusicCardViewProps {
   is_browser?: boolean;
   sessionId?: string;
   activeSessions?: MediaSessionItem[];
+  mode6Compact?: boolean;
+  podHostEl?: HTMLDivElement | null;
+  isSearchPodOpen?: boolean;
+  isQueuePodOpen?: boolean;
+  onToggleSearchPod?: () => void;
+  onToggleQueuePod?: () => void;
+  onCloseSearchPod?: () => void;
+  onCloseQueuePod?: () => void;
+  onInteractionLock?: () => void;
+  isIdleLyricsEnabled?: boolean;
+  onToggleIdleLyrics?: () => void;
+  onStopMedia?: () => void;
+  playbackClock?: PlaybackClockSnapshot;
+  onSeekClock?: (targetMs: number) => void;
 }
 
 /**
@@ -236,6 +258,20 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
   is_browser: propIsBrowser,
   sessionId: propSessionId,
   activeSessions: propActiveSessions,
+  mode6Compact = false,
+  podHostEl = null,
+  isSearchPodOpen = false,
+  isQueuePodOpen = false,
+  onToggleSearchPod,
+  onToggleQueuePod,
+  onCloseSearchPod,
+  onCloseQueuePod,
+  onInteractionLock,
+  isIdleLyricsEnabled = false,
+  onToggleIdleLyrics,
+  onStopMedia,
+  playbackClock,
+  onSeekClock,
 }) => {
   const isBrowser = Boolean(propIsBrowser ?? song.is_browser);
   const currentSessionId = propSessionId || song.session_id || '';
@@ -274,16 +310,65 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     removeFromQueue: handleRemoveFromNativeQueue,
     clearQueue: handleClearNativeQueue,
     setQueueAndPlay,
+    isShuffle: nativeIsShuffle,
+    isRepeat: nativeIsRepeat,
+    setRepeat: setNativeRepeat,
+    playSmartQueueTrack,
+    removeSmartQueueTrack,
   } = useCasaAudio();
 
   const handleEjectNative = useCallback(() => {
     playChimeCue('tap');
+    refreshReqIdRef.current += 1;
+    refreshAbortRef.current?.abort();
+    refreshAbortRef.current = null;
+    nativeAutoFetchAbortRef.current?.abort();
+    nativeAutoFetchAbortRef.current = null;
+    setIsRefreshingLyrics(false);
+    setIsAutoFetchingLyrics(false);
     ejectNativeTrack();
     resetLyricsSyncRef.current?.();
     setDisplayedArtwork(null);
     setSecondaryArtwork(null);
     onLyricsUpdated?.({ lines: [], isSynced: false, syncType: 'none', isInstrumental: false });
   }, [ejectNativeTrack, onLyricsUpdated]);
+
+  const handleStopMedia = useCallback(() => {
+    playChimeCue('tap');
+    stopNativeAudioHook();
+    ejectNativeTrack();
+    setGlobalPlaybackSource('companion');
+    onPlaybackSourceChange?.('companion');
+    resetLyricsSyncRef.current?.();
+    setLastKnownPositionMs(0);
+    clearPlayGuardWindow();
+    lastValidDurationRef.current = 0;
+    queueRequestIdRef.current += 1;
+    lastAppliedReqIdRef.current = queueRequestIdRef.current;
+    refreshReqIdRef.current += 1;
+    refreshAbortRef.current?.abort();
+    refreshAbortRef.current = null;
+    companionAutoFetchAbortRef.current?.abort();
+    companionAutoFetchAbortRef.current = null;
+    nativeAutoFetchAbortRef.current?.abort();
+    nativeAutoFetchAbortRef.current = null;
+    autoFetchedLyricsKeyRef.current = '';
+    setIsRefreshingLyrics(false);
+    setIsAutoFetchingLyrics(false);
+    setIsLoadingQueue(false);
+    setOptimisticTrack(null);
+    setDisplayedArtwork(null);
+    setSecondaryArtwork(null);
+    setCurrentTrackId(null);
+    setSearchQuery('');
+    setSearchResults([]);
+    setQueueTracks([]);
+    setQueueContextTitle('Next up');
+    setActiveContextUri(null);
+    setIsSessionPopoverOpen(false);
+    onLyricsUpdated?.({ lines: [], isSynced: false, syncType: 'none', isInstrumental: false });
+    onStopMedia?.();
+  }, [stopNativeAudioHook, ejectNativeTrack, setGlobalPlaybackSource, onPlaybackSourceChange, onLyricsUpdated, onStopMedia]);
 
   // Local Audio File Picker & Drop Pipeline (0ms latency, pure offline playback)
   const localFileInputRef = useRef<HTMLInputElement>(null);
@@ -306,37 +391,45 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           continue;
         }
         const url = URL.createObjectURL(file);
-        const cleanName = file.name.replace(/\.[^/.]+$/, '');
-        let artist = 'Local Audio';
-        let title = cleanName;
-        if (cleanName.includes(' - ')) {
-          const parts = cleanName.split(' - ');
-          artist = parts[0].trim();
-          title = parts.slice(1).join(' - ').trim();
-        }
+        const norm = normalizeTrackMetadata(
+          {
+            id: `local-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+            title: file.name,
+            artist: 'Local Audio',
+            durationSeconds: 0,
+            thumbnailUrl: '',
+            streamUrl: url,
+            candidates: [url],
+            isLocal: true,
+            source: 'native',
+          },
+          { isLocal: true }
+        );
         newTracks.push({
-          id: `local-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
-          title,
-          artist,
-          durationSeconds: 0,
-          thumbnailUrl: '',
+          id: norm.id,
+          title: norm.title,
+          artist: norm.artist,
+          durationSeconds: norm.durationSeconds,
+          thumbnailUrl: norm.thumbnailUrl,
           streamUrl: url,
           candidates: [url],
+          isLocal: true,
         });
       }
 
       if (newTracks.length > 0) {
         playChimeCue('tap');
+        useMusicAffinityStore.getState().recordLocalUploads(newTracks);
         setGlobalPlaybackSource('native');
-        if (nativeQueue.length === 0) {
+        if (!nativeTrack || nativeQueue.length === 0) {
           setQueueAndPlay(newTracks, 0);
         } else {
-          const combined = [...nativeQueue, ...newTracks];
-          setQueueAndPlay(combined, nativeQueueIndex >= 0 ? nativeQueueIndex : 0);
+          const qStore = useQueueStore.getState();
+          newTracks.forEach((t) => qStore.addToManualQueue(t));
         }
       }
     },
-    [nativeQueue, nativeQueueIndex, setQueueAndPlay, setGlobalPlaybackSource]
+    [nativeTrack, nativeQueue, setQueueAndPlay, setGlobalPlaybackSource]
   );
 
   const handleLocalFilesSelected = useCallback(
@@ -411,20 +504,38 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
   }, [playbackSource, activeSubPanel, onSubPanelChange, audioRef, setIsNativePlaying]);
 
   // Atomik Flush Lifecycle:
-  // Saat currentTrackId atau activeSource / playbackSource berganti,
-  // seketika kosongkan array lirik dan reset activeLineIndex ke -1
-  const prevTrackKeyRef = useRef<string>('');
+  // Saat track atau source benar-benar berganti (bukan saat remount),
+  // hydrate dari cache global terlebih dahulu atau kosongkan jika belum ada.
   const currentTrackKey = `${playbackSource}::${
-    playbackSource === 'native' ? (nativeTrack?.id || '') : (song.title || '')
+    playbackSource === 'native'
+      ? nativeTrack?.id || ''
+      : `${song.title || ''}::${song.artist || ''}`
   }`;
+  const prevTrackKeyRef = useRef<string>(currentTrackKey);
 
   useEffect(() => {
     if (prevTrackKeyRef.current !== currentTrackKey) {
       prevTrackKeyRef.current = currentTrackKey;
-      onLyricsUpdated?.({ lines: [], isSynced: false, syncType: 'none', isInstrumental: false });
+      lastValidDurationRef.current = 0;
+      const nextTitle = playbackSource === 'native' ? nativeTrack?.title || '' : song.title || '';
+      const nextArtist = playbackSource === 'native' ? nativeTrack?.artist || '' : song.artist || '';
+      const cached = nextTitle ? getCachedLyrics(nextTitle, nextArtist) : null;
+      if (cached) {
+        onLyricsUpdated?.(cached);
+      } else {
+        onLyricsUpdated?.({ lines: [], isSynced: false, syncType: 'none', isInstrumental: false });
+      }
       resetLyricsSyncRef.current?.();
     }
-  }, [currentTrackKey, onLyricsUpdated]);
+  }, [
+    currentTrackKey,
+    playbackSource,
+    nativeTrack?.title,
+    nativeTrack?.artist,
+    song.title,
+    song.artist,
+    onLyricsUpdated,
+  ]);
 
   // Single-Master Mutual Exclusion Watcher:
   // If external playback (Spotify/GSMTC) is confirmed playing while in companion mode,
@@ -480,7 +591,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     playChimeCue('tap');
     setIsNativeSearchOpen(false);
 
-    const baseList = customList || MOCK_NATIVE_SEARCH_TRACKS;
+    const baseList = customList && customList.length > 0 ? customList : [track];
     const listToUse = [...baseList];
     let idx = listToUse.findIndex((t) => t.id === track.id);
     if (idx === -1) {
@@ -550,32 +661,28 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     }
   }, [song.duration]);
 
-  const effectiveDuration =
-    playbackSource === 'native'
-      ? (nativeDuration > 0 ? nativeDuration : (nativeTrack?.durationSeconds || 0))
-      : typeof song.duration === 'number' && !isNaN(song.duration) && song.duration > 0
-      ? song.duration
-      : lastValidDurationRef.current;
-
-  // Artwork state with auto-reset on song changes
+  // Artwork & lyrics loading state
   const [imgFailed, setImgFailed] = useState(false);
   const [isWakingSpotify, setIsWakingSpotify] = useState(false);
   const [isRefreshingLyrics, setIsRefreshingLyrics] = useState(false);
+  const [isAutoFetchingLyrics, setIsAutoFetchingLyrics] = useState(false);
+  const autoFetchedLyricsKeyRef = useRef<string>('');
+  const refreshAbortRef = useRef<AbortController | null>(null);
+  const refreshReqIdRef = useRef<number>(0);
+  const companionAutoFetchAbortRef = useRef<AbortController | null>(null);
+  const nativeAutoFetchAbortRef = useRef<AbortController | null>(null);
 
-  const handleRefreshLyrics = async () => {
-    if (!effectiveTitle) return;
-    setIsRefreshingLyrics(true);
-    playChimeCue('tap');
-    try {
-      flushLyricsCache();
-      const result = await fetchLyrics(effectiveTitle, effectiveArtist, effectiveDuration, true);
-      onLyricsUpdated?.(result);
-    } catch (err) {
-      console.warn('[MusicCardView] handleRefreshLyrics error:', err);
-    } finally {
-      setIsRefreshingLyrics(false);
-    }
-  };
+  useEffect(() => {
+    return () => {
+      refreshReqIdRef.current += 1;
+      refreshAbortRef.current?.abort();
+      refreshAbortRef.current = null;
+      companionAutoFetchAbortRef.current?.abort();
+      companionAutoFetchAbortRef.current = null;
+      nativeAutoFetchAbortRef.current?.abort();
+      nativeAutoFetchAbortRef.current = null;
+    };
+  }, []);
 
   const handleRefreshSession = async () => {
     playChimeCue('tap');
@@ -588,27 +695,68 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
 
   // Auto-fetch synced lyrics when native track changes or on initial play
   useEffect(() => {
-    if (playbackSource !== 'native' || !nativeTrack) return;
+    if (playbackSource !== 'native' || !nativeTrack) {
+      nativeAutoFetchAbortRef.current?.abort();
+      nativeAutoFetchAbortRef.current = null;
+      if (playbackSource === 'native') {
+        setIsAutoFetchingLyrics(false);
+      }
+      return;
+    }
     const cleanTitle = cleanTrackTitleForLyrics(nativeTrack.title);
-    const cleanArtist = nativeTrack.artist;
-    if (!cleanTitle || cleanTitle === 'CASA Native Player') return;
+    const cleanArtist = nativeTrack.artist || '';
+    if (!cleanTitle || cleanTitle === 'CASA Native Player' || cleanTitle === 'CASA PLAYER' || cleanTitle === 'No Media Playing') {
+      nativeAutoFetchAbortRef.current?.abort();
+      nativeAutoFetchAbortRef.current = null;
+      setIsAutoFetchingLyrics(false);
+      return;
+    }
 
-    let isSubscribed = true;
+    const cached = getCachedLyrics(cleanTitle, cleanArtist);
+    if (cached && cached.lines.length > 0) {
+      nativeAutoFetchAbortRef.current?.abort();
+      nativeAutoFetchAbortRef.current = null;
+      setIsAutoFetchingLyrics(false);
+      onLyricsUpdated?.(cached);
+      return;
+    }
+
+    nativeAutoFetchAbortRef.current?.abort();
     const controller = new AbortController();
+    nativeAutoFetchAbortRef.current = controller;
+    setIsAutoFetchingLyrics(true);
 
-    fetchLyrics(cleanTitle, cleanArtist, nativeTrack.durationSeconds, false, { signal: controller.signal })
+    fetchLyrics(cleanTitle, cleanArtist, nativeTrack.durationSeconds, false, {
+      signal: controller.signal,
+      allowTitleOnlyFallback: true,
+    })
       .then((res) => {
-        if (!isSubscribed) return;
-        onLyricsUpdated?.(res);
+        if (res.lines.length > 0) {
+          setCachedLyrics(cleanTitle, cleanArtist, res);
+        }
+        if (controller.signal.aborted) return;
+        if (res.lines.length > 0 || res.isInstrumental) {
+          onLyricsUpdated?.(res);
+        }
       })
       .catch((err) => {
-        if (!isSubscribed) return;
-        console.warn('[NativeAudio] Auto fetchLyrics failed:', cleanTitle, err);
+        if (!controller.signal.aborted) {
+          console.warn('[NativeAudio] Auto fetchLyrics failed:', cleanTitle, err);
+        }
+      })
+      .finally(() => {
+        if (nativeAutoFetchAbortRef.current === controller) {
+          nativeAutoFetchAbortRef.current = null;
+          setIsAutoFetchingLyrics(false);
+        }
       });
 
     return () => {
-      isSubscribed = false;
       controller.abort();
+      if (nativeAutoFetchAbortRef.current === controller) {
+        nativeAutoFetchAbortRef.current = null;
+        setIsAutoFetchingLyrics(false);
+      }
     };
   }, [playbackSource, nativeTrack?.id, nativeTrack?.title, nativeTrack?.artist, onLyricsUpdated]);
 
@@ -648,30 +796,131 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     }
   }, [song.title, song.artist]);
 
-  const effectiveTitle =
-    playbackSource === 'native'
-      ? (nativeTrack?.title || 'CASA Native Player')
-      : song.title && song.title !== 'No Media Playing' && song.title !== 'No Media Active'
-      ? song.title
-      : (optimisticTrack?.title || song.title || '');
+  const sanitizeActiveArtist = (val?: string | null): string => {
+    const trimmed = (val || '').trim();
+    const lower = trimmed.toLowerCase();
+    if (
+      !trimmed ||
+      lower === 'unknown' ||
+      lower === 'unknown artist' ||
+      lower === 'pilih lagu atau putar media' ||
+      lower === 'no media playing' ||
+      lower === 'no media active'
+    ) {
+      return '';
+    }
+    return trimmed;
+  };
 
-  const effectiveArtist =
+  const resolvedActiveTitle =
     playbackSource === 'native'
-      ? (nativeTrack?.artist || 'Pilih lagu untuk putar')
-      : song.artist && song.artist !== 'Unknown'
-      ? song.artist
-      : (optimisticTrack?.artist || song.artist || '');
+      ? (nativeTrack?.title || '').trim()
+      : song.title && song.title !== 'No Media Playing' && song.title !== 'No Media Active'
+      ? song.title.trim()
+      : (optimisticTrack?.title || '').trim();
+
+  const resolvedActiveArtist =
+    playbackSource === 'native'
+      ? sanitizeActiveArtist(nativeTrack?.artist)
+      : sanitizeActiveArtist(song.artist || optimisticTrack?.artist);
 
   const hasActiveSession = Boolean(
     playbackSource === 'native'
-      ? true
-      : optimisticTrack || (
-          song.title &&
-          song.title.trim() !== '' &&
-          song.title !== 'No Media Playing' &&
-          song.title !== 'No Media Active'
-        )
+      ? Boolean(nativeTrack && resolvedActiveTitle !== '')
+      : optimisticTrack || resolvedActiveTitle !== ''
   );
+
+  const effectiveTitle = hasActiveSession
+    ? (resolvedActiveTitle || 'No Media Playing')
+    : 'No Media Playing';
+
+  const effectiveArtist = hasActiveSession
+    ? (resolvedActiveArtist || 'Unknown Artist')
+    : 'Pilih lagu atau putar media';
+
+  const effectiveDuration =
+    playbackSource === 'native'
+      ? nativeDuration > 0
+        ? nativeDuration
+        : nativeTrack?.durationSeconds || 0
+      : !hasActiveSession
+      ? 0
+      : typeof song.duration === 'number' && !isNaN(song.duration) && song.duration > 0
+      ? song.duration
+      : lastValidDurationRef.current;
+
+  const displayDurationSec =
+    typeof effectiveDuration === 'number' && Number.isFinite(effectiveDuration) && effectiveDuration > 0
+      ? effectiveDuration
+      : 0;
+
+  // Hard reset loading & stale lyrics immediately whenever session becomes Standby (!hasActiveSession)
+  useEffect(() => {
+    if (!hasActiveSession) {
+      refreshReqIdRef.current += 1;
+      refreshAbortRef.current?.abort();
+      refreshAbortRef.current = null;
+      companionAutoFetchAbortRef.current?.abort();
+      companionAutoFetchAbortRef.current = null;
+      nativeAutoFetchAbortRef.current?.abort();
+      nativeAutoFetchAbortRef.current = null;
+      autoFetchedLyricsKeyRef.current = '';
+      setIsRefreshingLyrics(false);
+      setIsAutoFetchingLyrics(false);
+      if (lyricLines.length > 0 || isInstrumental) {
+        onLyricsUpdated?.({ lines: [], isSynced: false, syncType: 'none', isInstrumental: false });
+      }
+    }
+  }, [hasActiveSession, lyricLines.length, isInstrumental, onLyricsUpdated]);
+
+  const handleRefreshLyrics = async () => {
+    if (!hasActiveSession) return;
+    const displayTitle = effectiveTitle.trim();
+    const displayArtist = resolvedActiveArtist;
+    if (
+      !displayTitle ||
+      displayTitle === 'No Media Playing' ||
+      displayTitle === 'No Media Active'
+    ) {
+      return;
+    }
+
+    const reqId = ++refreshReqIdRef.current;
+    refreshAbortRef.current?.abort();
+    companionAutoFetchAbortRef.current?.abort();
+    nativeAutoFetchAbortRef.current?.abort();
+    setIsAutoFetchingLyrics(false);
+
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
+    setIsRefreshingLyrics(true);
+    playChimeCue('tap');
+
+    try {
+      flushLyricsCache(displayTitle, displayArtist);
+      autoFetchedLyricsKeyRef.current = '';
+      const result = await fetchLyrics(displayTitle, displayArtist, displayDurationSec, true, {
+        signal: controller.signal,
+        allowTitleOnlyFallback: playbackSource === 'native' || isBrowser,
+      });
+      if (controller.signal.aborted || refreshReqIdRef.current !== reqId) return;
+      if (result.lines.length > 0) {
+        setCachedLyrics(displayTitle, displayArtist, result);
+      }
+      onLyricsUpdated?.(result);
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        console.warn('[MusicCardView] handleRefreshLyrics error:', err);
+      }
+    } finally {
+      if (refreshReqIdRef.current === reqId) {
+        if (refreshAbortRef.current === controller) {
+          refreshAbortRef.current = null;
+        }
+        setIsRefreshingLyrics(false);
+      }
+    }
+  };
 
   // Smart Detection: Spotify Desktop native vs Spotify Web in browser vs generic browser (YouTube)
   const isDesktopSpotify = Boolean(
@@ -683,6 +932,147 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
   const [isBrowserSpotify, setIsBrowserSpotify] = useState(false);
 
   const isSpotifySession = Boolean(isDesktopSpotify || isBrowserSpotify);
+
+  const [isSpotifyRestricted, setIsSpotifyRestricted] = useState<boolean>(() =>
+    isSpotifyPremiumRestricted()
+  );
+
+  useEffect(() => {
+    return subscribeSpotifyPremiumRestriction((restricted) => {
+      setIsSpotifyRestricted(restricted);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (
+      playbackSource === 'companion' &&
+      hasActiveSession &&
+      isSpotifySession &&
+      isUserConnected &&
+      !isSpotifyRestricted
+    ) {
+      void probeSpotifyPremiumAccess();
+    }
+  }, [playbackSource, hasActiveSession, isSpotifySession, isUserConnected, isSpotifyRestricted]);
+
+  const canAccessSpotifyPremium = Boolean(
+    isSpotifySession && isUserConnected && !isSpotifyRestricted
+  );
+  const canShowMode6SearchQueue =
+    playbackSource === 'native' || !hasActiveSession || canAccessSpotifyPremium;
+
+  useEffect(() => {
+    if (mode6Compact && !canShowMode6SearchQueue) {
+      if (isSearchPodOpen) onCloseSearchPod?.();
+      if (isQueuePodOpen) onCloseQueuePod?.();
+    }
+  }, [
+    mode6Compact,
+    canShowMode6SearchQueue,
+    isSearchPodOpen,
+    isQueuePodOpen,
+    onCloseSearchPod,
+    onCloseQueuePod,
+  ]);
+
+  // Hydrate or auto-fetch companion/Spotify lyrics whenever active track metadata is present
+  useEffect(() => {
+    if (playbackSource !== 'companion' || !hasActiveSession || !effectiveTitle) {
+      companionAutoFetchAbortRef.current?.abort();
+      companionAutoFetchAbortRef.current = null;
+      if (playbackSource === 'companion') {
+        setIsAutoFetchingLyrics(false);
+      }
+      return;
+    }
+    const lowerTitle = effectiveTitle.trim().toLowerCase();
+    if (
+      !lowerTitle ||
+      lowerTitle === 'no media playing' ||
+      lowerTitle === 'no media active' ||
+      lowerTitle === 'unknown' ||
+      lowerTitle === 'spotify' ||
+      lowerTitle === 'spotify free' ||
+      lowerTitle === 'spotify premium' ||
+      lowerTitle === 'advertisement' ||
+      lowerTitle === 'sponsored'
+    ) {
+      companionAutoFetchAbortRef.current?.abort();
+      companionAutoFetchAbortRef.current = null;
+      setIsAutoFetchingLyrics(false);
+      return;
+    }
+
+    if ((Array.isArray(lyricLines) && lyricLines.length > 0) || isInstrumental) {
+      setIsAutoFetchingLyrics(false);
+      return;
+    }
+
+    const queryArtist = resolvedActiveArtist;
+    const cached = getCachedLyrics(effectiveTitle, queryArtist);
+    if (cached && cached.lines.length > 0) {
+      companionAutoFetchAbortRef.current?.abort();
+      companionAutoFetchAbortRef.current = null;
+      setIsAutoFetchingLyrics(false);
+      onLyricsUpdated?.(cached);
+      return;
+    }
+
+    const trackKey = buildGlobalLyricsCacheKey(effectiveTitle, queryArtist);
+    const attemptKey = `${trackKey || lowerTitle}::${Math.round(displayDurationSec || 0)}`;
+    if (autoFetchedLyricsKeyRef.current === attemptKey) return;
+    autoFetchedLyricsKeyRef.current = attemptKey;
+
+    companionAutoFetchAbortRef.current?.abort();
+    const controller = new AbortController();
+    companionAutoFetchAbortRef.current = controller;
+    setIsAutoFetchingLyrics(true);
+
+    fetchLyrics(effectiveTitle, queryArtist, displayDurationSec, false, {
+      signal: controller.signal,
+      allowTitleOnlyFallback: isBrowser,
+    })
+      .then((res) => {
+        if (res.lines.length > 0) {
+          setCachedLyrics(effectiveTitle, queryArtist, res);
+        }
+        if (controller.signal.aborted) return;
+        if (res.lines.length > 0 || res.isInstrumental) {
+          onLyricsUpdated?.(res);
+        } else if (autoFetchedLyricsKeyRef.current === attemptKey) {
+          autoFetchedLyricsKeyRef.current = '';
+        }
+      })
+      .catch(() => {
+        if (autoFetchedLyricsKeyRef.current === attemptKey) {
+          autoFetchedLyricsKeyRef.current = '';
+        }
+      })
+      .finally(() => {
+        if (companionAutoFetchAbortRef.current === controller) {
+          companionAutoFetchAbortRef.current = null;
+          setIsAutoFetchingLyrics(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+      if (companionAutoFetchAbortRef.current === controller) {
+        companionAutoFetchAbortRef.current = null;
+        setIsAutoFetchingLyrics(false);
+      }
+    };
+  }, [
+    playbackSource,
+    hasActiveSession,
+    effectiveTitle,
+    resolvedActiveArtist,
+    displayDurationSec,
+    isBrowser,
+    lyricLines.length,
+    isInstrumental,
+    onLyricsUpdated,
+  ]);
 
   useEffect(() => {
     let isMounted = true;
@@ -919,16 +1309,11 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     onSubPanelChange?.(next);
   };
 
-  const [isRepeat, setIsRepeat] = useState<boolean>(false);
+  const isRepeat = nativeIsRepeat;
   const handleToggleRepeat = () => {
     playChimeCue('tap');
-    setIsRepeat((prev) => {
-      const next = !prev;
-      if (audioRef.current) {
-        audioRef.current.loop = next;
-      }
-      return next;
-    });
+    const next = !nativeIsRepeat;
+    setNativeRepeat(next);
   };
 
   const [isSearchFocused, setIsSearchFocused] = useState<boolean>(false);
@@ -993,6 +1378,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     audioRef,
     isPlaying: playbackSource === 'native' ? isNativePlaying : (song.isPlaying && hasActiveSession),
     playbackSource,
+    playbackClock,
     currentTrackId: playbackSource === 'native' ? (nativeTrack?.id || null) : (song.title || null),
     displayLines,
     durationMs: effectiveDuration * 1000,
@@ -1009,13 +1395,17 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     isUserConnected,
     currentSessionId,
     onSeekExternal: async (targetMs) => {
+      markPlaybackManualSeekLock(850);
+      onSeekClock?.(targetMs);
       if (canAccessSpotifyFeatures && (isDesktopSpotify || isBrowserSpotify)) {
-        await seekSpotifyPlayback(targetMs);
-      } else if (currentSessionId) {
-        await seekMediaSession(currentSessionId, targetMs);
-      } else {
-        await seekMediaSession('', targetMs);
+        const spotifyOk = await seekSpotifyPlayback(targetMs);
+        if (spotifyOk) return true;
       }
+      if (currentSessionId) {
+        const gsmtcOk = await seekMediaSession(currentSessionId, targetMs);
+        if (gsmtcOk) return true;
+      }
+      return await seekMediaSession('', targetMs);
     },
   });
 
@@ -1147,7 +1537,9 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           e.preventDefault();
           e.stopPropagation();
         }}
-        className="absolute inset-y-1.5 right-1.5 w-[310px] bg-[#0e0e11] border border-[#2e2e34] rounded-2xl p-2.5 flex flex-col z-50 shadow-[0_16px_36px_rgba(0,0,0,0.95)] select-none"
+        className={`absolute inset-y-1.5 right-1.5 ${
+          mode6Compact ? 'w-[250px] bg-[#000000] border-white/[0.14]' : 'w-[310px] bg-[#0e0e11] border-[#2e2e34]'
+        } border rounded-2xl p-2.5 flex flex-col z-50 shadow-[0_16px_36px_rgba(0,0,0,0.95)] select-none`}
       >
         <div className="flex items-center justify-between pb-1.5 border-b border-[#222226] flex-shrink-0">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
@@ -1343,16 +1735,23 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     }
   };
 
-  // Load queue immediately when user opens queue panel or connects to Spotify
+  const isQueuePanelOrPodOpen = activeSubPanel === 'queue' || isQueuePodOpen;
+
+  // Load queue when user opens queue panel/pod or connects to Spotify while a Spotify Premium companion session is active
   useEffect(() => {
-    if (activeSubPanel === 'queue') {
+    if (
+      isQueuePanelOrPodOpen &&
+      hasActiveSession &&
+      playbackSource === 'companion' &&
+      canAccessSpotifyPremium
+    ) {
       refreshQueue(false);
     }
-  }, [activeSubPanel, isUserConnected]);
+  }, [isQueuePanelOrPodOpen, hasActiveSession, playbackSource, canAccessSpotifyPremium]);
 
   // Reactive Queue Auto-Refresh on Track Change (Anti-Regression & Anti-Double-Slice)
   useEffect(() => {
-    if (activeSubPanel !== 'queue' || !currentTrackId) return;
+    if (!isQueuePanelOrPodOpen || !currentTrackId || !canAccessSpotifyPremium) return;
 
     // 1. Optimistic removal: buang track aktif saat ini dari antrean lokal seketika (0ms)
     setQueueTracks((prev) => prev.filter((t) => t.id !== currentTrackId));
@@ -1363,12 +1762,12 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     }, 800);
 
     return () => clearTimeout(debounceTimer);
-  }, [currentTrackId, activeSubPanel]);
+  }, [currentTrackId, isQueuePanelOrPodOpen, canAccessSpotifyPremium]);
 
   // Auto-Retry Polling on Empty Queue (Cold-Start Cloud Propagation Latency Fix)
   // Does NOT block paused sessions (isPlaying: false) as long as a valid song/track is detected
   useEffect(() => {
-    if (activeSubPanel !== 'queue' || !isUserConnected || queueTracks.length > 0) return;
+    if (!isQueuePanelOrPodOpen || !canAccessSpotifyPremium || queueTracks.length > 0) return;
     const hasValidSong = Boolean(
       currentTrackId ||
       (song?.title && song.title !== 'No Media Playing' && song.title !== 'No Media Active')
@@ -1388,7 +1787,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     }, 1500);
 
     return () => clearInterval(retryInterval);
-  }, [activeSubPanel, isUserConnected, queueTracks.length, currentTrackId, song?.title]);
+  }, [isQueuePanelOrPodOpen, canAccessSpotifyPremium, queueTracks.length, currentTrackId, song?.title]);
 
   // Wake-Up Re-sync: Saat status isPlaying beralih dari false ke true dan antrean masih kosong
   const prevIsPlayingRef = useRef<boolean>(song.isPlaying);
@@ -1398,25 +1797,25 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     const isNowPlaying = song.isPlaying;
     prevIsPlayingRef.current = song.isPlaying;
 
-    if (wasPaused && isNowPlaying && activeSubPanel === 'queue' && isUserConnected && queueTracks.length === 0) {
+    if (wasPaused && isNowPlaying && isQueuePanelOrPodOpen && canAccessSpotifyPremium && queueTracks.length === 0) {
       const wakeTimer = setTimeout(() => {
         refreshQueue(false);
       }, 1000);
       return () => clearTimeout(wakeTimer);
     }
-  }, [song.isPlaying, activeSubPanel, isUserConnected, queueTracks.length]);
+  }, [song.isPlaying, isQueuePanelOrPodOpen, isUserConnected, queueTracks.length]);
 
   // Adaptive Gentle Queue & Shuffle Poller (Safe: 1 request / 6s = 10 req/min)
-  // Strictly active ONLY when user has the queue subpanel visually open
+  // Strictly active ONLY when queue is visually open AND an external session is active
   useEffect(() => {
-    if (activeSubPanel !== 'queue' || !isUserConnected) return;
+    if (!isQueuePanelOrPodOpen || !isUserConnected || !hasActiveSession || playbackSource !== 'companion') return;
 
     const pollerInterval = setInterval(() => {
       refreshQueue(false);
     }, 6000);
 
     return () => clearInterval(pollerInterval);
-  }, [activeSubPanel, isUserConnected]);
+  }, [isQueuePanelOrPodOpen, isUserConnected, hasActiveSession, playbackSource]);
 
   // Cold-Start Queue Hydration Re-sync:
   // When Spotify desktop opens / wakes up, immediately mark session init timestamp
@@ -1428,21 +1827,21 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
 
     if (!wasRunning && effectiveSpotifyRunning && isUserConnected) {
       markSessionInit();
-      if (activeSubPanel === 'queue') {
+      if (isQueuePanelOrPodOpen) {
         refreshQueue(true);
       }
     }
-  }, [effectiveSpotifyRunning, isUserConnected, activeSubPanel]);
+  }, [effectiveSpotifyRunning, isUserConnected, isQueuePanelOrPodOpen]);
 
   // Reactive Queue Re-sync on Shuffle Change while viewing Queue
   useEffect(() => {
-    if (activeSubPanel === 'queue' && isUserConnected) {
+    if (isQueuePanelOrPodOpen && isUserConnected) {
       const timer = setTimeout(() => {
         refreshQueue(false);
       }, 400);
       return () => clearTimeout(timer);
     }
-  }, [isShuffle, activeSubPanel, isUserConnected]);
+  }, [isShuffle, isQueuePanelOrPodOpen, isUserConnected]);
 
   // Load Playlists & Liked Songs count when playlists panel opens
   useEffect(() => {
@@ -1500,7 +1899,15 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
   // Auto-detect active track ID and liked status when song changes (delayed 1200ms to avoid API collision during playback)
   useEffect(() => {
     let isMounted = true;
-    if (!isUserConnected) return;
+    if (
+      !canAccessSpotifyPremium ||
+      playbackSource !== 'companion' ||
+      !song.title ||
+      song.title === 'No Media Playing' ||
+      song.title === 'No Media Active'
+    ) {
+      return;
+    }
 
     // Fast-path: Check if new song matches an item in current queueTracks immediately (0ms)
     if (song.title && song.title !== 'No Media Playing' && song.title !== 'No Media Active') {
@@ -1561,7 +1968,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     setIsSearching(true);
     const timer = setTimeout(async () => {
       try {
-        const results = await searchSpotifyTracks(searchQuery, 4);
+        const results = await searchSpotifyTracks(searchQuery, 6);
         results.forEach((t) => {
           if (t.albumArt) setCachedArtwork(t.title, t.artist, t.albumArt, t.id);
         });
@@ -1592,6 +1999,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
   };
 
   const handlePlaySpotifyTrack = async (track: SpotifyTrackItem) => {
+    clearManualMediaStopped();
     markUserInitiatedPlayback();
     playChimeCue('tap');
 
@@ -1627,11 +2035,15 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     try {
       // Tahap 1 (0ms - Fokus Putar Lagu):
       const normalizedTrackUri = track.uri || `spotify:track:${track.id}`;
-      if (track.albumUri) {
-        await playTrackWithContext(normalizedTrackUri, track.albumUri, undefined, isBrowser);
-      } else {
-        await executeSpotifyPlay({ trackUri: normalizedTrackUri, isNewTrack: true, isBrowser });
+      const playOk = track.albumUri
+        ? await playTrackWithContext(normalizedTrackUri, track.albumUri, undefined, isBrowser)
+        : await executeSpotifyPlay({ trackUri: normalizedTrackUri, isNewTrack: true, isBrowser });
+
+      if (!playOk) {
+        setOptimisticTrack(null);
+        return;
       }
+
       setCurrentTrackId(track.id);
       setTimeout(async () => {
         try {
@@ -1659,11 +2071,13 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
         }
       }, 1200);
     } catch (err) {
+      setOptimisticTrack(null);
       console.warn('[MusicCardView] failed to play track:', err);
     }
   };
 
   const handlePlayQueueTrack = async (track: SpotifyTrackItem, trackIdx?: number) => {
+    clearManualMediaStopped();
     markUserInitiatedPlayback();
     playChimeCue('tap');
 
@@ -1709,22 +2123,29 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
       playQueueTrack(targetTrack, activeContextUri, remainingUris, isBrowser)
         .then((playOk) => {
           if (!playOk) {
-            console.warn('[MusicCardView] playQueueTrack failed, refreshing queue...');
+            console.warn('[MusicCardView] playQueueTrack rejected/failed, restoring queue...');
+            setOptimisticTrack(null);
+            setQueueTracks(effectiveQueue);
           }
           // Asynchronous background queue revalidation
           refreshQueue(false);
         })
         .catch((err) => {
           console.error('[MusicCardView] playQueueTrack error:', err);
+          setOptimisticTrack(null);
+          setQueueTracks(effectiveQueue);
           refreshQueue(false);
         });
     } catch (err) {
       console.error('[MusicCardView] failed to dispatch queue track:', err);
+      setOptimisticTrack(null);
+      setQueueTracks(effectiveQueue);
       refreshQueue(false);
     }
   };
 
   const handlePlayPlaylistTrack = async (track: SpotifyTrackItem) => {
+    clearManualMediaStopped();
     markUserInitiatedPlayback();
     playChimeCue('tap');
 
@@ -1759,20 +2180,23 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     });
     try {
       if (!selectedPlaylist) return;
-      if (selectedPlaylist.id === 'liked-songs') {
-        await executeSpotifyPlay({
-          trackUri: track.uri || `spotify:track:${track.id}`,
-          uris: playlistTracks.map((t) => t.uri || `spotify:track:${t.id}`),
-          isNewTrack: true,
-          isBrowser,
-        });
-      } else {
-        await executeSpotifyPlay({
-          trackUri: track.uri || `spotify:track:${track.id}`,
-          contextUri: selectedPlaylist.uri,
-          isNewTrack: true,
-          isBrowser,
-        });
+      const playOk =
+        selectedPlaylist.id === 'liked-songs'
+          ? await executeSpotifyPlay({
+              trackUri: track.uri || `spotify:track:${track.id}`,
+              uris: playlistTracks.map((t) => t.uri || `spotify:track:${t.id}`),
+              isNewTrack: true,
+              isBrowser,
+            })
+          : await executeSpotifyPlay({
+              trackUri: track.uri || `spotify:track:${track.id}`,
+              contextUri: selectedPlaylist.uri,
+              isNewTrack: true,
+              isBrowser,
+            });
+      if (!playOk) {
+        setOptimisticTrack(null);
+        return;
       }
       setCurrentTrackId(track.id);
       setTimeout(async () => {
@@ -1786,6 +2210,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
         } catch {}
       }, 1000);
     } catch (err) {
+      setOptimisticTrack(null);
       console.warn('[MusicCardView] failed to play playlist track:', err);
     }
   };
@@ -1819,26 +2244,35 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     try {
       if (selectedPlaylist.id === 'liked-songs') {
         if (playlistTracks.length > 0) {
-          await executeSpotifyPlay({
+          const playOk = await executeSpotifyPlay({
             trackUri: playlistTracks[0].uri || `spotify:track:${playlistTracks[0].id}`,
             uris: playlistTracks.map((t) => t.uri || `spotify:track:${t.id}`),
             isNewTrack: true,
             isBrowser,
           });
+          if (!playOk) {
+            setOptimisticTrack(null);
+            return;
+          }
           setCurrentTrackId(playlistTracks[0].id);
         }
       } else {
-        await executeSpotifyPlay({
+        const playOk = await executeSpotifyPlay({
           contextUri: selectedPlaylist.uri,
           trackUri: playlistTracks[0] ? (playlistTracks[0].uri || `spotify:track:${playlistTracks[0].id}`) : undefined,
           isNewTrack: true,
           isBrowser,
         });
+        if (!playOk) {
+          setOptimisticTrack(null);
+          return;
+        }
         if (playlistTracks[0]?.id) {
           setCurrentTrackId(playlistTracks[0].id);
         }
       }
     } catch (err) {
+      setOptimisticTrack(null);
       console.warn('[MusicCardView] failed to play all in playlist:', err);
     }
   };
@@ -1919,7 +2353,10 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     }
 
     if (preciseTimeMs > 3000) {
-      handleLyricLineSeek(0);
+      const seekOk = await handleLyricLineSeek(0);
+      if (!seekOk && onPrev) {
+        onPrev();
+      }
       return;
     }
 
@@ -1978,6 +2415,112 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     !hasActiveSession &&
     (activeSubPanel === 'none' || activeSubPanel === 'lyrics' || activeSubPanel === 'queue');
 
+  const normalizedDurationSec = displayDurationSec;
+  const rawElapsedSec = playbackSource === 'native' ? nativeCurrentTime : preciseTimeMs / 1000;
+  const normalizedElapsedSec =
+    normalizedDurationSec > 0
+      ? Math.min(normalizedDurationSec, Math.max(0, Number.isFinite(rawElapsedSec) ? rawElapsedSec : 0))
+      : Math.max(0, Number.isFinite(rawElapsedSec) ? rawElapsedSec : 0);
+
+  if (mode6Compact) {
+    return (
+      <div className="relative w-full h-full min-h-0 overflow-hidden bg-[#000000]">
+        <Mode6MusicLayout
+          playbackSource={playbackSource}
+          onSelectSource={handleSelectSource}
+          hasActiveSession={hasActiveSession}
+          isSpotifySession={isSpotifySession}
+          isUserConnected={isUserConnected}
+          canUseSpotifyPremium={canAccessSpotifyPremium}
+          onConnectSpotify={handleConnectSpotify}
+          activeAppName={activeSession?.app_name}
+          sessionCount={activeSessions.length}
+          onOpenSessionPopover={() => setIsSessionPopoverOpen((prev) => !prev)}
+          effectiveArtwork={effectiveArtwork}
+          effectiveTitle={effectiveTitle}
+          effectiveArtist={effectiveArtist}
+          isEffectivePlaying={isEffectivePlaying}
+          isResolvingAudio={isResolvingAudio}
+          nativeAudioError={nativeAudioError}
+          currentTimeSeconds={normalizedElapsedSec}
+          durationSeconds={normalizedDurationSec}
+          onSeek={handlePlayerSeek}
+          onPrev={handlePrevious}
+          onTogglePlay={handleMainTogglePlay}
+          onNext={handleNext}
+          onStopMedia={handleStopMedia}
+          onCoverImageLoad={handleCoverImageLoad}
+          onCoverImageError={handleCoverImageError}
+          mainBoxWidth={showLyrics ? 640 : 480}
+          isLyricsOpen={Boolean(showLyrics)}
+          onToggleLyrics={() => {
+            onInteractionLock?.();
+            onToggleLyrics?.();
+          }}
+          isIdleLyricsEnabled={Boolean(isIdleLyricsEnabled)}
+          onToggleIdleLyrics={() => {
+            onInteractionLock?.();
+            onToggleIdleLyrics?.();
+          }}
+          displayLines={displayLines}
+          activeLyricIndex={activeLyricIndex}
+          isSyncedLyrics={isSyncedLyrics}
+          isInstrumental={isInstrumental}
+          lyricsContainerRef={lyricsContainerRef}
+          isMidSongInstrumental={isMidSongInstrumental}
+          audioAdjustedTime={audioAdjustedTime}
+          isLoadingLyrics={isRefreshingLyrics || isAutoFetchingLyrics}
+          onRefreshLyrics={handleRefreshLyrics}
+          onLyricLineSeek={handlePlayerSeek}
+          podHostEl={podHostEl}
+          isSearchPodOpen={isSearchPodOpen}
+          isQueuePodOpen={isQueuePodOpen}
+          onToggleSearchPod={() => onToggleSearchPod?.()}
+          onToggleQueuePod={() => onToggleQueuePod?.()}
+          onCloseSearchPod={() => onCloseSearchPod?.()}
+          onCloseQueuePod={() => onCloseQueuePod?.()}
+          onInteractionLock={onInteractionLock}
+          spotifySearchQuery={searchQuery}
+          onSpotifySearchQueryChange={setSearchQuery}
+          spotifySearchResults={searchResults}
+          isSearchingSpotify={isSearching}
+          onPlaySpotifyTrack={handlePlaySpotifyTrack}
+          onAddSpotifyToQueue={handleAddToQueue}
+          addedSpotifyQueueId={addedQueueId}
+          spotifyQueueTracks={queueTracks}
+          spotifyQueueContextTitle={queueContextTitle}
+          isLoadingSpotifyQueue={isLoadingQueue}
+          onPlaySpotifyQueueTrack={handlePlayQueueTrack}
+          nativeTrack={nativeTrack}
+          nativeQueue={nativeQueue}
+          nativeQueueIndex={nativeQueueIndex}
+          onPlayNativeSearchTrack={handleSelectNativeTrack}
+          onAddToNativeQueue={handleAddToNativeQueue}
+          addedNativeTrackId={addedNativeTrackId}
+          onSelectNativeQueueTrack={playTrackAtIndex}
+          onRemoveNativeQueueTrack={handleRemoveFromNativeQueue}
+          onClearNativeQueue={handleClearNativeQueue}
+          onOpenLocalFile={handleOpenLocalFiles}
+          isShuffle={playbackSource === 'native' ? nativeIsShuffle : isShuffle}
+          onToggleShuffle={handleShuffleToggle}
+          isRepeat={nativeIsRepeat}
+          onToggleRepeat={handleToggleRepeat}
+          onPlaySmartQueueTrack={playSmartQueueTrack}
+          onRemoveSmartQueueTrack={removeSmartQueueTrack}
+        />
+        {renderSessionPopover()}
+        <input
+          ref={localFileInputRef}
+          type="file"
+          accept="audio/*,.mp3,.flac,.wav,.ogg,.m4a,.aac,.opus"
+          multiple
+          className="hidden"
+          onChange={handleLocalFilesSelected}
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       className="relative w-full max-w-[620px] h-full min-h-0 overflow-visible"
@@ -2034,8 +2577,8 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           effectiveArtwork={effectiveArtwork}
           effectiveTitle={effectiveTitle}
           effectiveArtist={effectiveArtist}
-          currentTimeSeconds={playbackSource === 'native' ? nativeCurrentTime : preciseTimeMs / 1000}
-          durationSeconds={effectiveDuration}
+          currentTimeSeconds={normalizedElapsedSec}
+          durationSeconds={normalizedDurationSec}
           isShuffle={isShuffle}
           isSmartShuffle={isSmartShuffle}
           isRepeat={isRepeat}
@@ -2148,8 +2691,8 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           onToggleMute={toggleSystemMute}
           activeAppName={activeSession?.app_name}
           sessionCount={activeSessions.length}
-          currentTimeSeconds={playbackSource === 'native' ? nativeCurrentTime : preciseTimeMs / 1000}
-          durationSeconds={effectiveDuration}
+          currentTimeSeconds={normalizedElapsedSec}
+          durationSeconds={normalizedDurationSec}
           isShuffle={isShuffle}
           isSmartShuffle={isSmartShuffle}
           isRepeat={isRepeat}

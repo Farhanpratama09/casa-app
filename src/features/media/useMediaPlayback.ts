@@ -2,13 +2,20 @@ import { useCallback } from 'react';
 import { useSkillStore } from '../../skills/store';
 import { MediaSkillState, MusicSubPanel } from './types';
 import {
+  computeInterpolatedPositionMs,
+  reconcilePlaybackClockSnapshot,
+  markPlaybackManualSeekLock,
+} from './playbackClock';
+import {
   mediaPlayPause,
   mediaNextTrack,
   mediaPrevTrack,
   controlMediaSession,
   seekMediaSession,
+  markManualMediaStopped,
+  clearManualMediaStopped,
 } from '../../utils/tauriBridge';
-import { getActiveLyrics, LyricResult } from '../../utils/lyricsService';
+import { getActiveLyrics, LyricResult, setCachedLyrics } from '../../utils/lyricsService';
 import {
   ensureSpotifySessionReady,
   isQueueStale,
@@ -31,6 +38,26 @@ import {
   markUserInitiatedPlayback,
   normalizeTrackUri,
 } from '../../utils/spotifyService';
+
+async function executeNativePlaybackFallback(
+  command: 'toggle' | 'next' | 'prev',
+  sessionId: string,
+  hasNativeMedia?: boolean
+): Promise<void> {
+  if (sessionId) {
+    const ok = await controlMediaSession(sessionId, command);
+    if (ok) return;
+  }
+  if (hasNativeMedia || !sessionId) {
+    if (command === 'toggle') {
+      await mediaPlayPause();
+    } else if (command === 'next') {
+      await mediaNextTrack();
+    } else {
+      await mediaPrevTrack();
+    }
+  }
+}
 
 export {
   ensureSpotifySessionReady,
@@ -61,6 +88,7 @@ export function useMediaPlayback() {
 
   const togglePlay = useCallback(async () => {
     if (!mediaState) return;
+    clearManualMediaStopped();
     const isBrowser = Boolean(mediaState?.is_browser || mediaState?.song?.is_browser);
     const sessionId = mediaState?.session_id || mediaState?.song?.session_id || '';
     const isPlaying = mediaState?.song?.isPlaying ?? false;
@@ -96,22 +124,34 @@ export function useMediaPlayback() {
       if (isPlaying) {
         const ok = await pauseSpotifyPlayback();
         if (!ok) {
-          if (sessionId) {
-            await controlMediaSession(sessionId, 'toggle');
-          } else {
-            await mediaPlayPause();
-          }
+          await executeNativePlaybackFallback('toggle', sessionId, mediaState.hasNativeMedia);
         }
-        updateState((prev) => ({
-          ...prev,
-          song: { ...prev.song, isPlaying: false },
-        }));
+        updateState((prev) => {
+          const durationMs = Math.round((prev.song?.duration || 0) * 1000);
+          const frozenClock = reconcilePlaybackClockSnapshot(prev.playbackClock, {
+            incomingPositionMs: prev.playbackClock ? null : Math.round((prev.song?.currentTime || 0) * 1000),
+            isPlaying: false,
+            durationMs,
+            forceSnap: true,
+          });
+          return {
+            ...prev,
+            playbackClock: frozenClock,
+            song: {
+              ...prev.song,
+              isPlaying: false,
+              currentTime: frozenClock.basePositionMs / 1000,
+            },
+          };
+        });
         return;
       } else {
         markUserInitiatedPlayback();
         const lastPosMs =
           getLastKnownPositionMs() ||
-          Math.round((mediaState?.song?.currentTime ?? 0) * 1000);
+          (mediaState?.playbackClock
+            ? computeInterpolatedPositionMs(mediaState.playbackClock)
+            : Math.round((mediaState?.song?.currentTime ?? 0) * 1000));
 
         const trackUri = (mediaState.song as any)?.uri || normalizeTrackUri((mediaState.song as any)?.id);
 
@@ -120,19 +160,32 @@ export function useMediaPlayback() {
           trackUri,
         });
 
-        // Fallback to OS media keys / GSMTC if Web API did not respond or lacked active device
+        // Fallback to OS media keys / GSMTC if Web API did not respond or returned 403 (Free tier)
         if (!ok) {
-          if (sessionId) {
-            await controlMediaSession(sessionId, 'toggle');
-          } else {
-            await mediaPlayPause();
-          }
+          await executeNativePlaybackFallback('toggle', sessionId, mediaState.hasNativeMedia);
         }
 
-        updateState((prev) => ({
-          ...prev,
-          song: { ...prev.song, isPlaying: true },
-        }));
+        updateState((prev) => {
+          const durationMs = Math.round((prev.song?.duration || 0) * 1000);
+          const currentClockPosMs = prev.playbackClock
+            ? computeInterpolatedPositionMs(prev.playbackClock)
+            : Math.round((prev.song?.currentTime || 0) * 1000);
+          const resumedClock = reconcilePlaybackClockSnapshot(prev.playbackClock, {
+            incomingPositionMs: lastPosMs > 0 ? lastPosMs : currentClockPosMs,
+            isPlaying: true,
+            durationMs,
+            forceSnap: true,
+          });
+          return {
+            ...prev,
+            playbackClock: resumedClock,
+            song: {
+              ...prev.song,
+              isPlaying: true,
+              currentTime: resumedClock.basePositionMs / 1000,
+            },
+          };
+        });
         return;
       }
     }
@@ -144,38 +197,85 @@ export function useMediaPlayback() {
     }
 
     if (isBrowser && sessionId) {
-      await controlMediaSession(sessionId, 'toggle');
-      updateState((prev) => ({
-        ...prev,
-        song: { ...prev.song, isPlaying: !isPlaying },
-      }));
+      const ok = await controlMediaSession(sessionId, 'toggle');
+      if (!ok && mediaState.hasNativeMedia) {
+        await mediaPlayPause();
+      }
+      updateState((prev) => {
+        const durationMs = Math.round((prev.song?.duration || 0) * 1000);
+        const currentPosMs = prev.playbackClock
+          ? computeInterpolatedPositionMs(prev.playbackClock)
+          : Math.round((prev.song?.currentTime || 0) * 1000);
+        const toggledClock = reconcilePlaybackClockSnapshot(prev.playbackClock, {
+          incomingPositionMs: currentPosMs,
+          isPlaying: !isPlaying,
+          durationMs,
+          forceSnap: true,
+        });
+        return {
+          ...prev,
+          playbackClock: toggledClock,
+          song: {
+            ...prev.song,
+            isPlaying: !isPlaying,
+            currentTime: toggledClock.basePositionMs / 1000,
+          },
+        };
+      });
       return;
     }
 
     // 3. Fallback to native GSMTC media keys
-    if (mediaState.hasNativeMedia) {
-      await mediaPlayPause();
-    }
+    await executeNativePlaybackFallback('toggle', sessionId, mediaState.hasNativeMedia);
 
-    updateState((prev) => ({
-      ...prev,
-      song: { ...prev.song, isPlaying: !isPlaying },
-    }));
+    updateState((prev) => {
+      const durationMs = Math.round((prev.song?.duration || 0) * 1000);
+      const currentPosMs = prev.playbackClock
+        ? computeInterpolatedPositionMs(prev.playbackClock)
+        : Math.round((prev.song?.currentTime || 0) * 1000);
+      const toggledClock = reconcilePlaybackClockSnapshot(prev.playbackClock, {
+        incomingPositionMs: currentPosMs,
+        isPlaying: !isPlaying,
+        durationMs,
+        forceSnap: true,
+      });
+      return {
+        ...prev,
+        playbackClock: toggledClock,
+        song: {
+          ...prev.song,
+          isPlaying: !isPlaying,
+          currentTime: toggledClock.basePositionMs / 1000,
+        },
+      };
+    });
   }, [mediaState, updateState]);
 
   const nextTrack = useCallback(async () => {
-    // Explicit Song Switch: reset position cache and clear play guard window
+    clearManualMediaStopped();
+    // Explicit Song Switch: reset position cache, lock stale external polls, and clear play guard window
+    markPlaybackManualSeekLock(850);
     setLastKnownPositionMs(0);
     clearPlayGuardWindow();
-    updateState((prev) => ({
-      ...prev,
-      song: {
-        ...prev.song,
-        currentTime: 0,
-        // Anti-Blank Scrubber Guard: Preserve last valid duration across track actions
-        duration: prev.song.duration > 0 ? prev.song.duration : 0,
-      },
-    }));
+    const nowMs = Date.now();
+    updateState((prev) => {
+      const preservedDuration = prev.song.duration > 0 ? prev.song.duration : 0;
+      return {
+        ...prev,
+        playbackClock: {
+          basePositionMs: 0,
+          capturedAtMs: nowMs,
+          isPlaying: prev.song.isPlaying,
+          durationMs: Math.round(preservedDuration * 1000),
+        },
+        song: {
+          ...prev.song,
+          currentTime: 0,
+          // Anti-Blank Scrubber Guard: Preserve last valid duration across track actions
+          duration: preservedDuration,
+        },
+      };
+    });
 
     const isBrowser = Boolean(mediaState?.is_browser || mediaState?.song?.is_browser);
     const sessionId = mediaState?.session_id || mediaState?.song?.session_id || '';
@@ -200,14 +300,11 @@ export function useMediaPlayback() {
       if (ok) return;
     }
 
-    if (sessionId) {
-      await controlMediaSession(sessionId, 'next');
-    } else if (mediaState?.hasNativeMedia) {
-      await mediaNextTrack();
-    }
+    await executeNativePlaybackFallback('next', sessionId, mediaState?.hasNativeMedia);
   }, [mediaState, updateState]);
 
   const prevTrack = useCallback(async () => {
+    clearManualMediaStopped();
     const isBrowser = Boolean(mediaState?.is_browser || mediaState?.song?.is_browser);
     const sessionId = mediaState?.session_id || mediaState?.song?.session_id || '';
     const isDesktopSpotify = Boolean(
@@ -224,42 +321,70 @@ export function useMediaPlayback() {
     }
 
     const isGenuineSpotify = isDesktopSpotify || isBrowserSpotify;
-    const currentPosMs = (mediaState?.song?.currentTime ?? 0) * 1000;
+    const currentPosMs = mediaState?.playbackClock
+      ? computeInterpolatedPositionMs(mediaState.playbackClock)
+      : (mediaState?.song?.currentTime ?? 0) * 1000;
 
     // 1. Smart Dual-Action Previous: Jika lagu sudah berjalan > 3 detik (> 3000ms),
-    // Ulangi lagu saat ini ke detik 0:00 secara riil di browser/pemutar
+    // Ulangi lagu saat ini ke detik 0:00 secara riil di browser/pemutar (dengan fallback GSMTC/MediaPrev untuk Spotify Free)
     if (currentPosMs > 3000) {
+      markPlaybackManualSeekLock(850);
       setLastKnownPositionMs(0);
-      updateState((prev) => ({
-        ...prev,
-        song: {
-          ...prev.song,
-          currentTime: 0,
-          // Anti-Blank Scrubber Guard: Preserve last valid duration
-          duration: prev.song.duration > 0 ? prev.song.duration : 0,
-        },
-      }));
+      const nowMs = Date.now();
+      updateState((prev) => {
+        const preservedDuration = prev.song.duration > 0 ? prev.song.duration : 0;
+        return {
+          ...prev,
+          playbackClock: {
+            basePositionMs: 0,
+            capturedAtMs: nowMs,
+            isPlaying: prev.song.isPlaying,
+            durationMs: Math.round(preservedDuration * 1000),
+          },
+          song: {
+            ...prev.song,
+            currentTime: 0,
+            // Anti-Blank Scrubber Guard: Preserve last valid duration
+            duration: preservedDuration,
+          },
+        };
+      });
 
       if (isGenuineSpotify && isSpotifyUserConnected()) {
-        await seekSpotifyPlayback(0);
-      } else if (sessionId) {
-        await seekMediaSession(sessionId, 0);
+        const spotifySeekOk = await seekSpotifyPlayback(0);
+        if (spotifySeekOk) return;
       }
+      if (sessionId) {
+        const gsmtcSeekOk = await seekMediaSession(sessionId, 0);
+        if (gsmtcSeekOk) return;
+      }
+      await executeNativePlaybackFallback('prev', sessionId, mediaState?.hasNativeMedia);
       return;
     }
 
     // 2. Jika lagu masih di awal (<= 3 detik): Panggil track sebelumnya
+    markPlaybackManualSeekLock(850);
     setLastKnownPositionMs(0);
     clearPlayGuardWindow();
-    updateState((prev) => ({
-      ...prev,
-      song: {
-        ...prev.song,
-        currentTime: 0,
-        // Anti-Blank Scrubber Guard: Preserve last valid duration
-        duration: prev.song.duration > 0 ? prev.song.duration : 0,
-      },
-    }));
+    const nowMs = Date.now();
+    updateState((prev) => {
+      const preservedDuration = prev.song.duration > 0 ? prev.song.duration : 0;
+      return {
+        ...prev,
+        playbackClock: {
+          basePositionMs: 0,
+          capturedAtMs: nowMs,
+          isPlaying: prev.song.isPlaying,
+          durationMs: Math.round(preservedDuration * 1000),
+        },
+        song: {
+          ...prev.song,
+          currentTime: 0,
+          // Anti-Blank Scrubber Guard: Preserve last valid duration
+          duration: preservedDuration,
+        },
+      };
+    });
 
     // Prioritize direct Spotify Web API ONLY if current media is genuine Spotify
     if (isGenuineSpotify && isSpotifyUserConnected()) {
@@ -267,11 +392,7 @@ export function useMediaPlayback() {
       if (ok) return;
     }
 
-    if (sessionId) {
-      await controlMediaSession(sessionId, 'prev');
-    } else if (mediaState?.hasNativeMedia) {
-      await mediaPrevTrack();
-    }
+    await executeNativePlaybackFallback('prev', sessionId, mediaState?.hasNativeMedia);
   }, [mediaState, updateState]);
 
   const toggleShuffle = useCallback(() => {
@@ -296,11 +417,106 @@ export function useMediaPlayback() {
     }));
   }, [updateState]);
 
-  const updateLyrics = useCallback((result: LyricResult) => {
+  const setShowIdleLyrics = useCallback(
+    (enabled: boolean) => {
+      updateState((prev) => ({ ...prev, showIdleLyrics: enabled }));
+      try {
+        localStorage.setItem('casa_show_idle_lyrics', enabled ? 'true' : 'false');
+      } catch {}
+    },
+    [updateState]
+  );
+
+  const toggleIdleLyrics = useCallback(() => {
     updateState((prev) => {
+      const next = !prev.showIdleLyrics;
+      try {
+        localStorage.setItem('casa_show_idle_lyrics', next ? 'true' : 'false');
+      } catch {}
+      return { ...prev, showIdleLyrics: next };
+    });
+  }, [updateState]);
+
+  const stopPlayback = useCallback(async () => {
+    const sessionId = mediaState?.session_id || mediaState?.song?.session_id || '';
+    const songTitle = mediaState?.song?.title || '';
+    const activeSessions = mediaState?.active_sessions || mediaState?.song?.active_sessions || [];
+
+    markManualMediaStopped(sessionId, songTitle);
+    setLastKnownPositionMs(0);
+    clearPlayGuardWindow();
+
+    // Pause Spotify Web API & all active playing GSMTC sessions so OS stops playing
+    if (isSpotifyUserConnected()) {
+      pauseSpotifyPlayback().catch(() => {});
+    }
+    for (const s of activeSessions) {
+      if (s.is_playing) {
+        controlMediaSession(s.session_id, 'pause').catch(() => {});
+      }
+    }
+    if (sessionId) {
+      controlMediaSession(sessionId, 'pause').catch(() => {});
+    } else if (mediaState?.hasNativeMedia && mediaState?.song?.isPlaying) {
+      mediaPlayPause().catch(() => {});
+    }
+
+    updateState((prev) => ({
+      ...prev,
+      playbackSource: 'companion',
+      playbackClock: {
+        basePositionMs: 0,
+        capturedAtMs: Date.now(),
+        isPlaying: false,
+        durationMs: 0,
+      },
+      hasNativeMedia: false,
+      is_browser: false,
+      session_id: '',
+      active_sessions: [],
+      isNativePlaying: false,
+      nativeTrack: null,
+      lyricsData: { lines: [], isSynced: false, syncType: 'none', isInstrumental: false },
+      song: {
+        session_id: '',
+        title: '',
+        artist: '',
+        albumArt: undefined,
+        albumArtUrl: undefined,
+        duration: 0,
+        currentTime: 0,
+        isPlaying: false,
+        is_browser: false,
+        is_spotify: false,
+        source_app: '',
+        active_sessions: [],
+        lyrics: { prev: '', current: '', next: '' },
+        queue: [],
+      },
+    }));
+  }, [mediaState, updateState]);
+
+  const updateLyrics = useCallback((result: LyricResult) => {
+    const activeMedia = useSkillStore.getState().skillStates['core.media'] as MediaSkillState | undefined;
+    if (activeMedia?.song) {
+      const activeTitle =
+        activeMedia.playbackSource === 'native' && activeMedia.nativeTrack
+          ? activeMedia.nativeTrack.title
+          : activeMedia.song.title;
+      const activeArtist =
+        activeMedia.playbackSource === 'native' && activeMedia.nativeTrack
+          ? activeMedia.nativeTrack.artist
+          : activeMedia.song.artist;
+      setCachedLyrics(activeTitle || '', activeArtist || '', result);
+    }
+
+    updateState((prev) => {
+      const liveSec = prev.playbackClock
+        ? computeInterpolatedPositionMs(prev.playbackClock) / 1000
+        : prev.song.currentTime;
       const active =
         result.lines && result.lines.length > 0 && result.isSynced
-          ? getActiveLyrics(result.lines, prev.song.currentTime, 0.35, result.offsetSeconds || 0)
+          ? getActiveLyrics(result.lines, liveSec, 0.35, result.offsetSeconds || 0)
           : { prev: '', current: '', next: '' };
 
       return {
@@ -318,8 +534,33 @@ export function useMediaPlayback() {
     });
   }, [updateState]);
 
+  const commitManualSeekClock = useCallback((targetMs: number) => {
+    const safeTargetMs = Math.max(0, Math.round(Number.isFinite(targetMs) ? targetMs : 0));
+    markPlaybackManualSeekLock(850);
+    setLastKnownPositionMs(safeTargetMs);
+    const nowMs = Date.now();
+    updateState((prev) => {
+      const durationMs = Math.round((prev.song?.duration || 0) * 1000);
+      const clampedMs = durationMs > 0 ? Math.min(durationMs, safeTargetMs) : safeTargetMs;
+      return {
+        ...prev,
+        playbackClock: {
+          basePositionMs: clampedMs,
+          capturedAtMs: nowMs,
+          isPlaying: prev.song?.isPlaying ?? false,
+          durationMs,
+        },
+        song: {
+          ...prev.song,
+          currentTime: clampedMs / 1000,
+        },
+      };
+    });
+  }, [updateState]);
+
   return {
     mediaState,
+    playbackClock: mediaState?.playbackClock,
     song: mediaState?.song,
     isPlaying: mediaState?.song?.isPlaying ?? false,
     hasNativeMedia: mediaState?.hasNativeMedia ?? false,
@@ -337,6 +578,11 @@ export function useMediaPlayback() {
     toggleAudioOutput,
     updateLyrics,
     updateState,
+    commitManualSeekClock,
+    stopPlayback,
+    showIdleLyrics: mediaState?.showIdleLyrics ?? false,
+    setShowIdleLyrics,
+    toggleIdleLyrics,
     ensurePlayerReady: ensureSpotifySessionReady,
     isQueueStale,
     sessionInitTimestamp: getSessionInitTimestamp(),

@@ -84,17 +84,49 @@ export async function controlMediaSession(
     | 'prev'
     | 'previous'
     | 'skip_previous'
-): Promise<void> {
+): Promise<boolean> {
   if (isTauriEnv) {
     try {
       await invoke('control_media_session', { sessionId, action });
+      return true;
     } catch (err) {
       console.warn('[CASA GSMTC] control_media_session failed:', err);
+      return false;
     }
   }
+  return true;
 }
 
 let lastManualTargetSessionId: string | null = null;
+let manualStoppedMedia: { sessionId: string; title: string } | null = null;
+
+export function markManualMediaStopped(sessionId?: string, title?: string): void {
+  manualStoppedMedia = {
+    sessionId: sessionId || '',
+    title: (title || '').trim().toLowerCase(),
+  };
+}
+
+export function clearManualMediaStopped(): void {
+  manualStoppedMedia = null;
+}
+
+export function shouldSuppressStoppedMediaUpdate(
+  sessionId?: string,
+  title?: string,
+  isPlaying?: boolean
+): boolean {
+  if (!manualStoppedMedia) return false;
+  const cleanTitle = (title || '').trim().toLowerCase();
+  const sameTitle = Boolean(manualStoppedMedia.title && cleanTitle === manualStoppedMedia.title);
+  const sameSession = Boolean(manualStoppedMedia.sessionId && sessionId === manualStoppedMedia.sessionId);
+
+  if (isPlaying || (cleanTitle && !sameTitle && !sameSession)) {
+    manualStoppedMedia = null;
+    return false;
+  }
+  return !isPlaying;
+}
 
 export function getLastManualTargetSessionId(): string | null {
   return lastManualTargetSessionId;
@@ -118,14 +150,17 @@ export async function quickSwapSession(
   }
 }
 
-export async function seekMediaSession(sessionId: string, positionMs: number): Promise<void> {
+export async function seekMediaSession(sessionId: string, positionMs: number): Promise<boolean> {
   if (isTauriEnv) {
     try {
       await invoke('seek_media_session', { sessionId, positionMs: Math.round(positionMs) });
+      return true;
     } catch (err) {
       console.warn('[CASA GSMTC] seek_media_session failed:', err);
+      return false;
     }
   }
+  return true;
 }
 
 export async function mediaPlayPause(): Promise<void> {
@@ -325,31 +360,158 @@ export async function refreshSpotifyUserToken(
   throw new Error('Spotify OAuth refresh requires Tauri desktop runtime');
 }
 
-let lastHitboxSize = { width: 0, height: 0 };
+export interface HitRect {
+  center_offset_x: number;
+  top_offset: number;
+  width: number;
+  height: number;
+}
+
+let lastHitboxKey = '';
+
+function serializeHitRects(rects: HitRect[]): string {
+  return rects
+    .map(
+      (r) =>
+        `${Math.round(r.center_offset_x)}:${Math.round(r.top_offset)}:${Math.round(r.width)}x${Math.round(r.height)}`
+    )
+    .join('|');
+}
 
 /**
  * Update the active island capsule hitbox in the Rust backend
- * for 50Hz dynamic click-through pass-through (Option B: Fixed 620px canvas)
+ * for 50Hz dynamic click-through pass-through (single center rect helper)
  */
 export async function updateIslandHitbox(width: number, height: number): Promise<void> {
-  const roundedW = Math.round(width);
-  const roundedH = Math.round(height);
+  await updateIslandHitboxes([
+    {
+      center_offset_x: 0,
+      top_offset: 0,
+      width: Math.round(width),
+      height: Math.round(height),
+    },
+  ]);
+}
 
-  if (lastHitboxSize.width === roundedW && lastHitboxSize.height === roundedH) {
+/**
+ * Update composite multi-rect hitboxes in the Rust backend (center card + detached pods + overlays).
+ * Transparent gaps between rects remain 100% click-through.
+ */
+export async function updateIslandHitboxes(rects: HitRect[]): Promise<void> {
+  const rounded = rects.map((r) => ({
+    center_offset_x: Math.round(r.center_offset_x),
+    top_offset: Math.max(0, Math.round(r.top_offset)),
+    width: Math.max(10, Math.round(r.width)),
+    height: Math.max(10, Math.round(r.height)),
+  }));
+  const key = serializeHitRects(rounded);
+  if (key === lastHitboxKey) {
     return;
   }
-  lastHitboxSize = { width: roundedW, height: roundedH };
+  lastHitboxKey = key;
 
   if (isTauriEnv) {
     try {
-      await invoke('update_island_hitbox', {
-        width: roundedW,
-        height: roundedH,
-      });
+      await invoke('update_island_hitboxes', { rects: rounded });
     } catch (err) {
-      console.warn('[CASA IPC] update_island_hitbox failed:', err);
+      console.warn('[CASA IPC] update_island_hitboxes failed:', err);
     }
   }
+}
+
+export async function setIslandPinned(pinned: boolean): Promise<void> {
+  if (isTauriEnv) {
+    try {
+      await invoke('set_island_pinned', { pinned });
+    } catch (err) {
+      console.warn('[CASA IPC] set_island_pinned failed:', err);
+    }
+  }
+}
+
+export async function setStayAwakeNative(enabled: boolean): Promise<boolean> {
+  if (isTauriEnv) {
+    try {
+      return await invoke<boolean>('set_stay_awake', { enabled });
+    } catch (err) {
+      console.warn('[CASA IPC] set_stay_awake failed:', err);
+    }
+  }
+  return enabled;
+}
+
+export interface WifiNetworkItem {
+  ssid: string;
+  signal_quality: number;
+  is_secured: boolean;
+  is_connected: boolean;
+  has_profile: boolean;
+}
+
+export interface ConnectedBluetoothDevice {
+  name: string;
+  address: string;
+  battery_percent?: number | null;
+}
+
+export interface BluetoothDeviceItem {
+  id: string;
+  name: string;
+  address: string;
+  is_connected: boolean;
+  device_type: string;
+  battery_percent?: number | null;
+}
+
+export async function openExternalUrl(url: string): Promise<void> {
+  if (!isTauriEnv) {
+    if (typeof window !== 'undefined' && url.startsWith('https://')) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+    return;
+  }
+  await invoke('open_url_item', { url });
+}
+
+export async function toggleWifiNative(enabled?: boolean): Promise<boolean> {
+  if (isTauriEnv) {
+    return await invoke<boolean>('toggle_wifi', { enabled: enabled ?? null });
+  }
+  return false;
+}
+
+export async function toggleBluetoothNative(enabled?: boolean): Promise<boolean> {
+  if (isTauriEnv) {
+    return await invoke<boolean>('toggle_bluetooth', { enabled: enabled ?? null });
+  }
+  return false;
+}
+
+export async function scanWifiNetworks(): Promise<WifiNetworkItem[]> {
+  if (isTauriEnv) {
+    return await invoke<WifiNetworkItem[]>('scan_wifi_networks');
+  }
+  return [];
+}
+
+export async function connectWifiNetwork(ssid: string, password?: string): Promise<void> {
+  if (isTauriEnv) {
+    await invoke('connect_wifi_network', { ssid, password: password ?? null });
+  }
+}
+
+export async function listPairedBluetooth(): Promise<BluetoothDeviceItem[]> {
+  if (isTauriEnv) {
+    return await invoke<BluetoothDeviceItem[]>('list_paired_bluetooth');
+  }
+  return [];
+}
+
+export async function toggleBluetoothDevice(address: string, connect: boolean): Promise<boolean> {
+  if (isTauriEnv) {
+    return await invoke<boolean>('toggle_bluetooth_device', { address, connect });
+  }
+  return connect;
 }
 
 let lastAdjustedSize = { width: 0, height: 0 };
@@ -426,4 +588,80 @@ export function playChimeCue(type: 'ding' | 'whisper' | 'tap' = 'ding'): void {
   } catch (e) {
     console.debug('Audio cue unavailable:', e);
   }
+}
+
+
+export interface AppUpdateCheckResult {
+  currentVersion: string;
+  available: boolean;
+  version: string | null;
+  body: string | null;
+  date: string | null;
+  statusKind: 'up-to-date' | 'available' | 'offline' | 'error';
+  message: string;
+}
+
+export async function alignWindowTop(align: 'left' | 'center' | 'right'): Promise<void> {
+  if (!isTauriEnv) return;
+  try {
+    await invoke('align_window_top', { align });
+  } catch (err) {
+    console.warn('[CASA IPC] align_window_top failed:', err);
+  }
+}
+
+export async function setWindowVisibility(visible: boolean): Promise<void> {
+  if (!isTauriEnv) return;
+  try {
+    await invoke('set_window_visibility', { visible });
+  } catch (err) {
+    console.warn('[CASA IPC] set_window_visibility failed:', err);
+  }
+}
+
+export async function getGlobalShortcutStatus(): Promise<boolean> {
+  if (!isTauriEnv) return false;
+  try {
+    return await invoke<boolean>('get_global_shortcut_status');
+  } catch (err) {
+    console.warn('[CASA IPC] get_global_shortcut_status failed:', err);
+    return false;
+  }
+}
+
+export async function getAutostartEnabled(): Promise<boolean> {
+  if (!isTauriEnv) return false;
+  try {
+    return await invoke<boolean>('get_autostart_enabled');
+  } catch (err) {
+    console.warn('[CASA IPC] get_autostart_enabled failed:', err);
+    return false;
+  }
+}
+
+export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
+  if (!isTauriEnv) return false;
+  return await invoke<boolean>('set_autostart_enabled', { enabled });
+}
+
+export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
+  if (!isTauriEnv) {
+    return {
+      currentVersion: '2.0.0',
+      available: false,
+      version: null,
+      body: null,
+      date: null,
+      statusKind: 'offline',
+      message: 'Pemeriksaan pembaruan hanya tersedia di aplikasi desktop CASA.',
+    };
+  }
+  return await invoke<AppUpdateCheckResult>('check_app_update');
+}
+
+export async function installAppUpdate(): Promise<void> {
+  if (!isTauriEnv) {
+    throw new Error('Instalasi pembaruan hanya tersedia di aplikasi desktop CASA.');
+  }
+  await invoke('install_app_update');
 }

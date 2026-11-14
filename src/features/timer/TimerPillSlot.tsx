@@ -2,6 +2,7 @@ import React from 'react';
 import { LunarBunnyGlyph } from '../../components/LunarBunnyGlyph';
 import { useTimerState } from './useTimerState';
 import { TimerState } from './types';
+import { formatDurationClock } from './timerUtils';
 
 interface TimerPillSlotProps {
   state?: TimerState;
@@ -39,12 +40,6 @@ export const TimerPillSlot: React.FC<TimerPillSlotProps> = ({ state: propState, 
     );
   }
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
-  };
-
   const isAlert = state.remainingSeconds <= 1;
 
   return (
@@ -56,7 +51,7 @@ export const TimerPillSlot: React.FC<TimerPillSlotProps> = ({ state: propState, 
       className={`flex items-center gap-1.5 shrink-0 cursor-pointer select-none px-2 py-0.5 rounded-full transition-colors hover:bg-white/5 ${
         isAlert ? 'animate-pulse' : ''
       }`}
-      title={`Pomodoro Timer: ${formatTime(state.remainingSeconds)} (${state.mode})`}
+      title={`Pomodoro Timer: ${formatDurationClock(state.remainingSeconds)} (${state.mode})`}
       role="button"
       aria-label="Active Timer Teaser"
     >
@@ -87,7 +82,7 @@ export const TimerPillSlot: React.FC<TimerPillSlotProps> = ({ state: propState, 
           filter: !state.isPaused && !isAlert ? 'drop-shadow(0 0 6px rgba(125, 211, 252, 0.25))' : undefined,
         }}
       >
-        {formatTime(state.remainingSeconds)}
+        {formatDurationClock(state.remainingSeconds)}
       </span>
     </div>
   );

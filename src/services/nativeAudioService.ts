@@ -18,6 +18,8 @@ export interface NativeTrack {
   artworkUrl?: string;
   streamUrl?: string;
   candidates?: string[];
+  isLocal?: boolean;
+  source?: 'native' | 'spotify' | 'local';
 }
 
 interface ResolvedStreamResponse {
@@ -150,7 +152,15 @@ export async function resolveAudioCandidates(track: NativeTrack): Promise<string
   if (track.candidates && track.candidates.length > 0) {
     return track.candidates;
   }
-  if (track.streamUrl && (track.streamUrl.startsWith('blob:') || track.streamUrl.startsWith('data:') || track.streamUrl.startsWith('http://127.0.0.1:'))) {
+  if (
+    track.streamUrl &&
+    (track.streamUrl.startsWith('blob:') ||
+      track.streamUrl.startsWith('data:') ||
+      track.streamUrl.startsWith('http://127.0.0.1:') ||
+      track.streamUrl.startsWith('asset:') ||
+      track.streamUrl.startsWith('http://asset.localhost') ||
+      track.streamUrl.startsWith('https://asset.localhost'))
+  ) {
     return [track.streamUrl];
   }
   if (track.id.startsWith('local-') && track.streamUrl) {

@@ -14,7 +14,9 @@ import {
 } from 'lucide-react';
 import { NativeTrack, searchTracks } from '../../../../services/nativeAudioService';
 import { playChimeCue } from '../../../../utils/tauriBridge';
-import { formatDuration, MOCK_NATIVE_SEARCH_TRACKS } from '../constants';
+import { useMusicAffinity } from '../../../../hooks/useMusicAffinity';
+import { AddToPlaylistPopover } from '../AddToPlaylistPopover';
+import { formatDuration } from '../constants';
 import { useQueueStore } from '../../../../stores/useQueueStore';
 
 // ============================================================================
@@ -479,7 +481,7 @@ export const NativeSearchPanel: React.FC<NativeSearchPanelProps> = memo(({
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const displayTracks = searchQuery.trim() ? searchResults : MOCK_NATIVE_SEARCH_TRACKS;
+  const { suggestionChips, affinityTracks, recordSearchQuery } = useMusicAffinity();
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -584,18 +586,68 @@ export const NativeSearchPanel: React.FC<NativeSearchPanelProps> = memo(({
               Ketik judul lagu atau nama artis di atas untuk memutar streaming langsung via InnerTube
             </p>
 
-            {/* Quick Suggestions Chips */}
-            <div className="flex items-center gap-1.5 mt-3 flex-wrap justify-center max-w-[280px]">
-              {['NewJeans', 'BABYMONSTER', 'YOASOBI', 'aespa', 'Lofi Beats'].map((tag) => (
+            {/* Adaptive Contextual Suggestions Chips */}
+            <div className="flex items-center gap-1.5 mt-3 flex-wrap justify-center max-w-[300px]">
+              {suggestionChips.map((chip) => (
                 <button
-                  key={tag}
-                  onClick={() => setSearchQuery(tag)}
-                  className="px-2 py-0.5 rounded-full text-[9px] font-medium bg-[#18181c] hover:bg-cyan-950/40 border border-[#2e2e34] hover:border-cyan-500/40 text-zinc-400 hover:text-cyan-300 transition-colors cursor-pointer"
+                  key={`${chip.kind}-${chip.label}`}
+                  onClick={() => {
+                    recordSearchQuery(chip.query);
+                    setSearchQuery(chip.query);
+                  }}
+                  className="px-2 py-0.5 rounded-full text-[9px] font-medium bg-[#18181c] hover:bg-white/15 border border-[#2e2e34] hover:border-white/35 text-zinc-300 hover:text-white transition-colors cursor-pointer"
                 >
-                  {tag}
+                  {chip.kind === 'recent' ? `↺ ${chip.label}` : chip.label}
                 </button>
               ))}
             </div>
+            {affinityTracks.length > 0 && (
+              <div className="w-full mt-2.5 flex flex-col gap-0.5 text-left">
+                {affinityTracks.slice(0, 3).map((rec) => {
+                  const recTrack: NativeTrack = {
+                    id: rec.id,
+                    title: rec.title,
+                    artist: rec.artist,
+                    durationSeconds: rec.durationSeconds,
+                    thumbnailUrl: rec.thumbnailUrl,
+                    albumArt: rec.albumArt,
+                    streamUrl: rec.streamUrl,
+                    candidates: rec.candidates,
+                    isLocal: rec.isLocal,
+                  };
+                  return (
+                    <div
+                      key={`rec-${rec.id}`}
+                      onClick={() => {
+                        playChimeCue('tap');
+                        onPlayTrack(
+                          recTrack,
+                          affinityTracks.slice(0, 8).map((a) => ({
+                            id: a.id,
+                            title: a.title,
+                            artist: a.artist,
+                            durationSeconds: a.durationSeconds,
+                            thumbnailUrl: a.thumbnailUrl,
+                            albumArt: a.albumArt,
+                            streamUrl: a.streamUrl,
+                            candidates: a.candidates,
+                            isLocal: a.isLocal,
+                          }))
+                        );
+                      }}
+                      className="flex items-center justify-between px-2 py-1 rounded-lg bg-[#141417]/70 hover:bg-white/[0.08] border border-white/[0.06] cursor-pointer transition-colors"
+                    >
+                      <span className="text-[10.5px] font-medium text-white truncate flex-1 pr-2">
+                        {rec.title}
+                      </span>
+                      <span className="text-[9px] text-zinc-400 truncate max-w-[90px]">
+                        {rec.artist}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : isSearching && searchResults.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-zinc-500 text-center py-4 gap-1.5">
@@ -612,6 +664,9 @@ export const NativeSearchPanel: React.FC<NativeSearchPanelProps> = memo(({
                 key={track.id}
                 onClick={() => {
                   playChimeCue('tap');
+                  if (searchQuery.trim()) {
+                    recordSearchQuery(searchQuery);
+                  }
                   onPlayTrack(track, searchResults);
                 }}
                 className={`group flex items-center justify-between p-1.5 rounded-lg border transition-all duration-100 cursor-pointer active:scale-[0.99] ${
@@ -665,6 +720,7 @@ export const NativeSearchPanel: React.FC<NativeSearchPanelProps> = memo(({
                       {formatDuration(track.durationSeconds)}
                     </span>
                   )}
+                  <AddToPlaylistPopover track={track} compact />
                   <button
                     onClick={(e) => {
                       e.stopPropagation();

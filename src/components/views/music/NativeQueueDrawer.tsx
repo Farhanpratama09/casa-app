@@ -56,7 +56,7 @@ export const NativeQueueDrawer: React.FC<NativeQueueDrawerProps> = memo(({
             <ListMusic className="w-3 h-3" />
           </div>
           <span className="text-[12px] font-medium text-zinc-100 tracking-tight">
-            Antrean CASA Native
+            Antrean CASA PLAYER
           </span>
           <span className="font-sans font-medium text-[10px] tracking-tight text-cyan-300 bg-cyan-950/40 border border-cyan-500/30 px-2 py-0.5 rounded-full tabular-nums">
             {queue.length} lagu

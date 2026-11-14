@@ -7,6 +7,7 @@ import { TimerState } from './types';
 interface TimerExpandedViewProps {
   state?: TimerState;
   onCollapse?: () => void;
+  onOpenMusic?: () => void;
   onUpdateState?: (
     patchOrFn: Partial<TimerState> | ((prev: TimerState) => TimerState)
   ) => void;
@@ -15,6 +16,7 @@ interface TimerExpandedViewProps {
 export const TimerExpandedView: React.FC<TimerExpandedViewProps> = ({
   state: propState,
   onCollapse: _onCollapse,
+  onOpenMusic,
   onUpdateState: _onUpdateState,
 }) => {
   const timer = useTimerState();
@@ -34,11 +36,18 @@ export const TimerExpandedView: React.FC<TimerExpandedViewProps> = ({
         timer.selectPreset(minutes, mode === 'break' ? 'rest' : mode)
       }
       onAdjustMinutes={timer.adjustMinutes}
+      onSetCustomMinutes={timer.setCustomMinutes}
+      onAddFiveMinutes={timer.addFiveMinutes}
+      onDismissAlarm={timer.dismissAlarm}
+      focusedTaskId={timer.focusedTaskId}
+      onFocusTask={timer.toggleFocusTask}
       todos={todo.todoState?.todos || []}
       onToggleTodo={todo.toggleTodo}
       onAddTodo={todo.addTodo}
+      onSetTodoTime={todo.setTodoScheduledTime}
       onTogglePin={todo.togglePin}
       onDeleteTodo={todo.removeTodo}
+      onOpenMusic={onOpenMusic}
     />
   );
 };

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, ChevronRight, Zap } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronUp, Zap } from 'lucide-react';
 import { IslandMode } from '../../types/island';
 import { CasaCompanionAvatar } from '../companion/CasaCompanionAvatar';
 import { FocusRabbitIcon, TwinEqualizerGlyph } from '../system/CosmicIcons';
@@ -227,8 +227,6 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
   const activeModule = modules[currentIdx] || modules[0];
 
   const handleBarClick = (e: React.MouseEvent) => {
-    // Klik pada header bar HANYA mengeksekusi onHeaderClick/onCollapse jika pengguna mengklik area kosong bar,
-    // BUKAN saat mengklik tombol panah navigasi atau tombol kontrol aktif.
     const target = e.target as HTMLElement;
     if (target.closest('button, [role="button"], a, input, select, textarea, [data-interactive="true"]')) {
       return;
@@ -238,10 +236,10 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
       setIsNotchOpen(false);
       return;
     }
-    if (onHeaderClick) {
+    // Persistent Mode 6: header bar clicks lock peek preview -> expanded,
+    // and never accidentally collapse Mode 6 (use explicit minimize button or click outside).
+    if (isPeekPreview && onHeaderClick) {
       onHeaderClick(e);
-    } else if (onCollapse) {
-      onCollapse();
     }
   };
 
@@ -253,12 +251,8 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
     >
       <div
         onClick={handleBarClick}
-        className="w-full h-full px-4 pt-1 flex items-center justify-between border-b border-[#27272a] overflow-visible text-[11px] font-medium leading-none bg-[#09090b] cursor-pointer hover:bg-[#121215] transition-colors"
-        title={
-          isPeekPreview
-            ? 'Klik untuk mengunci CASA (Lock Expanded)'
-            : 'Klik header untuk menciutkan CASA (Collapse to Idle)'
-        }
+        className="w-full h-full px-4 pt-1 flex items-center justify-between border-b border-[#27272a] overflow-visible text-[11px] font-medium leading-none bg-[#09090b] transition-colors"
+        title={isPeekPreview ? 'Klik untuk mengunci CASA (Lock Expanded)' : undefined}
       >
         {/* Left: Interactive Vibing Companion Mascot + Divider Rapat (Anti-Kopong) */}
         <div
@@ -410,6 +404,7 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
             <button
               type="button"
               data-interactive="true"
+              data-collapse-btn="true"
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
               onMouseDown={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
@@ -475,6 +470,27 @@ export const MicroStatusHeader: React.FC<MicroStatusHeaderProps> = ({
 
           {/* Dynamic Twin Audio Equalizer Glyph */}
           <TwinEqualizerGlyph active={isPlaying} isMuted={telemetry.is_muted} isSpotify={isSpotifyActive} className="ml-1" />
+
+          {/* Tombol Minimize / Tutup Mode 6 secara eksplisit */}
+          {onCollapse && (
+            <button
+              type="button"
+              data-interactive="true"
+              data-collapse-btn="true"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onCollapse();
+              }}
+              className="w-[22px] h-[22px] ml-0.5 flex items-center justify-center rounded-full bg-[#18181c] hover:bg-[#27272a] border border-[#2e2e34] text-zinc-400 hover:text-white transition-all duration-100 ease-out cursor-pointer active:scale-[0.95] shrink-0"
+              title="Tutup / Minimize ke Idle"
+              aria-label="Minimize ke Idle"
+            >
+              <ChevronUp className="w-3.5 h-3.5 pointer-events-none" />
+            </button>
+          )}
         </div>
       </div>
 

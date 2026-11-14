@@ -7,6 +7,7 @@ import { TodoSkillState } from './types';
 interface TodoExpandedViewProps {
   state?: TodoSkillState;
   onCollapse?: () => void;
+  onOpenMusic?: () => void;
   onUpdateState?: (
     patchOrFn: Partial<TodoSkillState> | ((prev: TodoSkillState) => TodoSkillState)
   ) => void;
@@ -15,6 +16,7 @@ interface TodoExpandedViewProps {
 export const TodoExpandedView: React.FC<TodoExpandedViewProps> = ({
   state: propState,
   onCollapse: _onCollapse,
+  onOpenMusic,
   onUpdateState: _onUpdateState,
 }) => {
   const todo = useTodoState();
@@ -34,11 +36,18 @@ export const TodoExpandedView: React.FC<TodoExpandedViewProps> = ({
         timer.selectPreset(minutes, mode === 'break' ? 'rest' : mode)
       }
       onAdjustMinutes={timer.adjustMinutes}
+      onSetCustomMinutes={timer.setCustomMinutes}
+      onAddFiveMinutes={timer.addFiveMinutes}
+      onDismissAlarm={timer.dismissAlarm}
+      focusedTaskId={timer.focusedTaskId}
+      onFocusTask={timer.toggleFocusTask}
       todos={state.todos || []}
       onToggleTodo={todo.toggleTodo}
       onAddTodo={todo.addTodo}
+      onSetTodoTime={todo.setTodoScheduledTime}
       onTogglePin={todo.togglePin}
       onDeleteTodo={todo.removeTodo}
+      onOpenMusic={onOpenMusic}
     />
   );
 };

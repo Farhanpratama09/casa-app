@@ -78,11 +78,12 @@ export interface LyricRowItemProps {
   onSeek: (targetSeconds: number) => void;
   isMidSongInstrumental?: boolean;
   isSpotifyActive?: boolean;
+  compactOled?: boolean;
 }
 
 export const LyricRowItem = memo(
   React.forwardRef<HTMLDivElement, LyricRowItemProps>(
-    ({ line, isActive, isNear, isFar, duration = 0, onSeek, isMidSongInstrumental, isSpotifyActive = false }, ref) => {
+    ({ line, isActive, isNear, isFar: _isFar, duration: _duration = 0, onSeek, isMidSongInstrumental, isSpotifyActive = false, compactOled = false }, ref) => {
       const handleClick = (e: React.MouseEvent) => {
         e.stopPropagation();
         const rawTime =
@@ -96,31 +97,39 @@ export const LyricRowItem = memo(
         }
       };
 
+      const activeClass = compactOled
+        ? 'font-semibold opacity-100 bg-white/[0.08] border-l-2 border-white text-white pl-2 pr-1.5 rounded-r-md'
+        : 'font-semibold opacity-100 bg-white/[0.08] border-l-2 border-white text-white pl-2.5 pr-2 rounded-r-md';
+
       return (
         <React.Fragment>
           <div
             ref={ref}
             onClick={handleClick}
-            className={`cursor-pointer transition-all duration-300 ease-out origin-left py-0.5 px-2 rounded-[5px] flex items-center shrink-0 min-h-[22px] my-0.5 ${
+            className={`cursor-pointer transition-[opacity,background-color,color] duration-200 ease-out ${
+              compactOled ? 'py-[3px] px-1.5 min-h-[20px] my-[1px]' : 'py-0.5 px-2 min-h-[22px] my-0.5'
+            } rounded-[5px] flex items-center shrink-0 ${
               isActive
-                ? isSpotifyActive
-                  ? 'scale-[1.02] font-semibold opacity-100 border-emerald-500/40 bg-emerald-950/25 text-emerald-100 border-l-2 pl-2.5 pr-2 rounded-r-md shadow-sm'
-                  : 'scale-[1.02] font-semibold opacity-100 border-cyan-500/40 bg-cyan-950/25 text-cyan-100 border-l-2 pl-2.5 pr-2 rounded-r-md shadow-sm'
+                ? activeClass
                 : isNear
-                ? 'opacity-40 scale-100 hover:opacity-80 pl-2.5 border-l-2 border-transparent text-zinc-300 font-normal'
-                : 'opacity-15 scale-100 hover:opacity-50 pl-2.5 border-l-2 border-transparent text-zinc-400 font-normal'
+                ? 'opacity-85 hover:opacity-100 pl-2 border-l-2 border-transparent font-medium text-zinc-400 hover:text-zinc-200'
+                : 'opacity-55 hover:opacity-85 pl-2 border-l-2 border-transparent font-medium text-zinc-400 hover:text-zinc-200'
             }`}
             title={line.text}
           >
             {isActive ? (
               <MarqueeLyric
                 text={line.text}
-                className={`text-[13px] font-semibold tracking-tight leading-snug ${
-                  isSpotifyActive ? 'text-emerald-100' : 'text-zinc-100'
-                }`}
+                className={`${
+                  compactOled ? 'text-[12px]' : 'text-[13px]'
+                } font-semibold tracking-tight leading-[1.35] py-[1px] text-white antialiased`}
               />
             ) : (
-              <p className="truncate leading-tight text-[11.5px] text-zinc-400 font-normal">
+              <p
+                className={`truncate leading-[1.35] py-[1px] antialiased ${
+                  compactOled ? 'text-[10.5px] text-zinc-400' : 'text-[11.5px] text-zinc-400'
+                } font-medium`}
+              >
                 {line.text}
               </p>
             )}
@@ -128,9 +137,9 @@ export const LyricRowItem = memo(
 
           {/* Mid-song instrumental pause indicator */}
           {isActive && isMidSongInstrumental && (
-            <div className="my-1 py-0.5 px-2 mx-1 rounded bg-[#18181c] border border-[#2e2e34] flex items-center gap-2 text-zinc-400 text-[9px] animate-pulse shrink-0">
-              <span className="tracking-widest font-bold text-zinc-300">• • •</span>
-              <span className="tracking-wider uppercase text-[8px] font-mono text-zinc-400">
+            <div className="my-1 py-0.5 px-2 mx-1 rounded bg-[#0a0a0a] border border-white/[0.06] flex items-center gap-2 text-zinc-500 text-[9px] animate-pulse shrink-0">
+              <span className="tracking-widest font-bold text-zinc-400">• • •</span>
+              <span className="tracking-wider uppercase text-[8px] font-mono text-zinc-500">
                 Instrumental Interlude
               </span>
             </div>
@@ -166,6 +175,8 @@ export interface LyricsPanelProps {
   emptySubtitle?: string;
   isSpotifyActive?: boolean;
   isSpotifySession?: boolean;
+  compactOled?: boolean;
+  hasActiveSession?: boolean;
 }
 
 export const LyricsPanel: React.FC<LyricsPanelProps> = memo(({
@@ -177,14 +188,16 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = memo(({
   isInstrumental = false,
   isSynced = true,
   containerRef: externalContainerRef,
-  onRefreshLyrics,
-  isRefreshingLyrics = false,
+  onRefreshLyrics: _onRefreshLyrics,
+  isRefreshingLyrics: _isRefreshingLyrics = false,
   isMidSongInstrumental = false,
   audioAdjustedTime = 0,
   emptyTitle,
   emptySubtitle,
   isSpotifyActive = false,
   isSpotifySession = false,
+  compactOled = false,
+  hasActiveSession = true,
 }) => {
   const effectiveSpotifyActive = Boolean(isSpotifyActive || isSpotifySession);
   const internalContainerRef = useRef<HTMLDivElement>(null);
@@ -209,8 +222,8 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = memo(({
       const containerHeight = container.clientHeight;
       const activeTop = activeEl.offsetTop;
       const activeHeight = activeEl.offsetHeight || activeEl.clientHeight;
-      // Center aligned view
-      const centeredY = containerHeight / 2 - (activeTop + activeHeight / 2);
+      // Center aligned view snapped to integer CSS pixel
+      const centeredY = Math.round(containerHeight / 2 - (activeTop + activeHeight / 2));
       setTargetY(centeredY);
     }
   }, [activeLyricIndex, isSynced, lines]);
@@ -224,7 +237,7 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = memo(({
         const containerHeight = container.clientHeight;
         const activeTop = activeEl.offsetTop;
         const activeHeight = activeEl.offsetHeight || activeEl.clientHeight;
-        setTargetY(containerHeight / 2 - (activeTop + activeHeight / 2));
+        setTargetY(Math.round(containerHeight / 2 - (activeTop + activeHeight / 2)));
       }
     };
 
@@ -240,7 +253,7 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = memo(({
   // Wheel interaction: Allow temporary manual peek, auto-realigning to active lyric with spring physics
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.stopPropagation();
-    setUserOffset((prev) => prev - e.deltaY * 0.7);
+    setUserOffset((prev) => Math.round(prev - e.deltaY * 0.7));
     if (userScrollTimeoutRef.current) {
       clearTimeout(userScrollTimeoutRef.current);
     }
@@ -249,54 +262,19 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = memo(({
     }, 2500);
   }, []);
 
-  // Loading Stardust State: Displayed while LRCLIB / Spotify API fetches lyrics
-  if (isLoading) {
-    return (
-      <div
-        data-tauri-drag-region="false"
-        className="flex-1 min-h-0 flex flex-col items-center justify-center py-2 px-3.5 text-center select-none space-y-2 animate-in fade-in duration-200"
-      >
-        <div className="relative flex items-center justify-center">
-          <div className="relative w-7 h-7 flex items-center justify-center">
-            {/* Spinning Stardust Arc */}
-            <div
-              className={`absolute inset-0 rounded-full border-2 border-t-transparent animate-spin ${
-                effectiveSpotifyActive
-                  ? 'border-emerald-400 drop-shadow-[0_0_8px_rgba(16,185,129,0.5)]'
-                  : 'border-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]'
-              }`}
-            />
-            {/* Core Stardust Dot */}
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                effectiveSpotifyActive ? 'bg-emerald-300' : 'bg-cyan-300'
-              } animate-ping`}
-            />
-          </div>
-        </div>
-
-        <div className="flex flex-col items-center gap-0.5">
-          <h4 className="text-[11.5px] font-medium text-zinc-200 tracking-tight m-0 leading-tight">
-            Menyelaraskan Lirik Kosmik...
-          </h4>
-          <p className="text-[9.5px] text-zinc-400 m-0 leading-tight">
-            Mengambil stardust lirik dari LRCLIB
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // Empty state: No lines or explicitly marked instrumental
-  if (isInstrumental || lines.length === 0) {
+  // Standby / Empty guard: NEVER render loading spinner when !hasActiveSession (No Media Playing)
+  if (!hasActiveSession || (!isLoading && (isInstrumental || lines.length === 0))) {
+    const resolvedSubtitle = !hasActiveSession
+      ? emptySubtitle || 'Instrumental or unsynced playback'
+      : emptySubtitle || (isInstrumental ? 'Instrumental playback' : 'Instrumental or unsynced playback');
     return (
       <div
         data-tauri-drag-region="false"
         className="flex-1 min-h-0 flex flex-col items-center justify-center py-1 px-3.5 text-center select-none space-y-1"
       >
         <div className="relative flex items-center justify-center">
-          <div className="w-6 h-6 p-1.5 rounded-lg bg-[#18181c] border border-[#2e2e34] flex items-center justify-center relative shadow-sm">
-            <svg className={`w-3 h-3 ${effectiveSpotifyActive ? 'text-emerald-400' : 'text-cyan-400'}`} viewBox="0 0 16 16" fill="none">
+          <div className="w-6 h-6 p-1.5 rounded-lg bg-[#0a0a0a] border border-white/[0.06] flex items-center justify-center relative">
+            <svg className="w-3 h-3 text-zinc-500" viewBox="0 0 16 16" fill="none">
               <line x1="2.5" y1="6" x2="2.5" y2="10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
               <line x1="5.5" y1="4" x2="5.5" y2="12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
               <line x1="8" y1="2" x2="8" y2="14" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
@@ -313,9 +291,35 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = memo(({
             {emptyTitle || 'No Lyrics Available'}
           </h4>
           <p
-            className="text-[10px] text-zinc-400 m-0 leading-tight max-w-[240px]"
+            className="text-[10px] text-zinc-500 m-0 leading-tight max-w-[240px]"
           >
-            {emptySubtitle || (isInstrumental ? 'Instrumental playback' : 'Instrumental or unsynced playback')}
+            {resolvedSubtitle}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Loading State: Monochrome OLED spinner (only shown while an active media session is syncing)
+  if (isLoading) {
+    return (
+      <div
+        data-tauri-drag-region="false"
+        className="flex-1 min-h-0 flex flex-col items-center justify-center py-2 px-3.5 text-center select-none space-y-2 animate-in fade-in duration-200"
+      >
+        <div className="relative flex items-center justify-center">
+          <div className="relative w-7 h-7 flex items-center justify-center">
+            <div className="absolute inset-0 rounded-full border-2 border-white/75 border-t-transparent animate-spin" />
+            <span className="w-1.5 h-1.5 rounded-full bg-white/80 animate-ping" />
+          </div>
+        </div>
+
+        <div className="flex flex-col items-center gap-0.5">
+          <h4 className="text-[11.5px] font-medium text-zinc-200 tracking-tight m-0 leading-tight">
+            Menyelaraskan Lirik...
+          </h4>
+          <p className="text-[9.5px] text-zinc-500 m-0 leading-tight">
+            Mengambil lirik tersinkronisasi dari LRCLIB
           </p>
         </div>
       </div>
@@ -330,11 +334,11 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = memo(({
         onWheel={(e) => e.stopPropagation()}
         className="flex-1 min-h-0 overflow-y-auto no-scrollbar pointer-events-auto flex flex-col p-3 gap-2.5 select-text"
       >
-        <div className="flex items-center gap-1.5 pb-1 border-b border-[#222226] text-zinc-400 text-[9.5px] uppercase font-semibold tracking-wider">
+        <div className="flex items-center gap-1.5 pb-1 border-b border-white/[0.06] text-zinc-500 text-[9.5px] uppercase font-semibold tracking-wider">
           <span>Plain Lyrics (Unsynchronized)</span>
         </div>
         {lines.map((line) => (
-          <p key={line.id} className={`text-[12px] text-zinc-300 leading-relaxed font-normal ${effectiveSpotifyActive ? 'hover:text-emerald-400' : 'hover:text-cyan-400'} transition-colors`}>
+          <p key={line.id} className="text-[12px] text-zinc-400 leading-relaxed font-medium hover:text-white transition-colors antialiased">
             {line.text}
           </p>
         ))}
@@ -350,19 +354,23 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = memo(({
       onWheel={handleWheel}
       className="flex-1 min-h-0 overflow-hidden no-scrollbar pointer-events-auto mask-lyrics-vertical flex flex-col relative select-none"
       style={{
-        maskImage: 'linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
-        WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
+        maskImage: compactOled
+          ? 'linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%)'
+          : 'linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
+        WebkitMaskImage: compactOled
+          ? 'linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%)'
+          : 'linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
       }}
     >
       <motion.div
-        animate={{ y: targetY + userOffset }}
+        animate={{ y: Math.round(targetY + userOffset) }}
         transition={{
           type: 'spring',
           stiffness: 280,
           damping: 30,
           mass: 0.8,
         }}
-        className="relative flex flex-col will-change-transform py-6"
+        className={`relative flex flex-col ${compactOled ? 'py-8' : 'py-6'}`}
       >
         {/* Intro Gate Indicator: singer hasn't started yet and has genuine intro (> 3s) */}
         {activeLyricIndex === -1 && lines.length > 0 && lines[0].timeMs > 3000 && audioAdjustedTime < lines[0].timeMs && (
@@ -392,6 +400,7 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = memo(({
               onSeek={onSeekLine}
               isMidSongInstrumental={isMidSongInstrumental}
               isSpotifyActive={effectiveSpotifyActive}
+              compactOled={compactOled}
             />
           );
         })}

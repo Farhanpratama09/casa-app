@@ -1,565 +1,883 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  UploadCloud,
-  FileText,
-  FolderOpen,
-  Folder,
-  ExternalLink,
+  Plus,
+  ClipboardPaste,
+  Trash2,
+  Inbox,
   Copy,
   Check,
-  Link2,
-  Image as ImageIcon,
-  Clipboard,
+  Play,
   X,
-  Layers,
-  GripHorizontal,
+  Folder,
+  Music,
+  Film,
+  FileArchive,
+  FileText,
+  Image as ImageIcon,
+  Globe,
+  AlignLeft,
+  GripVertical,
+  ExternalLink,
 } from 'lucide-react';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { startDrag } from '@tauri-apps/plugin-drag';
-import { useDropZoneStore, DropItem } from '../../stores/useDropZoneStore';
-import { playChimeCue } from '../../utils/tauriBridge';
-import { CosmicVoidPurgeIcon } from '../system/CosmicIcons';
+import {
+  useDropZoneStore,
+  DropItem,
+  ARCHIVE_EXTENSIONS,
+  VIDEO_EXTENSIONS,
+  AUDIO_EXTENSIONS,
+  IMAGE_EXTENSIONS,
+  formatBytes,
+  isAudioItem,
+} from '../../stores/useDropZoneStore';
+import { useCasaAudio } from '../../context/CasaAudioContext';
+import { NativeTrack, parseTrackTitleAndArtist } from '../../services/nativeAudioService';
+import { playChimeCue, focusIslandWindow } from '../../utils/tauriBridge';
 
-export const DropZoneView: React.FC = () => {
-  const { items, isDragging, isInternalDragging, removeItem, clearAll, addItem } = useDropZoneStore();
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+export interface DropZoneViewProps {
+  isLockedExpanded?: boolean;
+  onOpenMusic?: () => void;
+}
 
-  const handleWheel = (e: React.WheelEvent) => {
-    // Hentikan propagasi agar perputaran roda mouse di area shelf tidak mengubah mode CASA
-    e.stopPropagation();
-    if (scrollContainerRef.current) {
-      // Petakan perputaran roda vertikal mouse PC ke pergeseran horizontal
-      scrollContainerRef.current.scrollLeft += e.deltaY;
-    }
-  };
+const renderCategoryIcon = (item: DropItem) => {
+  if (item.isDir) {
+    return <Folder className="w-4 h-4 text-sky-400/85" />;
+  }
+  if (item.type === 'url') {
+    return <Globe className="w-4 h-4 text-sky-400" />;
+  }
+  if (item.type === 'text') {
+    return <AlignLeft className="w-4 h-4 text-sky-400/85" />;
+  }
 
-  const handleCopyText = (id: string, text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
+  const ext = (item.extension || '').toLowerCase();
+  if (AUDIO_EXTENSIONS.has(ext)) {
+    return <Music className="w-4 h-4 text-emerald-400" />;
+  }
+  if (VIDEO_EXTENSIONS.has(ext)) {
+    return <Film className="w-4 h-4 text-purple-400/90" />;
+  }
+  if (ARCHIVE_EXTENSIONS.has(ext)) {
+    return <FileArchive className="w-4 h-4 text-amber-400" />;
+  }
+  if (IMAGE_EXTENSIONS.has(ext) || item.type === 'image') {
+    return <ImageIcon className="w-4 h-4 text-purple-400" />;
+  }
+  return <FileText className="w-4 h-4 text-sky-400/85" />;
+};
+
+const getItemMetaLabel = (item: DropItem): string => {
+  if (item.isDir) return 'Folder';
+  if (item.type === 'url') return 'URL';
+  if (item.type === 'text') {
+    const chars = item.payload.length;
+    const lines = item.payload.split(/\r?\n/).length;
+    return lines > 1 ? `${chars} ch · ${lines} baris` : `${chars} ch`;
+  }
+  const ext = item.extension ? item.extension.toUpperCase() : 'File';
+  const size = item.sizeBytes ? formatBytes(item.sizeBytes) : '';
+  return size ? `${ext} · ${size}` : ext;
+};
+
+const parseUrlDisplay = (rawUrl: string): { host: string; subUrl: string } => {
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.replace(/^www\./i, '');
+    const rest = `${parsed.pathname === '/' ? '' : parsed.pathname}${parsed.search}${parsed.hash}`;
+    return { host, subUrl: rest || rawUrl };
+  } catch {
+    return { host: rawUrl, subUrl: 'Web URL' };
+  }
+};
+
+interface DropShelfCardProps {
+  item: DropItem;
+  isHighlighted?: boolean;
+  onRemove: (id: string) => void;
+  onOpenMusic?: () => void;
+}
+
+const DropShelfCard: React.FC<DropShelfCardProps> = ({
+  item,
+  isHighlighted = false,
+  onRemove,
+  onOpenMusic,
+}) => {
+  const { setPlaybackSource, playTrack } = useCasaAudio();
+  const [imgError, setImgError] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [isOpeningAudio, setIsOpeningAudio] = useState(false);
+
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  const draggedDuringGestureRef = useRef(false);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [item.payload]);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      dragCleanupRef.current?.();
+      dragCleanupRef.current = null;
+    };
+  }, []);
+
+  const canDragFile = item.type === 'file' || item.type === 'image';
+  const isAudio = isAudioItem(item);
+
+  const triggerCopiedFeedback = useCallback(() => {
+    setCopied(true);
     playChimeCue('tap');
-    setTimeout(() => {
-      setCopiedId((prev) => (prev === id ? null : prev));
-    }, 1500);
-  };
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopied(false), 1400);
+  }, []);
 
-  /** Meluncurkan file langsung dengan ShellExecuteW tanpa dialog peringatan */
-  const handleLaunchFile = async (path: string) => {
-    try {
-      playChimeCue('tap');
-      await invoke('launch_file_item', { path });
-    } catch (err) {
-      console.warn('[DropZoneView] Failed to launch file:', err);
+  const handleOpenItem = useCallback(async () => {
+    if (draggedDuringGestureRef.current) {
+      draggedDuringGestureRef.current = false;
+      return;
     }
-  };
-
-  /** Membuka folder lokasi berkas dan menyorotnya di Windows Explorer */
-  const handleRevealInFolder = async (path: string) => {
     try {
-      playChimeCue('whisper');
-      await invoke('reveal_in_folder', { path });
-    } catch (err) {
-      console.warn('[DropZoneView] Failed to reveal in folder:', err);
-    }
-  };
-
-  /** Memulai sesi drag-and-drop native via tauri-plugin-drag untuk mengekspor file ke Explorer/Desktop */
-  const handleCardDragStart = async (e: React.MouseEvent | React.DragEvent, filePath: string) => {
-    // 1. Matikan drag bawaan browser HTML5
-    if ('preventDefault' in e) {
-      e.preventDefault();
-    }
-
-    // 2. Bersihkan seleksi teks agar tidak mengunci kursor
-    window.getSelection()?.removeAllRanges();
-
-    try {
-      // 3. Panggil plugin native dengan path file dan icon '' (string kosong)
-      // PENTING: icon JANGAN diisi 'file' atau nama sembarang karena drag-rs di Windows
-      // akan gagal jika mencari bitmap file yang tidak ada di disk.
-      useDropZoneStore.getState().setIsInternalDragging(true);
-      playChimeCue('whisper');
-      await startDrag({
-        item: [filePath],
-        icon: '',
-      });
-    } catch (err) {
-      console.error('[DropZoneView] Native drag failed:', err);
-    } finally {
-      // Beri sedikit delay agar drag session selesai sepenuhnya sebelum membuka kembali drag-in
-      setTimeout(() => {
-        useDropZoneStore.getState().setIsInternalDragging(false);
-      }, 250);
-    }
-  };
-
-  const handleOpenUrl = async (url: string) => {
-    try {
-      playChimeCue('tap');
-      await invoke('open_url_item', { url });
-    } catch (err) {
-      console.warn('[DropZoneView] Failed to open URL:', err);
-    }
-  };
-
-  const handlePasteClipboard = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text && text.trim()) {
-        await addItem(text);
-        playChimeCue('ding');
+      if (item.type === 'url') {
+        await invoke('open_url_item', { url: item.payload });
+        playChimeCue('tap');
+      } else if (item.type === 'file' || item.type === 'image') {
+        await invoke('launch_file_item', { path: item.payload });
+        playChimeCue('tap');
+      } else {
+        await navigator.clipboard.writeText(item.payload);
+        triggerCopiedFeedback();
       }
     } catch (err) {
-      console.warn('[DropZoneView] Failed to read clipboard:', err);
+      console.warn('[DropZoneCard] Open failed:', err);
     }
+  }, [item.payload, item.type, triggerCopiedFeedback]);
+
+  const handleOpenUrl = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (item.type !== 'url') return;
+      try {
+        await invoke('open_url_item', { url: item.payload });
+        playChimeCue('tap');
+      } catch (err) {
+        console.warn('[DropZoneCard] Open URL failed:', err);
+      }
+    },
+    [item.type, item.payload]
+  );
+
+  const handleCopyItem = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      try {
+        if (item.type === 'file' || item.type === 'image') {
+          await invoke('copy_files_to_clipboard', { paths: [item.payload] });
+        } else {
+          await navigator.clipboard.writeText(item.payload);
+        }
+        triggerCopiedFeedback();
+      } catch (err) {
+        console.warn('[DropZoneCard] Clipboard copy failed:', err);
+      }
+    },
+    [item.payload, item.type, triggerCopiedFeedback]
+  );
+
+  const handleQuickPlayAudio = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!isAudio || isOpeningAudio) return;
+      setIsOpeningAudio(true);
+      try {
+        await invoke<string[]>('register_drop_zone_files', { paths: [item.payload] });
+        const assetUrl = convertFileSrc(item.payload);
+        const rawBaseName = item.title.replace(/\.[^.]+$/, '').trim() || item.title;
+        const parsed = parseTrackTitleAndArtist(rawBaseName, 'Local Audio');
+        const track: NativeTrack = {
+          id: `local-dropzone-${item.id}`,
+          title: parsed.title || rawBaseName,
+          artist: parsed.artist || 'Local Audio',
+          durationSeconds: 0,
+          thumbnailUrl: '',
+          streamUrl: assetUrl,
+          candidates: [assetUrl],
+        };
+        setPlaybackSource('native');
+        await playTrack(track, [track]);
+        playChimeCue('ding');
+        onOpenMusic?.();
+      } catch (err) {
+        console.warn('[DropZoneCard] Quick Play failed:', err);
+      } finally {
+        setIsOpeningAudio(false);
+      }
+    },
+    [
+      isAudio,
+      isOpeningAudio,
+      item.id,
+      item.payload,
+      item.title,
+      setPlaybackSource,
+      playTrack,
+      onOpenMusic,
+    ]
+  );
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    draggedDuringGestureRef.current = false;
+    if (!canDragFile || e.button !== 0) return;
+
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-no-drag="true"]')) return;
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let triggered = false;
+
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+      dragCleanupRef.current = null;
+    };
+
+    const onPointerMove = async (moveEvent: PointerEvent) => {
+      if (triggered) return;
+      const dist = Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY);
+      if (dist < 5) return;
+
+      triggered = true;
+      draggedDuringGestureRef.current = true;
+      cleanup();
+
+      useDropZoneStore.getState().setIsInternalDragging(true);
+      try {
+        await startDrag({
+          item: [item.payload],
+          icon: '',
+        });
+      } catch (err) {
+        console.warn('[DropZoneCard] startDrag error:', err);
+      } finally {
+        setTimeout(() => {
+          useDropZoneStore.getState().setIsInternalDragging(false);
+          draggedDuringGestureRef.current = false;
+        }, 250);
+      }
+    };
+
+    const onPointerUp = () => {
+      cleanup();
+    };
+
+    dragCleanupRef.current?.();
+    dragCleanupRef.current = cleanup;
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
   };
 
-  const getExtensionColor = (ext?: string) => {
-    if (!ext) return 'bg-[#18181c] text-zinc-300 border-[#2e2e34]';
-    const lower = ext.toLowerCase();
-    if (['pdf'].includes(lower)) {
-      return 'bg-rose-500/10 text-rose-300 border-rose-500/25';
-    }
-    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(lower)) {
-      return 'bg-purple-500/10 text-purple-300 border-purple-500/25';
-    }
-    if (['ts', 'tsx', 'js', 'jsx', 'rs', 'py', 'json', 'html', 'css', 'go', 'cpp', 'c', 'md', 'markdown', 'txt'].includes(lower)) {
-      return 'bg-purple-950/40 text-[#c084fc] border-purple-500/30';
-    }
-    if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp', 'ico', 'avif'].includes(lower)) {
-      return 'bg-purple-950/40 text-[#c084fc] border-purple-500/30';
-    }
-    if (['mp3', 'wav', 'flac', 'm4a', 'ogg', 'aac'].includes(lower)) {
-      return 'bg-teal-500/10 text-teal-300 border-teal-500/25';
-    }
-    if (['mp4', 'mkv', 'mov', 'webm', 'avi'].includes(lower)) {
-      return 'bg-indigo-500/10 text-indigo-300 border-indigo-500/25';
-    }
-    return 'bg-[#18181c] text-zinc-300 border-[#2e2e34]';
-  };
+  const urlInfo = item.type === 'url' ? parseUrlDisplay(item.payload) : null;
 
   return (
-    <div
-      onDragOver={(e) => {
-        if (isInternalDragging) return;
-        e.preventDefault();
-        e.stopPropagation();
-        e.dataTransfer.dropEffect = 'copy';
-      }}
-      onDragEnter={(e) => {
-        if (isInternalDragging) return;
-        e.preventDefault();
-        e.stopPropagation();
-      }}
-      onDrop={async (e) => {
-        if (isInternalDragging) return;
-        e.preventDefault();
-        e.stopPropagation();
-        useDropZoneStore.getState().setIsDragging(false);
-        const text = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text/uri-list');
-        if (text && text.trim()) {
-          await useDropZoneStore.getState().addItem(text.trim());
-          playChimeCue('ding');
-          return;
-        }
-        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-          for (let i = 0; i < e.dataTransfer.files.length; i++) {
-            const file = e.dataTransfer.files[i];
-            const path = (file as any).path || file.name;
-            await useDropZoneStore.getState().addDroppedPath(path);
-          }
-          playChimeCue('ding');
-        }
-      }}
-      className="relative w-full h-full flex flex-col justify-between px-4 pb-2 pt-1 select-none overflow-hidden"
+    <motion.div
+      layout
+      initial={{ opacity: 0, scale: 0.94 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.9 }}
+      transition={{ duration: 0.14, ease: 'easeOut' }}
+      onPointerDown={handlePointerDown}
+      data-tauri-drag-region="false"
+      className={`group relative w-[186px] h-[106px] shrink-0 rounded-xl bg-[#0a0a0a] border transition-colors flex flex-col justify-between p-2 select-none ${
+        isHighlighted
+          ? 'border-white/40 ring-1 ring-white/20'
+          : 'border-white/[0.06] hover:border-white/[0.16]'
+      } ${canDragFile ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
     >
-      <style>{`
-        .custom-shelf-scrollbar::-webkit-scrollbar {
-          height: 3.5px;
-        }
-        .custom-shelf-scrollbar::-webkit-scrollbar-track {
-          background: #09090b;
-          border-radius: 4px;
-        }
-        .custom-shelf-scrollbar::-webkit-scrollbar-thumb {
-          background: #27272a;
-          border-radius: 4px;
-        }
-        .custom-shelf-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #38383e;
-        }
-      `}</style>
-
-      {/* 1. Header Shelf */}
-      <div className="flex items-center justify-between h-[26px] shrink-0 border-b border-[#222226] pb-1 mb-1">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-semibold text-zinc-400 tracking-wider uppercase font-sans">
-              Drop Zone Shelf
-            </span>
-            <span className="font-sans font-medium text-[10px] tracking-wider text-[#e3e0f7] bg-purple-950/40 border border-purple-500/30 px-2 py-0.5 rounded-full tabular-nums">
-              {items.length} {items.length === 1 ? 'item' : 'items'}
+      {/* Top Preview Body: Text Snippet vs Link vs File/Image */}
+      {item.type === 'text' ? (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            void handleOpenItem();
+          }}
+          title={item.payload}
+          className="flex flex-col gap-1 min-w-0 cursor-pointer"
+        >
+          <div className="flex items-center justify-between gap-1.5 min-w-0">
+            <div className="w-5 h-5 rounded-md bg-[#141417] border border-white/[0.06] flex items-center justify-center shrink-0">
+              <AlignLeft className="w-3 h-3 text-sky-400/85" />
+            </div>
+            <span className="text-[9px] font-mono text-white/45 truncate tabular-nums">
+              {getItemMetaLabel(item)}
             </span>
           </div>
+          <p className="text-[10.5px] leading-[1.32] text-white/90 line-clamp-2 break-words">
+            {item.payload}
+          </p>
+        </div>
+      ) : (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            void handleOpenItem();
+          }}
+          title={item.payload}
+          className="flex items-center gap-2 min-w-0 cursor-pointer"
+        >
+          <div className="w-9 h-9 rounded-lg bg-[#141417] border border-white/[0.06] overflow-hidden flex items-center justify-center shrink-0">
+            {item.type === 'image' && !imgError ? (
+              <img
+                src={convertFileSrc(item.payload)}
+                alt={item.title}
+                draggable={false}
+                onError={() => setImgError(true)}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              renderCategoryIcon(item)
+            )}
+          </div>
 
-          {/* Aksi Tempel Persisten di Header: Selalu muncul & bisa diklik kapan saja */}
-          <button
-            onClick={handlePasteClipboard}
-            className="font-sans text-[10.5px] font-medium text-purple-300 hover:text-white bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/30 px-2 py-0.5 rounded-lg transition-all flex items-center gap-1 cursor-pointer active:scale-[0.97]"
-            title="Tempel teks atau tautan langsung dari papan klip sistem"
-          >
-            <span>+ Tempel Teks</span>
-          </button>
+          <div className="min-w-0 flex-1 flex flex-col gap-0.5">
+            <span className="text-[11px] font-medium text-white/90 truncate leading-tight">
+              {urlInfo ? urlInfo.host : item.title}
+            </span>
+            <span className="text-[9.5px] font-mono text-white/45 truncate tabular-nums leading-tight">
+              {urlInfo ? urlInfo.subUrl : getItemMetaLabel(item)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Bottom Action Bar */}
+      <div
+        data-no-drag="true"
+        className="flex items-center justify-between gap-1 pt-1.5 border-t border-white/[0.05]"
+      >
+        <div className="flex items-center gap-1 min-w-0 text-white/30">
+          {canDragFile && <GripVertical className="w-3 h-3 shrink-0" />}
+          <span className="text-[9px] tracking-tight truncate">
+            {canDragFile ? 'Drag out' : item.type === 'url' ? 'Link' : 'Snippet'}
+          </span>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 shrink-0">
+          {isAudio && (
+            <button
+              type="button"
+              data-no-drag="true"
+              onClick={handleQuickPlayAudio}
+              title="Quick Play di Musik"
+              className="w-[22px] h-[22px] rounded-md bg-white text-black hover:bg-white/90 flex items-center justify-center transition-transform active:scale-95 cursor-pointer"
+            >
+              <Play className="w-3 h-3 fill-current ml-[1px]" />
+            </button>
+          )}
+
+          {item.type === 'url' && (
+            <button
+              type="button"
+              data-no-drag="true"
+              onClick={handleOpenUrl}
+              title="Buka tautan di browser"
+              className="w-[22px] h-[22px] rounded-md bg-white/[0.05] text-white/70 border border-white/[0.08] hover:bg-white/[0.12] hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <ExternalLink className="w-3 h-3" />
+            </button>
+          )}
+
           <button
-            disabled={items.length === 0}
-            onClick={() => {
-              if (items.length === 0) return;
-              clearAll();
-              playChimeCue('whisper');
-            }}
-            className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg font-sans font-medium text-[10.5px] transition-colors group ${
-              items.length === 0
-                ? 'text-zinc-600 opacity-40 cursor-default'
-                : 'text-zinc-400 hover:text-rose-400 cursor-pointer active:scale-[0.97]'
+            type="button"
+            data-no-drag="true"
+            onClick={handleCopyItem}
+            title={
+              canDragFile
+                ? 'Salin berkas ke Clipboard Windows'
+                : item.type === 'url'
+                ? 'Salin tautan'
+                : 'Salin snippet teks'
+            }
+            className={`w-[22px] h-[22px] rounded-md border flex items-center justify-center transition-colors cursor-pointer ${
+              copied
+                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40'
+                : 'bg-white/[0.05] text-white/70 border-white/[0.08] hover:bg-white/[0.12] hover:text-white'
             }`}
-            title={items.length > 0 ? 'Kosongkan semua item di shelf' : 'Shelf kosong'}
           >
-            <CosmicVoidPurgeIcon
-              className={`w-3.5 h-3.5 transition-colors ${
-                items.length === 0 ? 'text-zinc-600' : 'text-zinc-500 group-hover:text-rose-400'
-              }`}
-            />
-            <span>Bersihkan</span>
+            {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+          </button>
+
+          <button
+            type="button"
+            data-no-drag="true"
+            onClick={(e) => {
+              e.stopPropagation();
+              playChimeCue('tap');
+              onRemove(item.id);
+            }}
+            title="Hapus dari Drop Zone"
+            className="w-[22px] h-[22px] rounded-md bg-white/[0.04] text-white/45 border border-white/[0.06] hover:bg-white/[0.12] hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+          >
+            <X className="w-3 h-3" />
           </button>
         </div>
       </div>
+    </motion.div>
+  );
+};
 
-      {/* 2. Main Content Body */}
-      <div className="flex-1 min-h-0 relative flex items-center justify-center overflow-hidden">
-        {/* Active Drag-Hover State Target */}
-        {isDragging && !isInternalDragging ? (
-          <div className="w-full h-full flex flex-col items-center justify-center border-2 border-dashed border-purple-500/50 bg-purple-950/30 rounded-xl p-2">
-            <UploadCloud className="w-7 h-7 text-[#c084fc] animate-bounce mb-1" />
-            <span className="text-[12.5px] font-semibold text-[#c084fc] tracking-tight">
-              Lepaskan untuk menyimpan di Shelf
-            </span>
-            <span className="text-[10px] text-[#c084fc]/90 mt-0.5">
-              Menerima berkas dari Explorer, gambar, teks salinan, dan tautan web
-            </span>
-          </div>
-        ) : items.length === 0 ? (
-          /* Tata Letak Split-View 2 Kolom Seimbang */
-          <div className="grid grid-cols-2 gap-3.5 w-full h-[118px] max-h-[118px] items-stretch">
-            {/* Kolom Kiri (Drop Zone Landing Pad) */}
-            <div className="border-2 border-dashed border-purple-500/30 rounded-2xl bg-gradient-to-b from-purple-950/20 to-[#09090b] py-2.5 px-3 flex flex-col items-center justify-center text-center hover:border-purple-400/60 transition-all select-none">
-              <Layers className="w-6 h-6 text-[#c084fc] mb-1 drop-shadow-[0_0_8px_rgba(192,132,252,0.4)]" />
-              <span className="font-sans text-[11.5px] font-medium leading-none mb-0.5 text-[#e3e0f7] tracking-tight">
-                Rak Penampung Kosong
-              </span>
-              <span className="font-sans text-[9.5px] text-zinc-400 leading-tight max-w-[200px]">
-                Seret berkas dari Windows Explorer, gambar, atau URL ke notch ini.
+export const DropZoneView: React.FC<DropZoneViewProps> = ({
+  isLockedExpanded = true,
+  onOpenMusic,
+}) => {
+  const {
+    items,
+    isDragging,
+    isInternalDragging,
+    lastActionFeedback,
+    clearActionFeedback,
+    addItem,
+    addDroppedPaths,
+    syncAssetScopes,
+    removeItem,
+    clearAll,
+  } = useDropZoneStore();
+
+  const [isPicking, setIsPicking] = useState(false);
+  const [isPasting, setIsPasting] = useState(false);
+  const [localHint, setLocalHint] = useState<string | null>(null);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const shelfRef = useRef<HTMLDivElement>(null);
+  const lastNativePasteRef = useRef<number>(0);
+  const keydownFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scrollShelfToFront = useCallback(() => {
+    requestAnimationFrame(() => {
+      shelfRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
+    });
+  }, []);
+
+  const flashLocalHint = useCallback((msg: string) => {
+    setLocalHint(msg);
+    if (localHintTimerRef.current) clearTimeout(localHintTimerRef.current);
+    localHintTimerRef.current = setTimeout(() => setLocalHint(null), 1600);
+  }, []);
+
+  // Auto-focus container & pull WebView foreground keyboard focus only when Mode 6 is pinned/open (not hover peek)
+  useEffect(() => {
+    void syncAssetScopes();
+  }, [syncAssetScopes]);
+
+  useEffect(() => {
+    if (!isLockedExpanded) return;
+
+    const rafId = requestAnimationFrame(() => {
+      if (!useDropZoneStore.getState().isDragging) {
+        void focusIslandWindow();
+      }
+      containerRef.current?.focus({ preventScroll: true });
+    });
+
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, [isLockedExpanded]);
+
+  useEffect(() => {
+    return () => {
+      if (keydownFallbackTimerRef.current) {
+        clearTimeout(keydownFallbackTimerRef.current);
+      }
+      if (localHintTimerRef.current) {
+        clearTimeout(localHintTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Auto-clear store promotion/deduplication feedback pill
+  useEffect(() => {
+    if (!lastActionFeedback) return;
+    const timer = setTimeout(() => {
+      clearActionFeedback();
+    }, 1800);
+    return () => clearTimeout(timer);
+  }, [lastActionFeedback, clearActionFeedback]);
+
+  const handlePasteFromClipboard = useCallback(
+    async (options?: { silentIfEmpty?: boolean }) => {
+      if (isPasting) return;
+      setIsPasting(true);
+      try {
+        let clipboardText = '';
+
+        // 1. Standard Web Clipboard API (graceful fallback if WebView2 denies/prompts/empty)
+        try {
+          if (navigator.clipboard?.readText) {
+            clipboardText = await navigator.clipboard.readText();
+          }
+        } catch {
+          // Permission denied or unfocused -> fallback cleanly to Win32 CF_UNICODETEXT
+        }
+
+        // 2. Fallback anti-gagal ke backend Win32 CF_UNICODETEXT
+        if ((!clipboardText || !clipboardText.trim()) && '__TAURI_INTERNALS__' in window) {
+          try {
+            const winText = await invoke<string | null>('read_clipboard_text');
+            if (winText && winText.trim()) {
+              clipboardText = winText;
+            }
+          } catch (err) {
+            console.warn('[DropZoneView] Win32 read_clipboard_text failed:', err);
+          }
+        }
+
+        if (clipboardText && clipboardText.trim()) {
+          await addItem(clipboardText);
+          scrollShelfToFront();
+          playChimeCue('ding');
+          return;
+        }
+
+        // 3. Fallback ke CF_HDROP jika pengguna baru Ctrl+C file di Explorer
+        if ('__TAURI_INTERNALS__' in window) {
+          try {
+            const winFiles = await invoke<string[]>('read_clipboard_files');
+            if (Array.isArray(winFiles) && winFiles.length > 0) {
+              await addDroppedPaths(winFiles);
+              scrollShelfToFront();
+              playChimeCue('ding');
+              return;
+            }
+          } catch {
+            // Ignore cleanly
+          }
+        }
+
+        if (!options?.silentIfEmpty) {
+          flashLocalHint('Clipboard kosong');
+        }
+      } finally {
+        setIsPasting(false);
+      }
+    },
+    [isPasting, addItem, addDroppedPaths, scrollShelfToFront, flashLocalHint]
+  );
+
+  // Unified DOM paste + Ctrl+V fallback listeners (text, links, Win+Shift+S images & Explorer files)
+  useEffect(() => {
+    const ingestClipboardDataTransfer = async (data: DataTransfer): Promise<boolean> => {
+      const collectedPaths: string[] = [];
+
+      if (data.files && data.files.length > 0) {
+        for (let i = 0; i < data.files.length; i++) {
+          const file = data.files[i];
+          const diskPath = (file as File & { path?: string }).path;
+          if (diskPath && diskPath.trim()) {
+            collectedPaths.push(diskPath);
+            continue;
+          }
+
+          if (file.type.startsWith('image/') && '__TAURI_INTERNALS__' in window) {
+            try {
+              const buffer = await file.arrayBuffer();
+              const bytes = Array.from(new Uint8Array(buffer));
+              const ext = file.type.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'png';
+              const savedPath = await invoke<string>('save_clipboard_image', {
+                bytes,
+                extension: ext,
+              });
+              if (savedPath) collectedPaths.push(savedPath);
+            } catch (err) {
+              console.warn('[DropZoneView] Failed saving pasted clipboard image:', err);
+            }
+          }
+        }
+      }
+
+      if (collectedPaths.length > 0) {
+        await addDroppedPaths(collectedPaths);
+        scrollShelfToFront();
+        playChimeCue('ding');
+        return true;
+      }
+
+      if ('__TAURI_INTERNALS__' in window) {
+        try {
+          const winFiles = await invoke<string[]>('read_clipboard_files');
+          if (Array.isArray(winFiles) && winFiles.length > 0) {
+            await addDroppedPaths(winFiles);
+            scrollShelfToFront();
+            playChimeCue('ding');
+            return true;
+          }
+        } catch {
+          // Ignore cleanly
+        }
+      }
+
+      const text = data.getData('text/plain') || data.getData('text/uri-list');
+      if (text && text.trim()) {
+        await addItem(text);
+        scrollShelfToFront();
+        playChimeCue('ding');
+        return true;
+      }
+
+      return false;
+    };
+
+    const handleWindowPaste = async (e: ClipboardEvent) => {
+      const activeTag = document.activeElement?.tagName;
+      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
+
+      lastNativePasteRef.current = Date.now();
+      if (keydownFallbackTimerRef.current) {
+        clearTimeout(keydownFallbackTimerRef.current);
+        keydownFallbackTimerRef.current = null;
+      }
+
+      e.preventDefault();
+      if (e.clipboardData) {
+        const handled = await ingestClipboardDataTransfer(e.clipboardData);
+        if (handled) return;
+      }
+      await handlePasteFromClipboard({ silentIfEmpty: false });
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'v') return;
+      const activeTag = document.activeElement?.tagName;
+      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
+
+      if (keydownFallbackTimerRef.current) {
+        clearTimeout(keydownFallbackTimerRef.current);
+      }
+      keydownFallbackTimerRef.current = setTimeout(() => {
+        keydownFallbackTimerRef.current = null;
+        if (Date.now() - lastNativePasteRef.current > 80) {
+          void handlePasteFromClipboard({ silentIfEmpty: false });
+        }
+      }, 28);
+    };
+
+    window.addEventListener('paste', handleWindowPaste);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('paste', handleWindowPaste);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [addItem, addDroppedPaths, handlePasteFromClipboard, scrollShelfToFront]);
+
+  const handlePickFiles = useCallback(
+    async (e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      if (isPicking) return;
+      setIsPicking(true);
+      try {
+        const paths = await invoke<string[]>('pick_drop_zone_files');
+        if (Array.isArray(paths) && paths.length > 0) {
+          await addDroppedPaths(paths);
+          scrollShelfToFront();
+          playChimeCue('ding');
+        }
+      } catch (err) {
+        console.warn('[DropZoneView] File picker cancelled or failed:', err);
+      } finally {
+        setIsPicking(false);
+      }
+    },
+    [isPicking, addDroppedPaths, scrollShelfToFront]
+  );
+
+  const handleShelfWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const container = shelfRef.current;
+    if (!container) return;
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      container.scrollLeft += e.deltaY;
+    }
+  };
+
+  const showDragTargetHighlight = isDragging && !isInternalDragging;
+  const activeFeedbackBadge = localHint || lastActionFeedback?.label || null;
+
+  return (
+    <div
+      ref={containerRef}
+      tabIndex={-1}
+      autoFocus
+      onMouseDown={() => {
+        containerRef.current?.focus({ preventScroll: true });
+      }}
+      data-tauri-drag-region="false"
+      className="relative w-full h-full bg-[#000000] px-3.5 py-2 flex flex-col justify-between gap-2 select-none overflow-hidden outline-none"
+    >
+      {/* Header Shelf Bar */}
+      <div className="flex items-center justify-between gap-2 h-[24px] shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[11px] font-medium text-white/80 tabular-nums shrink-0">
+            {items.length === 0
+              ? 'Drop Zone Shelf'
+              : `${items.length} ${items.length === 1 ? 'item parked' : 'items parked'}`}
+          </span>
+
+          <AnimatePresence mode="wait">
+            {activeFeedbackBadge ? (
+              <motion.span
+                key={activeFeedbackBadge}
+                initial={{ opacity: 0, x: -4 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -4 }}
+                transition={{ duration: 0.14 }}
+                className="px-2 py-[1px] rounded-full bg-white/[0.10] border border-white/[0.12] text-[9.5px] font-medium text-white/85 truncate"
+              >
+                {activeFeedbackBadge}
+              </motion.span>
+            ) : (
+              items.length > 0 && (
+                <span className="text-[9.5px] text-white/35 truncate">
+                  · Ctrl+V teks/link atau drag kartu keluar
+                </span>
+              )
+            )}
+          </AnimatePresence>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            disabled={isPasting}
+            onClick={(e) => {
+              e.stopPropagation();
+              void handlePasteFromClipboard({ silentIfEmpty: false });
+            }}
+            title="Tempel teks, tautan, atau berkas dari Clipboard (Ctrl+V)"
+            className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.10] text-[10.5px] font-medium text-white transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <ClipboardPaste className="w-3 h-3" />
+            <span>+ Paste</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={isPicking}
+            onClick={handlePickFiles}
+            title="Pilih berkas dari File Explorer"
+            className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.10] text-[10.5px] font-medium text-white transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <Plus className="w-3 h-3" />
+            <span>Add</span>
+          </button>
+
+          {items.length > 0 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                playChimeCue('tap');
+                clearAll();
+              }}
+              className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.04] hover:bg-white/[0.10] border border-white/[0.08] text-[10.5px] font-medium text-white/60 hover:text-white transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-3 h-3" />
+              <span>Clear All</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Main Content Area: Empty State vs Horizontal Card Shelf */}
+      <div className="relative flex-1 min-h-0 flex items-center">
+        {items.length === 0 ? (
+          <div
+            onClick={handlePickFiles}
+            className={`w-full h-full rounded-xl border border-dashed transition-colors flex flex-col items-center justify-center gap-2 cursor-pointer px-4 ${
+              showDragTargetHighlight
+                ? 'border-indigo-500/60 bg-indigo-500/[0.08]'
+                : 'border-white/[0.12] hover:border-white/25 bg-[#0a0a0a]'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Inbox
+                className={`w-4 h-4 transition-colors ${
+                  showDragTargetHighlight ? 'text-indigo-400' : 'text-white/50'
+                }`}
+              />
+              <span className="text-[11.5px] font-medium text-white/85">
+                Drop files here or press Ctrl+V to park links &amp; snippets
               </span>
             </div>
-
-            {/* Kolom Kanan (Clipboard Pocket & Quick Stash) */}
-            <div className="rounded-2xl border border-purple-500/20 bg-[#120d1c]/50 py-2.5 px-3 flex flex-col justify-between select-none">
-              <div className="flex items-center justify-between">
-                <span className="text-[9.5px] font-semibold tracking-wider text-purple-300/70 uppercase font-sans">
-                  CLIPBOARD STASH
-                </span>
-              </div>
-
-              <p className="font-sans text-[9.5px] text-zinc-400 leading-tight mt-0.5 line-clamp-2">
-                Simpan cuplikan teks, skrip, atau tautan aktif langsung dari papan klip sistem.
-              </p>
-
+            <div className="flex items-center gap-1.5">
               <button
-                onClick={handlePasteClipboard}
-                className="w-full py-1.5 px-2.5 rounded-lg bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/40 text-[#e3e0f7] text-[11px] font-medium flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer active:scale-[0.97] mt-auto"
-                title="Tempel teks atau tautan langsung dari papan klip sistem"
+                type="button"
+                disabled={isPasting}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handlePasteFromClipboard({ silentIfEmpty: false });
+                }}
+                className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.08] hover:bg-white/[0.16] border border-white/[0.10] text-[10px] font-medium text-white/90 transition-colors cursor-pointer disabled:opacity-50"
               >
-                <Clipboard className="w-3.5 h-3.5 text-[#c084fc]" />
-                <span>Tempel Clipboard</span>
+                <ClipboardPaste className="w-3 h-3" />
+                <span>+ Paste Clipboard</span>
+              </button>
+              <button
+                type="button"
+                disabled={isPicking}
+                onClick={handlePickFiles}
+                className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.05] hover:bg-white/[0.14] border border-white/[0.08] text-[10px] font-medium text-white/75 hover:text-white transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <Plus className="w-3 h-3" />
+                <span>+ Add Files</span>
               </button>
             </div>
           </div>
         ) : (
-          /* Horizontal Shelf Cards Carousel with Smooth Mouse-Wheel Support */
           <div
-            ref={scrollContainerRef}
-            onWheel={handleWheel}
-            className="w-full h-full flex items-center gap-3 overflow-x-auto overflow-y-hidden pb-1 pt-0.5 px-0.5 scroll-smooth select-none custom-shelf-scrollbar"
-            style={{ scrollbarWidth: 'thin' }}
+            ref={shelfRef}
+            onWheel={handleShelfWheel}
+            className="w-full h-full flex items-center gap-2 overflow-x-auto no-scrollbar"
           >
-            {items.map((item) => (
-              <ShelfCard
-                key={item.id}
-                item={item}
-                copiedId={copiedId}
-                onCopyText={handleCopyText}
-                onLaunchFile={handleLaunchFile}
-                onRevealInFolder={handleRevealInFolder}
-                onCardDragStart={handleCardDragStart}
-                onOpenUrl={handleOpenUrl}
-                onRemove={removeItem}
-                getExtensionColor={getExtensionColor}
-              />
-            ))}
+            <AnimatePresence initial={false} mode="popLayout">
+              {items.map((item) => (
+                <DropShelfCard
+                  key={item.id}
+                  item={item}
+                  isHighlighted={lastActionFeedback?.id === item.id}
+                  onRemove={removeItem}
+                  onOpenMusic={onOpenMusic}
+                />
+              ))}
+            </AnimatePresence>
           </div>
         )}
+
+        {/* Magnetic Drag-Over Overlay Highlight */}
+        <AnimatePresence>
+          {showDragTargetHighlight && items.length > 0 && (
+            <motion.div
+              key="dropzone-drag-overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
+              className="pointer-events-none absolute inset-0 rounded-xl border-2 border-dashed border-indigo-500/60 bg-indigo-500/[0.08] backdrop-blur-sm flex items-center justify-center gap-2"
+            >
+              <Inbox className="w-4 h-4 text-indigo-400" />
+              <span className="text-[11.5px] font-medium text-white/90">
+                Lepaskan berkas untuk ditambahkan ke Drop Zone
+              </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-    </div>
-  );
-};
-
-interface ShelfCardProps {
-  item: DropItem;
-  copiedId: string | null;
-  onCopyText: (id: string, text: string) => void;
-  onLaunchFile: (path: string) => void;
-  onRevealInFolder: (path: string) => void;
-  onCardDragStart: (e: React.MouseEvent | React.DragEvent, path: string) => void;
-  onOpenUrl: (url: string) => void;
-  onRemove: (id: string) => void;
-  getExtensionColor: (ext?: string) => string;
-}
-
-const ShelfCard: React.FC<ShelfCardProps> = ({
-  item,
-  copiedId,
-  onCopyText,
-  onLaunchFile,
-  onRevealInFolder,
-  onCardDragStart,
-  onOpenUrl,
-  onRemove,
-  getExtensionColor,
-}) => {
-  const [imgError, setImgError] = useState(false);
-  const isDraggable = item.type === 'file' || item.type === 'image';
-
-  return (
-    <div
-      onMouseDown={(e) => {
-        // Hanya picu jika tombol klik kiri dan item merupakan file/image
-        if (e.button === 0 && isDraggable) {
-          onCardDragStart(e, item.payload);
-        }
-      }}
-      onDragStart={(e) => {
-        // Matikan drag bawaan browser HTML5
-        e.preventDefault();
-      }}
-      className={`relative w-[210px] min-w-[210px] h-[92px] shrink-0 rounded-xl bg-[#121215] hover:bg-[#16161a] border border-[#222226] hover:border-[#38383e] p-2 flex flex-col justify-between group transition-all duration-100 ease-out select-none ${
-        isDraggable ? 'cursor-grab active:cursor-grabbing hover:border-purple-400/50' : ''
-      }`}
-      title={
-        isDraggable
-          ? `${item.title} (Seret ke Explorer atau Desktop untuk menyalin)`
-          : undefined
-      }
-    >
-      {/* ✕ Remove Button */}
-      <button
-        draggable={false}
-        onMouseDown={(e) => e.stopPropagation()}
-        onClick={(e) => {
-          e.stopPropagation();
-          onRemove(item.id);
-          playChimeCue('whisper');
-        }}
-        className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-[#18181c] hover:bg-rose-500/20 text-zinc-400 hover:text-rose-300 border border-[#2e2e34] hover:border-rose-500/30 flex items-center justify-center transition-all duration-100 ease-out cursor-pointer z-10 active:scale-[0.97]"
-        title="Hapus dari shelf"
-      >
-        <X className="w-2.5 h-2.5 pointer-events-none" />
-      </button>
-
-      {/* Card Content based on type */}
-      {item.type === 'text' && (
-        <>
-          <div className="flex items-center gap-1.5 pr-4">
-            <FileText className="w-3.5 h-3.5 text-[#c084fc] shrink-0" />
-            <span className="text-[10px] font-semibold text-zinc-400 truncate uppercase tracking-wider font-sans">
-              Teks
-            </span>
-            <span className="font-sans text-[9px] text-purple-300/80 tabular-nums ml-auto">
-              {item.sizeFormatted}
-            </span>
-          </div>
-
-          <p className="font-sans text-[11px] text-zinc-200 line-clamp-2 leading-relaxed bg-[#120d1c]/60 p-2 rounded-lg border border-purple-500/20 my-0.5 break-all">
-            {item.payload}
-          </p>
-
-          <button
-            draggable={false}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => onCopyText(item.id, item.payload)}
-            className="flex items-center justify-center gap-1 w-full py-0.5 rounded text-purple-300 hover:text-white bg-purple-950/30 hover:bg-purple-900/50 border border-purple-500/30 hover:border-purple-400/50 text-[9.5px] font-medium transition-all duration-100 ease-out cursor-pointer active:scale-[0.97]"
-          >
-            {copiedId === item.id ? (
-              <>
-                <Check className="w-2.5 h-2.5 text-emerald-400" />
-                <span className="text-emerald-300">Tersalin!</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-2.5 h-2.5" />
-                <span>Salin Teks</span>
-              </>
-            )}
-          </button>
-        </>
-      )}
-
-      {item.type === 'file' && (
-        <>
-          <div className="flex items-center justify-between pr-4">
-            <div className="flex items-center gap-1.5 min-w-0 flex-1">
-              <span
-                className={`px-1 py-0.2 rounded text-[9px] font-mono font-bold uppercase border shrink-0 ${getExtensionColor(
-                  item.extension
-                )}`}
-              >
-                {item.extension || 'FILE'}
-              </span>
-              <span className="text-[11px] font-medium text-zinc-100 truncate tracking-tight font-sans" title={item.title}>
-                {item.title}
-              </span>
-            </div>
-
-            {/* Mini Reveal in Explorer button */}
-            <button
-              draggable={false}
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                onRevealInFolder(item.payload);
-              }}
-              className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-[#18181c] transition-all duration-100 ease-out ml-1 shrink-0 active:scale-[0.97]"
-              title="Tampilkan lokasi berkas di Windows Explorer"
-            >
-              <Folder className="w-3 h-3 pointer-events-none" />
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between text-[9.5px] px-0.5">
-            <span className="font-sans text-[10px] text-purple-300/80 tabular-nums">
-              {item.sizeFormatted}
-            </span>
-            <div
-              className="flex items-center gap-1 text-[10px] text-zinc-500 truncate max-w-[140px]"
-              title={item.payload}
-            >
-              <GripHorizontal className="w-2.5 h-2.5 opacity-40 shrink-0" />
-              <span className="truncate">{item.payload}</span>
-            </div>
-          </div>
-
-          <button
-            draggable={false}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => onLaunchFile(item.payload)}
-            className="flex items-center justify-center gap-1 w-full py-0.5 rounded text-purple-300 hover:text-white bg-purple-950/30 hover:bg-purple-900/50 border border-purple-500/30 hover:border-purple-400/50 text-[9.5px] font-medium transition-all duration-100 ease-out cursor-pointer active:scale-[0.97]"
-            title="Buka berkas langsung dengan aplikasi default Windows"
-          >
-            <FolderOpen className="w-2.5 h-2.5" />
-            <span>Buka Berkas</span>
-          </button>
-        </>
-      )}
-
-      {item.type === 'image' && (
-        <>
-          <div className="flex items-center gap-2 pr-4">
-            {/* Clickable Square Thumbnail */}
-            <div
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={() => onLaunchFile(item.payload)}
-              className="w-9 h-9 rounded-md bg-[#09090b] border border-purple-500/30 shrink-0 overflow-hidden flex items-center justify-center cursor-pointer hover:border-purple-400/60 hover:scale-105 transition-all"
-              title="Klik thumbnail untuk membuka gambar di penampil default"
-            >
-              {!imgError ? (
-                <img
-                  draggable={false}
-                  src={convertFileSrc(item.payload)}
-                  alt={item.title}
-                  className="w-full h-full object-cover pointer-events-none"
-                  onError={() => setImgError(true)}
-                />
-              ) : (
-                <ImageIcon className="w-4 h-4 text-[#c084fc]" />
-              )}
-            </div>
-
-            <div className="flex flex-col min-w-0 flex-1">
-              <div className="flex items-center justify-between">
-                <span className="text-[10.5px] font-medium text-zinc-100 truncate tracking-tight font-sans" title={item.title}>
-                  {item.title}
-                </span>
-
-                {/* Mini Reveal in Explorer button */}
-                <button
-                  draggable={false}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRevealInFolder(item.payload);
-                  }}
-                  className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-[#18181c] transition-all duration-100 ease-out shrink-0 active:scale-[0.97]"
-                  title="Tampilkan lokasi berkas di Windows Explorer"
-                >
-                  <Folder className="w-2.8 h-2.8 pointer-events-none" />
-                </button>
-              </div>
-
-              <span className="font-sans text-[10px] text-purple-300/80 tabular-nums mt-0.5">
-                {item.sizeFormatted}
-              </span>
-            </div>
-          </div>
-
-          <button
-            draggable={false}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => onLaunchFile(item.payload)}
-            className="flex items-center justify-center gap-1 w-full py-0.5 rounded text-purple-300 hover:text-white bg-purple-950/30 hover:bg-purple-900/50 border border-purple-500/30 hover:border-purple-400/50 text-[9.5px] font-medium transition-all duration-100 ease-out cursor-pointer active:scale-[0.97] mt-1"
-            title="Buka gambar di aplikasi penampil foto default Windows"
-          >
-            <FolderOpen className="w-2.5 h-2.5" />
-            <span>Buka Gambar</span>
-          </button>
-        </>
-      )}
-
-      {item.type === 'url' && (
-        <>
-          <div className="flex items-center gap-1.5 pr-4">
-            <Link2 className="w-3.5 h-3.5 text-purple-300 shrink-0" />
-            <span className="text-[11px] font-medium text-zinc-100 truncate tracking-tight font-sans" title={item.title}>
-              {item.title}
-            </span>
-          </div>
-
-          <p className="text-[9.5px] text-purple-300/70 font-sans truncate px-0.5" title={item.payload}>
-            {item.payload}
-          </p>
-
-          <button
-            draggable={false}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => onOpenUrl(item.payload)}
-            className="flex items-center justify-center gap-1 w-full py-0.5 rounded text-purple-300 hover:text-white bg-purple-950/30 hover:bg-purple-900/50 border border-purple-500/30 hover:border-purple-400/50 text-[9.5px] font-medium transition-all duration-100 ease-out cursor-pointer active:scale-[0.97]"
-            title="Buka tautan di browser bawaan sistem"
-          >
-            <ExternalLink className="w-2.5 h-2.5" />
-            <span>Buka Tautan</span>
-          </button>
-        </>
-      )}
     </div>
   );
 };

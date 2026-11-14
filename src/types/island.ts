@@ -5,6 +5,7 @@ export type IslandMode =
   | 'expanded_music'
   | 'expanded_timer'
   | 'expanded_todo'
+  | 'expanded_control'
   | 'drop_zone';
 
 export type IslandState =
@@ -55,11 +56,19 @@ export interface SongMetadata {
   queue?: { title: string; artist: string }[];
 }
 
+export interface PlaybackClockSnapshot {
+  basePositionMs: number;
+  capturedAtMs: number;
+  isPlaying: boolean;
+  durationMs: number;
+}
+
 export interface TodoItem {
   id: string;
   text: string;
   completed: boolean;
   isPinned?: boolean;
+  scheduledTime?: string; // Optional Time-Block HH:MM (e.g., "09:00")
 }
 
 export interface TimerState {
@@ -69,6 +78,9 @@ export interface TimerState {
   remainingSeconds: number;
   currentCycle: number; // 1 to 4
   mode: 'focus' | 'rest' | 'break';
+  focusedTaskId?: string | null;
+  isAlarmRinging?: boolean;
+  presetTotalSeconds?: number;
 }
 
 export interface HardwareMetrics {

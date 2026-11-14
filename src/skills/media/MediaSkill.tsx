@@ -4,7 +4,13 @@ import { listen } from '@tauri-apps/api/event';
 import { CasaSkill, SkillPriorityTier } from '../types';
 import { SongMetadata, AudioOutputDevice, MediaSessionItem } from '../../types/island';
 import { MusicCardView, MusicSubPanel } from '../../components/views/MusicCardView';
-import { fetchLyrics, LyricResult } from '../../utils/lyricsService';
+import {
+  buildGlobalLyricsCacheKey,
+  fetchLyrics,
+  getCachedLyrics,
+  LyricResult,
+  setCachedLyrics,
+} from '../../utils/lyricsService';
 import { MediaExpandedView } from '../../features/media/MediaExpandedView';
 import { MediaPillSlot } from '../../features/media/MediaPillSlot';
 import {
@@ -18,19 +24,33 @@ import {
   isSpotifyRunning,
   getLastManualTargetSessionId,
   clearLastManualTargetSessionId,
+  shouldSuppressStoppedMediaUpdate,
 } from '../../utils/tauriBridge';
 import {
   markSessionInit,
   getCurrentlyPlayingTrackDetails,
+  getSpotifyPlaybackSnapshot,
   setLastKnownPositionMs,
   setLastPlayedTrackUri,
   clearPlayGuardWindow,
+  isSpotifyUserConnected,
+  nextSpotifyTrack,
+  prevSpotifyTrack,
+  seekSpotifyPlayback,
+  verifyIsBrowserSpotify,
 } from '../../utils/spotifyService';
+import {
+  PlaybackClockSnapshot,
+  computeInterpolatedPositionMs,
+  reconcilePlaybackClockSnapshot,
+  isPlaybackSeekLocked,
+} from '../../features/media/playbackClock';
 
 import type { NativeTrack } from '../../services/nativeAudioService';
 
 export interface MediaSkillState {
   song: SongMetadata;
+  playbackClock?: PlaybackClockSnapshot;
   hasNativeMedia: boolean;
   isShuffle: boolean;
   activeSubPanel: MusicSubPanel;
@@ -43,50 +63,66 @@ export interface MediaSkillState {
   playbackSource?: 'companion' | 'native';
   nativeTrack?: NativeTrack | null;
   isNativePlaying?: boolean;
+  showIdleLyrics?: boolean;
 }
 
-const advancePlaybackSecond = (prev: MediaSkillState): MediaSkillState => {
-  if (!prev.song.isPlaying) return prev;
-  const maxDur = prev.song.duration;
-  const nextTime =
-    maxDur > 0 ? Math.min(prev.song.currentTime + 1, maxDur) : prev.song.currentTime + 1;
+const interpolateClockTick = (prev: MediaSkillState): MediaSkillState => {
+  if (!prev.song.isPlaying && !prev.playbackClock?.isPlaying) return prev;
+  const nowMs = Date.now();
+  const clock: PlaybackClockSnapshot = prev.playbackClock || {
+    basePositionMs: Math.max(0, (prev.song.currentTime || 0) * 1000),
+    capturedAtMs: nowMs,
+    isPlaying: prev.song.isPlaying,
+    durationMs: prev.song.duration > 0 ? Math.round(prev.song.duration * 1000) : 0,
+  };
+  const nextMs = computeInterpolatedPositionMs(clock, nowMs);
+  const nextSec = nextMs / 1000;
+  if (Math.abs(nextSec - prev.song.currentTime) < 0.04) {
+    return prev;
+  }
 
   return {
     ...prev,
+    playbackClock: clock,
     song: {
       ...prev.song,
-      currentTime: nextTime,
+      currentTime: nextSec,
     },
   };
 };
 
-export const isValidTrackMetadata = (title?: string, artist?: string): boolean => {
+export const isValidTrackMetadata = (title?: string, _artist?: string): boolean => {
   if (!title) return false;
   const t = title.trim();
+  const lower = t.toLowerCase();
   if (
     !t ||
     t === 'No Media Playing' ||
     t === 'No Media Active' ||
-    t.toLowerCase() === 'spotify' ||
-    t.toLowerCase() === 'spotify free' ||
-    t.toLowerCase() === 'spotify premium'
+    lower === 'spotify' ||
+    lower === 'spotify free' ||
+    lower === 'spotify premium' ||
+    lower === 'casa player' ||
+    lower === 'casa native player' ||
+    lower === 'advertisement' ||
+    lower === 'sponsored'
   ) {
     return false;
   }
-  // If title contains an "Artist - Title" separator, it's valid even if artist is omitted/unknown
-  if (t.includes(' - ') || t.includes(' – ') || t.includes(' — ') || t.includes(' : ')) {
-    return true;
-  }
-  if (!artist) return false;
-  const a = artist.trim().toLowerCase();
-  if (!a || a === 'unknown' || a === 'unknown artist') {
-    return false;
-  }
-  return true;
+  // Allow title-based lookup even when GSMTC artist is empty or a browser/channel placeholder
+  return t.length >= 2;
 };
 
 const getInitialSubPanel = (): MusicSubPanel => {
   return 'none';
+};
+
+const getInitialShowIdleLyrics = (): boolean => {
+  try {
+    return localStorage.getItem('casa_show_idle_lyrics') === 'true';
+  } catch {
+    return false;
+  }
 };
 
 export const mediaSkill: CasaSkill<MediaSkillState> = {
@@ -127,6 +163,12 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
       },
       queue: [],
     },
+    playbackClock: {
+      basePositionMs: 0,
+      capturedAtMs: Date.now(),
+      isPlaying: false,
+      durationMs: 0,
+    },
     hasNativeMedia: false,
     isShuffle: false,
     activeSubPanel: getInitialSubPanel(),
@@ -144,6 +186,7 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
     playbackSource: 'companion',
     nativeTrack: null,
     isNativePlaying: false,
+    showIdleLyrics: getInitialShowIdleLyrics(),
   },
 
   getPriority: (state: MediaSkillState): SkillPriorityTier => {
@@ -160,6 +203,7 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
     let isMounted = true;
     const lastSourceAppRef = { current: '' };
     const lastNativePositionRef = { current: -1 };
+    const lastFetchedLyricsKeyRef = { current: '' };
     const lyricsAbortControllerRef = { current: null as AbortController | null };
     let unlistenMediaUpdate: (() => void) | undefined;
     let unlistenMediaClosed: (() => void) | undefined;
@@ -171,14 +215,28 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
       try {
         const running = await isSpotifyRunning();
         if (!isMounted) return;
-        setState((prev) => ({
-          ...prev,
-          isSpotifyRunning: running,
-          song:
-            !running && !prev.is_browser && !prev.song.is_browser && prev.song.isPlaying
-              ? { ...prev.song, isPlaying: false }
-              : prev.song,
-        }));
+        setState((prev) => {
+          const forcePaused =
+            !running && !prev.is_browser && !prev.song.is_browser && prev.song.isPlaying;
+          if (!forcePaused && prev.isSpotifyRunning === running) return prev;
+          const nowMs = Date.now();
+          const frozenClock = forcePaused
+            ? reconcilePlaybackClockSnapshot(prev.playbackClock, {
+                incomingPositionMs: null,
+                isPlaying: false,
+                durationMs:
+                  prev.playbackClock?.durationMs ||
+                  (prev.song.duration > 0 ? Math.round(prev.song.duration * 1000) : 0),
+                nowMs,
+              })
+            : prev.playbackClock;
+          return {
+            ...prev,
+            isSpotifyRunning: running,
+            playbackClock: frozenClock,
+            song: forcePaused ? { ...prev.song, isPlaying: false } : prev.song,
+          };
+        });
       } catch (err) {
         console.debug('[MediaSkill] checkSpotify error:', err);
       }
@@ -186,8 +244,93 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
     checkSpotifyProcess();
     const spotifyInterval = setInterval(checkSpotifyProcess, 2000);
 
-    // Single stable 1000ms playback ticker: runs continuously ONLY when media is confirmed playing
-    // Anti-Optimistic Drift: Guard against running while Spotify is still buffering, paused, or without valid song metadata
+    // Background authoritative Spotify Web API clock sync (active both in Idle and Mode 6)
+    const syncSpotifyClockSnapshot = async () => {
+      if (!isMounted || isPlaybackSeekLocked() || !isSpotifyUserConnected()) return;
+      const current = getState();
+      if (
+        !current ||
+        current.playbackSource === 'native' ||
+        !current.hasNativeMedia ||
+        !current.song?.is_spotify
+      ) {
+        return;
+      }
+
+      const snap = await getSpotifyPlaybackSnapshot();
+      if (!isMounted || !snap || isPlaybackSeekLocked()) return;
+
+      setState((s) => {
+        if (s.playbackSource === 'native' || !s.hasNativeMedia || !s.song.is_spotify) return s;
+
+        if (snap.title && s.song.title) {
+          const expected = s.song.title.trim().toLowerCase();
+          const incoming = snap.title.trim().toLowerCase();
+          const titleMatches =
+            expected === incoming ||
+            (expected.length > 2 && incoming.includes(expected)) ||
+            (incoming.length > 2 && expected.includes(incoming));
+          if (!titleMatches) return s;
+        }
+
+        const resolvedDurMs =
+          snap.durationMs > 0
+            ? snap.durationMs
+            : s.song.duration > 0
+            ? Math.round(s.song.duration * 1000)
+            : s.playbackClock?.durationMs || 0;
+        const nowMs = Date.now();
+        const prevClock: PlaybackClockSnapshot = s.playbackClock || {
+          basePositionMs: Math.max(0, (s.song.currentTime || 0) * 1000),
+          capturedAtMs: nowMs,
+          isPlaying: s.song.isPlaying,
+          durationMs: resolvedDurMs,
+        };
+
+        const localMsAtCapture = computeInterpolatedPositionMs(prevClock, snap.capturedAtMs);
+        const deltaMs = Math.abs(snap.progressMs - localMsAtCapture);
+        const shouldSnapOrCalibrate = deltaMs > 1500 || deltaMs > 250;
+
+        if (!shouldSnapOrCalibrate && resolvedDurMs === prevClock.durationMs) {
+          return s;
+        }
+
+        const nextClock = reconcilePlaybackClockSnapshot(prevClock, {
+          incomingPositionMs: snap.progressMs,
+          isPlaying: s.song.isPlaying,
+          durationMs: resolvedDurMs,
+          nowMs: snap.capturedAtMs,
+          isPositionFresh: true,
+          calibrateMinorDrift: true,
+        });
+        const interpolatedSec = computeInterpolatedPositionMs(nextClock, nowMs) / 1000;
+        const durationSec = resolvedDurMs > 0 ? Math.round(resolvedDurMs / 1000) : s.song.duration;
+
+        return {
+          ...s,
+          playbackClock: nextClock,
+          song: {
+            ...s.song,
+            duration: durationSec,
+            currentTime: interpolatedSec,
+          },
+        };
+      });
+    };
+
+    const spotifyClockSyncInterval = setInterval(() => {
+      const current = getState();
+      if (
+        current?.playbackSource !== 'native' &&
+        current?.hasNativeMedia &&
+        current?.song?.is_spotify &&
+        current?.song?.isPlaying
+      ) {
+        void syncSpotifyClockSnapshot();
+      }
+    }, 1800);
+
+    // Lightweight 250ms deterministic interpolation ticker: computes elapsed from timestamp anchor with zero drift
     const playbackTickerInterval = setInterval(() => {
       if (!isMounted) return;
       const current = getState();
@@ -199,9 +342,11 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
       ) {
         return;
       }
-      setState(advancePlaybackSecond);
-      setLastKnownPositionMs((current.song.currentTime + 1) * 1000);
-    }, 1000);
+      setState(interpolateClockTick);
+      if (current.playbackClock) {
+        setLastKnownPositionMs(computeInterpolatedPositionMs(current.playbackClock, Date.now()));
+      }
+    }, 250);
 
     // 2. Initial Media Session Query
     getCurrentMedia()
@@ -216,13 +361,19 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
           lastSourceAppRef.current = initial.source_app;
         }
         lastNativePositionRef.current = initial.position;
-        if (typeof initial.position === 'number' && initial.position > 0) {
-          setLastKnownPositionMs(initial.position * 1000);
+        const initialPosMs =
+          typeof initial.position === 'number' && initial.position > 0
+            ? Math.round(initial.position * 1000)
+            : 0;
+        if (initialPosMs > 0) {
+          setLastKnownPositionMs(initialPosMs);
         }
         if ((initial as any).uri || (initial as any).track_id) {
           setLastPlayedTrackUri((initial as any).uri || (initial as any).track_id);
         }
 
+        const initialDurMs = initial.duration > 0 ? Math.round(initial.duration * 1000) : 0;
+        const initNowMs = Date.now();
         setState((prev) => ({
           ...prev,
           hasNativeMedia: true,
@@ -230,6 +381,12 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
           session_id: initial.session_id || '',
           active_sessions: initial.active_sessions || [],
           activeSubPanel: prev.activeSubPanel,
+          playbackClock: {
+            basePositionMs: initialPosMs,
+            capturedAtMs: initNowMs,
+            isPlaying: initial.is_playing,
+            durationMs: initialDurMs,
+          },
           song: {
             ...prev.song,
             session_id: initial.session_id || '',
@@ -241,20 +398,39 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
             source_app: initial.source_app || '',
             active_sessions: initial.active_sessions || [],
             duration: initial.duration > 0 ? Math.round(initial.duration) : 0,
-            currentTime: initial.position,
+            currentTime: initialPosMs / 1000,
             albumArtUrl: initial.album_art || undefined,
             albumArt: initial.album_art || undefined,
           },
         }));
 
+        if (initial.is_spotify && isSpotifyUserConnected()) {
+          void syncSpotifyClockSnapshot();
+        }
+
         // Cold-start guard: Only query lyrics once valid non-generic track metadata is present
         if (isValidTrackMetadata(cleanTitle, initial.artist)) {
-          fetchLyrics(cleanTitle, initial.artist, initial.duration)
-            .then((lyrics) => {
-              if (!isMounted) return;
-              setState((prev) => ({ ...prev, lyricsData: lyrics }));
-            })
-            .catch(() => {});
+          const initLyricsKey = buildGlobalLyricsCacheKey(cleanTitle, initial.artist);
+          const cachedInitLyrics = getCachedLyrics(cleanTitle, initial.artist);
+          if (cachedInitLyrics) {
+            lastFetchedLyricsKeyRef.current = initLyricsKey;
+            setState((prev) => ({ ...prev, lyricsData: cachedInitLyrics }));
+          } else {
+            lastFetchedLyricsKeyRef.current = initLyricsKey;
+            fetchLyrics(cleanTitle, initial.artist, initial.duration)
+              .then((lyrics) => {
+                setCachedLyrics(cleanTitle, initial.artist, lyrics);
+                if (!isMounted) return;
+                setState((prev) => {
+                  const activeKey = buildGlobalLyricsCacheKey(prev.song.title, prev.song.artist);
+                  if (prev.playbackSource === 'native' || (activeKey && initLyricsKey && activeKey !== initLyricsKey)) {
+                    return prev;
+                  }
+                  return { ...prev, lyricsData: lyrics };
+                });
+              })
+              .catch(() => {});
+          }
         }
 
         // Presisi Durasi Spotify Web API saat inisialisasi awal
@@ -303,6 +479,12 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
             lastNativePositionRef.current = -1;
             setState((prev) => ({
               ...prev,
+              playbackClock: {
+                basePositionMs: 0,
+                capturedAtMs: Date.now(),
+                isPlaying: false,
+                durationMs: 0,
+              },
               hasNativeMedia: false,
               is_browser: false,
               session_id: '',
@@ -348,6 +530,11 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
             cleanTitle = cleanTitle.replace(/\s*-\s*YouTube(?:\s+Music)?$/i, '').trim();
           }
 
+          // Guard pasca-Stop manual: Abaikan echo GSMTC status paused dari lagu yang baru saja di-Stop user
+          if (shouldSuppressStoppedMediaUpdate(payload.session_id, cleanTitle, payload.is_playing)) {
+            return;
+          }
+
           // Deteksi Pergantian Sumber Aplikasi
           const currentSource = payload.source_app || '';
           const isSourceSwitched = Boolean(
@@ -357,202 +544,208 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
           );
           lastSourceAppRef.current = currentSource;
 
-          // Evaluasi perubahan posisi native dari GSMTC (Anti 5-Second Rubber-Banding)
+          // Evaluasi perubahan posisi native dari GSMTC (Anti Rubber-Banding / Frozen GSMTC Guard)
           const nativePosChanged =
-            lastNativePositionRef.current >= 0 &&
-            Math.abs(payload.position - lastNativePositionRef.current) > 0.5;
+            lastNativePositionRef.current < 0 ||
+            Math.abs(payload.position - lastNativePositionRef.current) > 0.25;
           lastNativePositionRef.current = payload.position;
-          if (typeof payload.position === 'number' && payload.position > 0) {
+          if (nativePosChanged && typeof payload.position === 'number' && payload.position > 0 && !isPlaybackSeekLocked()) {
             setLastKnownPositionMs(payload.position * 1000);
           }
 
-          setState((prev) => {
-            const incomingSessions = payload.active_sessions || [];
+          const prev = getState();
+          const incomingSessions = payload.active_sessions || [];
 
-            // State Hierarchy (Active Playback Precedence + Session Stickiness):
-            // 1. Jika sesi incoming berstatus PLAYING (payload.is_playing === true) sementara sesi saat ini PAUSED,
-            //    SELALU izinkan beralih ke sesi yang sedang PLAYING tersebut.
-            // 2. Stickiness HANYA menahan perpindahan jika sesi saat ini di-pause DAN tidak ada sesi lain yang sedang PLAYING
-            //    (atau bukan hasil klik manual user).
+          // State Hierarchy (Active Playback Precedence + Session Stickiness):
+          if (
+            prev?.session_id &&
+            payload.session_id &&
+            prev.session_id !== payload.session_id
+          ) {
+            const stickyStillAlive = incomingSessions.find(
+              (s) => s.session_id === prev.session_id
+            );
+            const manualTargetId = getLastManualTargetSessionId();
+            const isIncomingTakingOverPlayback =
+              payload.is_playing && (!stickyStillAlive || !stickyStillAlive.is_playing);
+
             if (
-              prev.session_id &&
-              payload.session_id &&
-              prev.session_id !== payload.session_id
+              stickyStillAlive &&
+              manualTargetId !== payload.session_id &&
+              !isIncomingTakingOverPlayback
             ) {
-              const stickyStillAlive = incomingSessions.find(
-                (s) => s.session_id === prev.session_id
-              );
-              const manualTargetId = getLastManualTargetSessionId();
-              const isIncomingTakingOverPlayback =
-                payload.is_playing && (!stickyStillAlive || !stickyStillAlive.is_playing);
-
-              if (
-                stickyStillAlive &&
-                manualTargetId !== payload.session_id &&
-                !isIncomingTakingOverPlayback
-              ) {
-                lastSourceAppRef.current = prev.song.source_app || currentSource;
+              lastSourceAppRef.current = prev.song.source_app || currentSource;
+              setState((s) => {
+                const nowMs = Date.now();
+                const stickyClock = reconcilePlaybackClockSnapshot(s.playbackClock, {
+                  incomingPositionMs: null,
+                  isPlaying: stickyStillAlive.is_playing,
+                  durationMs:
+                    s.playbackClock?.durationMs ||
+                    (s.song.duration > 0 ? Math.round(s.song.duration * 1000) : 0),
+                  nowMs,
+                });
                 return {
-                  ...prev,
+                  ...s,
                   active_sessions: incomingSessions,
+                  playbackClock: stickyClock,
                   song: {
-                    ...prev.song,
+                    ...s.song,
                     isPlaying: stickyStillAlive.is_playing,
+                    currentTime: computeInterpolatedPositionMs(stickyClock, nowMs) / 1000,
                     active_sessions: incomingSessions,
                   },
                 };
-              }
-
-              if (manualTargetId && manualTargetId === payload.session_id) {
-                clearLastManualTargetSessionId();
-              }
+              });
+              return;
             }
 
-            const isSessionSwitched = Boolean(
-              prev.session_id &&
-              payload.session_id &&
-              prev.session_id !== payload.session_id
-            );
-            const trackChanged =
-              isSourceSwitched ||
-              isSessionSwitched ||
-              prev.song.title !== cleanTitle ||
-              prev.song.artist !== payload.artist;
+            if (manualTargetId && manualTargetId === payload.session_id) {
+              clearLastManualTargetSessionId();
+            }
+          }
 
-            const isNativeMode = prev.playbackSource === 'native';
-            if (trackChanged && cleanTitle && !isNativeMode) {
-              setLastKnownPositionMs(0);
-              clearPlayGuardWindow();
-              if ((payload as any).uri || (payload as any).track_id) {
-                setLastPlayedTrackUri((payload as any).uri || (payload as any).track_id);
-              }
+          const isSessionSwitched = Boolean(
+            prev?.session_id &&
+            payload.session_id &&
+            prev.session_id !== payload.session_id
+          );
+          const trackChanged = Boolean(
+            isSourceSwitched ||
+            isSessionSwitched ||
+            prev?.song.title !== cleanTitle ||
+            prev?.song.artist !== payload.artist
+          );
 
-              // Batalkan request lirik sebelumnya yang masih berjalan
-              lyricsAbortControllerRef.current?.abort();
+          const isNativeMode = prev?.playbackSource === 'native';
+          const lyricsTrackKey = buildGlobalLyricsCacheKey(cleanTitle, payload.artist);
+          const validLyricsMeta = isValidTrackMetadata(cleanTitle, payload.artist);
+          const cachedLyrics =
+            !isNativeMode && validLyricsMeta
+              ? getCachedLyrics(cleanTitle, payload.artist)
+              : null;
 
-              // Atomik Flush: Langsung kosongkan lirik lagu lama seketika agar tidak tertinggal
-              setState((s) =>
-                s.playbackSource === 'native'
-                  ? s
-                  : {
-                      ...s,
-                      lyricsData: { lines: [], isSynced: false, syncType: 'none', isInstrumental: false },
-                    }
-              );
-
-              // Hanya fetch lirik jika bukan mode native dan status playback benar-benar Playing
-              if (
-                payload.is_playing &&
-                isValidTrackMetadata(cleanTitle, payload.artist)
-              ) {
-                const controller = new AbortController();
-                lyricsAbortControllerRef.current = controller;
-
-                fetchLyrics(cleanTitle, payload.artist, payload.duration, { signal: controller.signal })
-                  .then((lyrics) => {
-                    if (isMounted && !controller.signal.aborted) {
-                      setState((s) =>
-                        s.playbackSource === 'native' ? s : { ...s, lyricsData: lyrics }
-                      );
-                    }
-                  })
-                  .catch(() => {});
-              }
-
-              // Presisi Durasi Spotify Web API: sinkronkan duration_ms jika tersedia
-              if (!payload.is_browser && payload.is_spotify) {
-                getCurrentlyPlayingTrackDetails()
-                  .then((details) => {
-                    if (!isMounted || !details || !details.durationMs) return;
-                    const durationSec = Math.round(details.durationMs / 1000);
-                    if (durationSec > 0) {
-                      setState((s) => {
-                        const currentTitle = s.song.title.toLowerCase().trim();
-                        const detailsTitle = details.title.toLowerCase().trim();
-                        if (
-                          currentTitle === detailsTitle ||
-                          (currentTitle.length > 2 && detailsTitle.includes(currentTitle)) ||
-                          (detailsTitle.length > 2 && currentTitle.includes(detailsTitle))
-                        ) {
-                          return {
-                            ...s,
-                            song: {
-                              ...s.song,
-                              duration: durationSec,
-                            },
-                          };
-                        }
-                        return s;
-                      });
-                    }
-                  })
-                  .catch(() => {});
-              }
+          if (trackChanged && cleanTitle && !isNativeMode) {
+            setLastKnownPositionMs(0);
+            clearPlayGuardWindow();
+            if ((payload as any).uri || (payload as any).track_id) {
+              setLastPlayedTrackUri((payload as any).uri || (payload as any).track_id);
             }
 
-            // Sinkronisasi currentTime (Isolasi Ketat Browser vs Non-Browser / Spotify):
-            // 1. Browser: Chromium tidak memperbarui TimelineProperties saat video berjalan normal.
-            //    Hanya overwrite jika trackChanged ATAU (nativePosChanged && delta > 2s && position > 0).
-            // 2. Non-Browser / Spotify: Selalu sinkronkan currentTime jika ada selisih >= 0.5s
-            //    agar waktu Casa mengunci presisi 1:1 tanpa tertinggal ticker lokal.
-            let syncedCurrentTime: number;
-            if (payload.is_browser) {
-              if (trackChanged) {
-                syncedCurrentTime = payload.position;
-                lastNativePositionRef.current = payload.position;
-              } else if (
-                nativePosChanged &&
-                Math.abs(payload.position - prev.song.currentTime) > 2 &&
-                payload.position > 0
-              ) {
-                syncedCurrentTime = payload.position;
-              } else {
-                syncedCurrentTime = prev.song.currentTime;
-              }
-            } else {
-              // Mode Non-Browser / Spotify
-              if (
-                trackChanged ||
-                Math.abs(payload.position - prev.song.currentTime) >= 0.5
-              ) {
-                syncedCurrentTime = payload.position;
-                lastNativePositionRef.current = payload.position;
-              } else {
-                syncedCurrentTime = prev.song.currentTime;
-              }
+            if (payload.is_spotify && isSpotifyUserConnected()) {
+              setTimeout(() => {
+                if (isMounted) void syncSpotifyClockSnapshot();
+              }, 350);
             }
+
+            // Presisi Durasi Spotify Web API: sinkronkan duration_ms jika tersedia
+            if (!payload.is_browser && payload.is_spotify) {
+              getCurrentlyPlayingTrackDetails()
+                .then((details) => {
+                  if (!isMounted || !details || !details.durationMs) return;
+                  const durationSec = Math.round(details.durationMs / 1000);
+                  if (durationSec > 0) {
+                    setState((s) => {
+                      const currentTitle = s.song.title.toLowerCase().trim();
+                      const detailsTitle = details.title.toLowerCase().trim();
+                      if (
+                        currentTitle === detailsTitle ||
+                        (currentTitle.length > 2 && detailsTitle.includes(currentTitle)) ||
+                        (detailsTitle.length > 2 && currentTitle.includes(detailsTitle))
+                      ) {
+                        const nowMs = Date.now();
+                        const nextDurMs = Math.round(details.durationMs);
+                        const updatedClock = reconcilePlaybackClockSnapshot(s.playbackClock, {
+                          incomingPositionMs: null,
+                          isPlaying: s.song.isPlaying,
+                          durationMs: nextDurMs,
+                          nowMs,
+                        });
+                        return {
+                          ...s,
+                          playbackClock: updatedClock,
+                          song: {
+                            ...s.song,
+                            duration: durationSec,
+                            currentTime: computeInterpolatedPositionMs(updatedClock, nowMs) / 1000,
+                          },
+                        };
+                      }
+                      return s;
+                    });
+                  }
+                })
+                .catch(() => {});
+            }
+          }
+
+          setState((s) => {
+            const sNative = s.playbackSource === 'native';
+            const nowMs = Date.now();
 
             // Presisi Durasi Spotify & Anti-Blank Scrubber Guard:
-            // Pertahankan durasi valid sebelumnya jika payload SMTC mengirimkan durasi 0, null, atau NaN
             const incomingDurationSec =
               typeof payload.duration === 'number' && !isNaN(payload.duration) && payload.duration > 0
                 ? Math.round(payload.duration)
                 : 0;
 
-            const resolvedDuration = incomingDurationSec > 0
-              ? incomingDurationSec
-              : (prev.song.duration > 0 ? prev.song.duration : 0);
+            const resolvedDuration =
+              incomingDurationSec > 0
+                ? incomingDurationSec
+                : trackChanged
+                ? 0
+                : s.song.duration > 0
+                ? s.song.duration
+                : 0;
+
+            const prevDurMs = resolvedDuration > 0 ? Math.round(resolvedDuration * 1000) : 0;
+            const prevLocalMs = computeInterpolatedPositionMs(s.playbackClock, nowMs);
+            const isBrowserStaleZero = Boolean(
+              !trackChanged && payload.is_browser && payload.position === 0 && prevLocalMs > 2000
+            );
+            const incomingPosMs =
+              isPlaybackSeekLocked() || isBrowserStaleZero
+                ? null
+                : typeof payload.position === 'number' && !isNaN(payload.position) && payload.position >= 0
+                ? Math.round(payload.position * 1000)
+                : null;
+
+            const nextClock = reconcilePlaybackClockSnapshot(s.playbackClock, {
+              incomingPositionMs: incomingPosMs,
+              isPlaying: payload.is_playing,
+              durationMs: prevDurMs,
+              nowMs,
+              forceSnap: trackChanged && !isPlaybackSeekLocked(),
+              isPositionFresh: Boolean(trackChanged || (nativePosChanged && !isBrowserStaleZero)),
+              calibrateMinorDrift: Boolean(!payload.is_browser && nativePosChanged),
+            });
+
+            const syncedCurrentTime = computeInterpolatedPositionMs(nextClock, nowMs) / 1000;
+
+            const nextLyricsData = sNative
+              ? s.lyricsData
+              : trackChanged || isSourceSwitched || isSessionSwitched
+              ? cachedLyrics || { lines: [], isSynced: false, syncType: 'none', isInstrumental: false }
+              : cachedLyrics && s.lyricsData.lines.length === 0 && !s.lyricsData.isInstrumental
+              ? cachedLyrics
+              : s.lyricsData;
 
             return {
-              ...prev,
+              ...s,
               hasNativeMedia: true,
               is_browser: Boolean(payload.is_browser),
-              session_id: payload.session_id || prev.session_id || '',
+              session_id: payload.session_id || s.session_id || '',
               active_sessions: incomingSessions,
-              activeSubPanel: prev.activeSubPanel,
-              lyricsData:
-                prev.playbackSource === 'native'
-                  ? prev.lyricsData
-                  : isSourceSwitched || isSessionSwitched
-                  ? { lines: [], isSynced: false, syncType: 'none', isInstrumental: false }
-                  : prev.lyricsData,
+              activeSubPanel: s.activeSubPanel,
+              playbackClock: nextClock,
+              lyricsData: nextLyricsData,
               isShuffle:
-                typeof payload.is_shuffle === 'boolean' ? payload.is_shuffle : prev.isShuffle,
+                typeof payload.is_shuffle === 'boolean' ? payload.is_shuffle : s.isShuffle,
               song: {
-                ...prev.song,
-                session_id: payload.session_id || prev.song.session_id || '',
-                title: cleanTitle || prev.song.title,
-                artist: payload.artist || prev.song.artist,
+                ...s.song,
+                session_id: payload.session_id || s.song.session_id || '',
+                title: cleanTitle || (trackChanged ? '' : s.song.title),
+                artist: trackChanged ? (payload.artist || '') : (payload.artist || s.song.artist),
                 isPlaying: payload.is_playing,
                 is_browser: Boolean(payload.is_browser),
                 is_spotify: Boolean(payload.is_spotify),
@@ -562,14 +755,58 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
                 currentTime: syncedCurrentTime,
                 albumArtUrl: trackChanged
                   ? payload.album_art || undefined
-                  : payload.album_art || prev.song.albumArtUrl,
+                  : payload.album_art || s.song.albumArtUrl,
                 albumArt: trackChanged
                   ? payload.album_art || undefined
-                  : payload.album_art || prev.song.albumArt,
-                lyrics: trackChanged ? { prev: '', current: '', next: '' } : prev.song.lyrics,
+                  : payload.album_art || s.song.albumArt,
+                lyrics: trackChanged && !cachedLyrics ? { prev: '', current: '', next: '' } : s.song.lyrics,
               },
             };
           });
+
+          const needsLyricsFetch =
+            !isNativeMode &&
+            validLyricsMeta &&
+            !cachedLyrics &&
+            (trackChanged ||
+              (lyricsTrackKey !== lastFetchedLyricsKeyRef.current &&
+                prev.lyricsData.lines.length === 0 &&
+                !prev.lyricsData.isInstrumental));
+
+          if (needsLyricsFetch) {
+            lyricsAbortControllerRef.current?.abort();
+            const controller = new AbortController();
+            lyricsAbortControllerRef.current = controller;
+            lastFetchedLyricsKeyRef.current = lyricsTrackKey;
+
+            fetchLyrics(cleanTitle, payload.artist || '', payload.duration, {
+              signal: controller.signal,
+              allowTitleOnlyFallback: Boolean(payload.is_browser),
+            })
+              .then((lyrics) => {
+                if (lyrics.lines.length > 0) {
+                  setCachedLyrics(cleanTitle, payload.artist || '', lyrics);
+                }
+                if (!isMounted || controller.signal.aborted) return;
+                if (lyrics.lines.length === 0 && !lyrics.isInstrumental && lastFetchedLyricsKeyRef.current === lyricsTrackKey) {
+                  lastFetchedLyricsKeyRef.current = '';
+                }
+                setState((s) => {
+                  const activeKey = buildGlobalLyricsCacheKey(s.song.title, s.song.artist);
+                  if (s.playbackSource === 'native' || (activeKey && lyricsTrackKey && activeKey !== lyricsTrackKey)) {
+                    return s;
+                  }
+                  return { ...s, lyricsData: lyrics };
+                });
+              })
+              .catch(() => {
+                if (lastFetchedLyricsKeyRef.current === lyricsTrackKey) {
+                  lastFetchedLyricsKeyRef.current = '';
+                }
+              });
+          } else if (cachedLyrics) {
+            lastFetchedLyricsKeyRef.current = lyricsTrackKey;
+          }
         });
       } catch (e) {
         console.debug('[MediaSkill] listen media-update:', e);
@@ -582,6 +819,12 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
           lastNativePositionRef.current = -1;
           setState((prev) => ({
             ...prev,
+            playbackClock: {
+              basePositionMs: 0,
+              capturedAtMs: Date.now(),
+              isPlaying: false,
+              durationMs: 0,
+            },
             hasNativeMedia: false,
             is_browser: false,
             session_id: '',
@@ -619,10 +862,17 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
             if (prev.is_browser || prev.song.is_browser) {
               return { ...prev, isSpotifyRunning: false };
             }
+            lyricsAbortControllerRef.current?.abort();
             return {
               ...prev,
               isSpotifyRunning: false,
               hasNativeMedia: false,
+              playbackClock: reconcilePlaybackClockSnapshot(prev.playbackClock, {
+                incomingPositionMs: null,
+                isPlaying: false,
+                durationMs: Math.round((prev.song.duration || 0) * 1000),
+                forceSnap: true,
+              }),
               song: { ...prev.song, isPlaying: false },
             };
           });
@@ -644,6 +894,7 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
       isMounted = false;
       lyricsAbortControllerRef.current?.abort();
       clearInterval(spotifyInterval);
+      clearInterval(spotifyClockSyncInterval);
       clearInterval(playbackTickerInterval);
       if (unlistenMediaUpdate) unlistenMediaUpdate();
       if (unlistenMediaClosed) unlistenMediaClosed();
@@ -655,28 +906,57 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
   slots: {
     ExpandedCard: ({ state, onCollapse, onUpdateState }) => {
       const currentSessionId = state.session_id || state.song.session_id || '';
+      const isBrowser = Boolean(state.is_browser || state.song?.is_browser);
+      const isDesktopSpotify = Boolean(
+        state.song?.is_spotify || state.song?.source_app?.toLowerCase().includes('spotify')
+      );
+
+      const resolveIsGenuineSpotify = async (): Promise<boolean> => {
+        if (isDesktopSpotify) return true;
+        if (isBrowser && isSpotifyUserConnected()) {
+          return verifyIsBrowserSpotify(state.song?.title, state.song?.artist);
+        }
+        return false;
+      };
 
       const handleNext = async () => {
-        if (currentSessionId) {
-          await controlMediaSession(currentSessionId, 'next');
-        } else {
-          await mediaNextTrack();
+        if ((await resolveIsGenuineSpotify()) && isSpotifyUserConnected()) {
+          const ok = await nextSpotifyTrack();
+          if (ok) return;
         }
+        if (currentSessionId) {
+          const ok = await controlMediaSession(currentSessionId, 'next');
+          if (ok) return;
+        }
+        await mediaNextTrack();
       };
 
       const handlePrevious = async () => {
         const posMs = (state.song?.currentTime ?? 0) * 1000;
         if (posMs > 3000) {
-          if (currentSessionId) {
-            await seekMediaSession(currentSessionId, 0);
+          if ((await resolveIsGenuineSpotify()) && isSpotifyUserConnected()) {
+            const ok = await seekSpotifyPlayback(0);
+            if (ok) return;
           }
+          if (currentSessionId) {
+            const seekOk = await seekMediaSession(currentSessionId, 0);
+            if (seekOk) return;
+            const prevOk = await controlMediaSession(currentSessionId, 'prev');
+            if (prevOk) return;
+          }
+          await mediaPrevTrack();
           return;
         }
-        if (currentSessionId) {
-          await controlMediaSession(currentSessionId, 'prev');
-        } else {
-          await mediaPrevTrack();
+
+        if ((await resolveIsGenuineSpotify()) && isSpotifyUserConnected()) {
+          const ok = await prevSpotifyTrack();
+          if (ok) return;
         }
+        if (currentSessionId) {
+          const ok = await controlMediaSession(currentSessionId, 'prev');
+          if (ok) return;
+        }
+        await mediaPrevTrack();
       };
 
       return (

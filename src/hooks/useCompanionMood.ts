@@ -12,11 +12,14 @@ export interface UseCompanionMoodReturn {
   wakeUp: () => void;
 }
 
-const DROWSY_DELAY_MS = 15_000; // 15 detik -> drowsy
-const SLEEP_DELAY_MS = 40_000;  // 40 detik -> sleep
-const WAKEUP_BOUNCE_DURATION_MS = 480;
+const DROWSY_DELAY_MS = 25_000; // Kept type compatibility; direct sleep transition at 35s
+const SLEEP_DELAY_MS = 35_000;  // 35 detik tanpa interaksi di Resting Mode -> sleep (30-60s range)
+const WAKEUP_BOUNCE_DURATION_MS = 420;
 
-export function useCompanionMood(initialMood: CompanionMood = 'idle'): UseCompanionMoodReturn {
+export function useCompanionMood(
+  initialMood: CompanionMood = 'awake',
+  isActive: boolean = true
+): UseCompanionMoodReturn {
   const [mood, setMood] = useState<CompanionMood>(initialMood);
   const moodRef = useRef<CompanionMood>(initialMood);
   const [isWakeupBounce, setIsWakeupBounce] = useState<boolean>(false);
@@ -38,22 +41,18 @@ export function useCompanionMood(initialMood: CompanionMood = 'idle'): UseCompan
 
   const scheduleIdleTimers = useCallback(() => {
     clearIdleTimers();
+    if (!isActive) return;
 
-    drowsyTimerRef.current = setTimeout(() => {
-      moodRef.current = 'drowsy';
-      setMood('drowsy');
-    }, DROWSY_DELAY_MS);
-
+    // Gentle transition into sleep squint after 35s of inactivity in Resting Mode
     sleepTimerRef.current = setTimeout(() => {
       moodRef.current = 'sleep';
       setMood('sleep');
     }, SLEEP_DELAY_MS);
-  }, [clearIdleTimers]);
+  }, [clearIdleTimers, isActive]);
 
   const wakeUp = useCallback(() => {
     const prevMood = moodRef.current;
 
-    // Jika sebelumnya dari status 'sleep' (atau 'drowsy'), picu micro-bounce wakeup spring
     if (prevMood === 'sleep' || prevMood === 'drowsy') {
       setIsWakeupBounce(true);
       if (bounceTimerRef.current) {
@@ -70,9 +69,10 @@ export function useCompanionMood(initialMood: CompanionMood = 'idle'): UseCompan
       setMood('awake');
     }
 
-    // Reset timer kantuk setiap ada aktivitas kursor
-    scheduleIdleTimers();
-  }, [scheduleIdleTimers]);
+    if (isActive) {
+      scheduleIdleTimers();
+    }
+  }, [scheduleIdleTimers, isActive]);
 
   const onMouseEnter = useCallback(() => {
     wakeUp();
@@ -87,14 +87,23 @@ export function useCompanionMood(initialMood: CompanionMood = 'idle'): UseCompan
   }, [scheduleIdleTimers]);
 
   useEffect(() => {
-    scheduleIdleTimers();
+    if (isActive) {
+      // Newly entered Resting Mode: start crisp & bright, then fall asleep after SLEEP_DELAY_MS
+      moodRef.current = 'awake';
+      setMood('awake');
+      scheduleIdleTimers();
+    } else {
+      clearIdleTimers();
+      moodRef.current = 'awake';
+      setMood('awake');
+    }
     return () => {
       clearIdleTimers();
       if (bounceTimerRef.current) {
         clearTimeout(bounceTimerRef.current);
       }
     };
-  }, [scheduleIdleTimers, clearIdleTimers]);
+  }, [isActive, scheduleIdleTimers, clearIdleTimers]);
 
   return {
     mood,

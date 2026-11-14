@@ -2,7 +2,9 @@ import React, { useState, useEffect, useRef, memo } from 'react';
 import { Search, X, Loader2, Music, Plus, Check } from 'lucide-react';
 import { NativeTrack, searchTracks } from '../../../services/nativeAudioService';
 import { playChimeCue } from '../../../utils/tauriBridge';
-import { MOCK_NATIVE_SEARCH_TRACKS, formatDuration } from './constants';
+import { useMusicAffinity } from '../../../hooks/useMusicAffinity';
+import { AddToPlaylistPopover } from './AddToPlaylistPopover';
+import { formatDuration } from './constants';
 
 export interface NativeSearchDrawerProps {
   isOpen: boolean;
@@ -27,6 +29,7 @@ export const NativeSearchDrawer: React.FC<NativeSearchDrawerProps> = memo(({
   const [searchResults, setSearchResults] = useState<NativeTrack[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { suggestionChips, affinityTracks, recordSearchQuery } = useMusicAffinity();
 
   // Auto focus input when drawer opens
   useEffect(() => {
@@ -68,10 +71,25 @@ export const NativeSearchDrawer: React.FC<NativeSearchDrawerProps> = memo(({
 
   if (!isOpen) return null;
 
-  const displayTracks = searchQuery.trim() ? searchResults : MOCK_NATIVE_SEARCH_TRACKS;
+  const recentOrRecommendedTracks: NativeTrack[] = affinityTracks.map((t) => ({
+    id: t.id,
+    title: t.title,
+    artist: t.artist,
+    durationSeconds: t.durationSeconds,
+    thumbnailUrl: t.thumbnailUrl,
+    albumArt: t.albumArt,
+    streamUrl: t.streamUrl,
+    candidates: t.candidates,
+    isLocal: t.isLocal,
+  }));
+
+  const displayTracks = searchQuery.trim() ? searchResults : recentOrRecommendedTracks;
 
   const handleSelectTrack = (track: NativeTrack) => {
     playChimeCue('tap');
+    if (searchQuery.trim()) {
+      recordSearchQuery(searchQuery);
+    }
     onPlayTrack(track, displayTracks);
     onClose();
   };
@@ -145,7 +163,7 @@ export const NativeSearchDrawer: React.FC<NativeSearchDrawerProps> = memo(({
               ? isSearching
                 ? 'Mencari lagu online...'
                 : `Hasil Pencarian (${searchResults.length})`
-              : 'Daftar Lagu (Rekomendasi)'}
+              : 'Rekomendasi Adaptif'}
           </span>
           {isResolvingAudio && (
             <span className="text-sky-300 font-semibold flex items-center gap-1 animate-pulse">
@@ -154,6 +172,24 @@ export const NativeSearchDrawer: React.FC<NativeSearchDrawerProps> = memo(({
             </span>
           )}
         </div>
+
+        {!searchQuery.trim() && suggestionChips.length > 0 && (
+          <div className="flex items-center gap-1 flex-wrap px-0.5 py-1">
+            {suggestionChips.map((chip) => (
+              <button
+                key={`${chip.kind}-${chip.label}`}
+                type="button"
+                onClick={() => {
+                  recordSearchQuery(chip.query);
+                  setSearchQuery(chip.query);
+                }}
+                className="px-2 py-0.5 rounded-full text-[9.5px] font-medium bg-[#18181c] hover:bg-white/15 border border-white/15 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {isSearching && searchResults.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-white/40 text-center py-4 gap-1.5">
@@ -202,6 +238,7 @@ export const NativeSearchDrawer: React.FC<NativeSearchDrawerProps> = memo(({
                 <span className="text-[10px] font-mono text-white/40 group-hover:text-sky-300/70 tabular-nums">
                   {formatDuration(track.durationSeconds)}
                 </span>
+                <AddToPlaylistPopover track={track} compact />
                 <button
                   onClick={(e) => onAddToQueue(e, track)}
                   className="w-5 h-5 rounded-md hover:bg-white/15 text-white/40 hover:text-sky-300 flex items-center justify-center transition-all active:scale-95 cursor-pointer ml-1 shrink-0"

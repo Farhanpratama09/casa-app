@@ -184,7 +184,7 @@ export const PlayerHeaderBar: React.FC<PlayerHeaderBarProps> = memo(({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-1">
                     <span className="text-[11px] font-semibold tracking-tight text-zinc-100 truncate">
-                      CASA Native Player
+                      CASA PLAYER
                     </span>
                   </div>
                   <p className="text-[9.5px] font-semibold tracking-wider uppercase text-zinc-400 leading-tight mt-0.5 truncate">
@@ -252,7 +252,7 @@ export const PlayerHeaderBar: React.FC<PlayerHeaderBarProps> = memo(({
                 ? 'bg-cyan-500/10 border-cyan-500/25 text-cyan-300 hover:bg-cyan-500/15'
                 : 'bg-[#18181c] hover:bg-[#222226] border-[#2e2e34] text-zinc-400 hover:text-zinc-200'
             }`}
-            title="Daftar Antrean Lagu (CASA Native Player)"
+            title="Daftar Antrean Lagu (CASA PLAYER)"
             aria-label="Daftar Antrean"
           >
             <QueueOrbitIcon className="w-3.5 h-3.5 text-cyan-400 shrink-0" count={isCompact ? queueLength : undefined} />

@@ -1,8 +1,54 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Montserrat:ital,wght@0,300..800;1,300..800&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --casa-timer: #F59E0B;
+  --casa-timer-glow: rgba(245, 158, 11, 0.35);
+  --casa-rest: #10B981;
+  --casa-volume: #38BDF8;
+  --casa-brightness: #FACC15;
+  --casa-cpu: #E879F9;
+  --casa-ram: #A855F7;
+  --casa-awake: #F59E0B;
+  --casa-awake-glow: rgba(245, 158, 11, 0.16);
+  --casa-danger: #F43F5E;
+  --casa-danger-glow: rgba(244, 63, 94, 0.16);
+  --casa-wifi: #2DD4BF;
+  --casa-bluetooth: #6366F1;
+}
+
+[data-casa-theme="monochrome"] {
+  --casa-timer: #FFFFFF;
+  --casa-timer-glow: rgba(255, 255, 255, 0.28);
+  --casa-rest: #D4D4D8;
+  --casa-volume: #E4E4E7;
+  --casa-brightness: #D4D4D8;
+  --casa-cpu: #FFFFFF;
+  --casa-ram: #A1A1AA;
+  --casa-awake: #FFFFFF;
+  --casa-awake-glow: rgba(255, 255, 255, 0.14);
+  --casa-danger: #F4F4F5;
+  --casa-danger-glow: rgba(244, 244, 245, 0.18);
+  --casa-wifi: #FFFFFF;
+  --casa-bluetooth: #D4D4D8;
+}
+
+[data-casa-theme="colorblind"] {
+  --casa-timer: #38BDF8;
+  --casa-timer-glow: rgba(56, 189, 248, 0.35);
+  --casa-rest: #0284C7;
+  --casa-volume: #0284C7;
+  --casa-brightness: #FDE047;
+  --casa-cpu: #38BDF8;
+  --casa-ram: #1D4ED8;
+  --casa-awake: #F59E0B;
+  --casa-awake-glow: rgba(245, 158, 11, 0.18);
+  --casa-danger: #EA580C;
+  --casa-danger-glow: rgba(234, 88, 12, 0.20);
+  --casa-wifi: #38BDF8;
+  --casa-bluetooth: #1D4ED8;
+}
 
 @layer base {
   body, html, * {
@@ -12,6 +58,7 @@
   }
 
   html, body, #root {
+    font-family: "Geist", "Inter", "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
     background: transparent !important;
     background-color: transparent !important;
     margin: 0;
@@ -21,6 +68,14 @@
     overflow: hidden;
     user-select: none;
     -webkit-user-select: none;
+  }
+
+  html[data-casa-window="settings"],
+  html[data-casa-window="settings"] body,
+  html[data-casa-window="settings"] #root {
+    background: #000000 !important;
+    background-color: #000000 !important;
+    color: #ffffff;
   }
 }
 
@@ -83,6 +138,33 @@
 .custom-scrollbar {
   scrollbar-width: thin !important;
   scrollbar-color: rgba(255, 255, 255, 0.2) transparent !important;
+}
+
+/* OLED Micro Thin Scrollbar for Mode 6 Playlists & Popovers (4px on pure #000000 canvas) */
+.oled-thin-scrollbar::-webkit-scrollbar {
+  width: 4px !important;
+  height: 4px !important;
+  display: block !important;
+}
+.oled-thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+.oled-thin-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18) !important;
+  border-radius: 9999px !important;
+  transition: background 0.15s ease;
+}
+.oled-thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.32) !important;
+}
+.oled-thin-scrollbar::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+.oled-thin-scrollbar {
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent !important;
 }
 
 /* Minimalist Cosmic Tasks Scrollbar (2px Celestial Indigo Track) */

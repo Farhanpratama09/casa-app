@@ -1,32 +1,54 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Zap } from 'lucide-react';
-import { useSkillStore } from '../../skills/store';
-import { useSystemHardware } from '../../hooks/useSystemHardware';
-import { RestingPill } from '../companion/RestingPill';
-import { CasaCompanionAvatar } from '../companion/CasaCompanionAvatar';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import {
-  BunnyHeadphonesWired,
-  BunnyHeadphonesBluetooth,
-  MoonCraterSpeaker,
-  RabbitCapsLockIcon,
-} from '../system/LunarIcons';
+  Volume2,
+  VolumeX,
+  Sun,
+  Zap,
+  BatteryCharging,
+  BatteryWarning,
+  ArrowBigUpDash,
+  Bluetooth,
+  Headphones,
+  Timer,
+  Paperclip,
+  BellRing,
+} from 'lucide-react';
+import { useSkillStore } from '../../skills/store';
+import { useTimerState } from '../../features/timer/useTimerState';
+import { useDropZoneStore } from '../../stores/useDropZoneStore';
+import { TodoItem } from '../../types/island';
+import { useSystemHardware, SystemHudAlert } from '../../hooks/useSystemHardware';
+import { useSystemTelemetry } from '../../hooks/useSystemTelemetry';
+import { BatteryPill } from '../system/BatteryPill';
+import { useCasaAudio } from '../../context/CasaAudioContext';
+import { getActiveLyrics } from '../../utils/lyricsService';
+import { RestingPill } from '../companion/RestingPill';
+import {
+  CasaCompanionAvatar,
+  resolveCompanionExpression,
+  type CompanionExpression,
+} from '../companion/CasaCompanionAvatar';
 import { TwinEqualizerGlyph } from '../system/CosmicIcons';
+import { formatDurationClock } from '../../features/timer/timerUtils';
+import { useSettingsStore } from '../../stores/useSettingsStore';
+
+const snapEvenWidth = (width: number): number => Math.max(88, Math.ceil(width / 2) * 2);
 
 interface IdlePillViewProps {
   isDualBubble?: boolean;
   isExpanded?: boolean;
   isRestingSleep?: boolean;
+  isTucked?: boolean;
   isTuckedPeek?: boolean;
+  remeasureKey?: number;
   onExpandSkill?: (skillId: string) => void;
+  onContentWidthChange?: (width: number) => void;
 }
 
 /**
- * Pure Circle Battery Ring (Mode Compact / Idle)
- * Cincin melingkar murni (Circle Only) tanpa teks angka persentase.
- * Arc melingkar proporsional (0–100%):
- * - Charging: Hijau Emerald (#34D399) + ikon petir mikro di tengah.
- * - Non-charging: Lunar Cyan (#38BDF8) bersih tanpa teks/ikon di dalamnya.
+ * Pure Circle Battery Ring (CASA v2.0 Minimalist Flat Style)
+ * Cincin melingkar proporsional (0–100%) tanpa neon glow berlebih.
  */
 export const PureCircleBattery: React.FC<{
   percentage: number;
@@ -39,40 +61,25 @@ export const PureCircleBattery: React.FC<{
   percentage,
   isCharging,
   hasBattery = true,
-  size = 18,
+  size = 16,
   className = '',
   showText = true,
 }) => {
   if (!hasBattery) return null;
 
   const center = size / 2;
-  const radius = center - 1.8;
+  const radius = center - 1.7;
   const circumference = 2 * Math.PI * radius;
   const clamped = Math.max(0, Math.min(100, Math.round(percentage)));
   const offset = circumference - (clamped / 100) * circumference;
 
-  // Meteor arc endpoint in -90deg rotated SVG coordinates:
-  const angleRad = (clamped / 100) * 2 * Math.PI;
-  const dotX = center + radius * Math.cos(angleRad);
-  const dotY = center + radius * Math.sin(angleRad);
-
   const strokeColor = isCharging
-    ? '#34D399' // Emerald charging
+    ? '#34D399'
     : clamped <= 20
-    ? '#F43F5E' // Rose low
+    ? '#F43F5E'
     : clamped <= 50
-    ? '#FBBF24' // Amber moderate
-    : '#22D3EE'; // Cyan normal (> 50%)
-
-  const glowStyle = isCharging
-    ? { filter: 'drop-shadow(0 0 3px rgba(52, 211, 153, 0.75))' }
-    : clamped <= 20
-    ? { filter: 'drop-shadow(0 0 3px rgba(244, 63, 94, 0.75))' }
-    : clamped <= 50
-    ? { filter: 'drop-shadow(0 0 3px rgba(251, 191, 36, 0.65))' }
-    : { filter: 'drop-shadow(0 0 4px rgba(34, 211, 238, 0.65))' };
-
-  const dotGlowColor = isCharging ? '#34d399' : clamped <= 20 ? '#f43f5e' : '#22d3ee';
+    ? '#FBBF24'
+    : '#E4E4E7';
 
   return (
     <div
@@ -87,54 +94,38 @@ export const PureCircleBattery: React.FC<{
           className="w-full h-full -rotate-90 transform"
           viewBox={`0 0 ${size} ${size}`}
         >
-          {/* Track orbit redup */}
           <circle
             cx={center}
             cy={center}
             r={radius}
             fill="none"
             stroke="currentColor"
-            strokeWidth="1.8"
-            className="text-white/[0.08]"
+            strokeWidth="1.7"
+            className="text-white/[0.14]"
           />
-          {/* Arc baterai terisi proporsional */}
           <circle
             cx={center}
             cy={center}
             r={radius}
             fill="none"
             stroke={strokeColor}
-            strokeWidth="1.8"
+            strokeWidth="1.7"
             strokeLinecap="round"
             strokeDasharray={circumference}
             strokeDashoffset={offset}
-            style={glowStyle}
             className="transition-all duration-500 ease-out"
           />
-          {/* Ujung Orbit Bintang (Meteor Arc Tip) */}
-          {clamped > 3 && (
-            <circle
-              cx={dotX}
-              cy={dotY}
-              r={1.2}
-              fill="#ffffff"
-              style={{ filter: `drop-shadow(0 0 4px ${dotGlowColor})` }}
-              className="transition-all duration-500 ease-out"
-            />
-          )}
         </svg>
 
-        {/* Pusat Cincin: Petir mikro saat charging */}
         {isCharging && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <Zap className="w-2.5 h-2.5 text-[#34D399] animate-pulse fill-[#34D399]/40" />
+            <Zap className="w-2.5 h-2.5 text-[#34D399] fill-[#34D399]/35" />
           </div>
         )}
       </div>
 
-      {/* Persentase Teks Angka */}
       {showText && (
-        <span className="font-sans font-medium text-[10.5px] tabular-nums text-zinc-300 leading-none">
+        <span className="font-sans font-semibold text-[11.5px] tracking-[-0.02em] tabular-nums text-white leading-none antialiased">
           {clamped}%
         </span>
       )}
@@ -142,46 +133,47 @@ export const PureCircleBattery: React.FC<{
   );
 };
 
-
-// Komponen Marquee Teks Lagu & Artis Dinamis
+// Komponen Marquee Teks Lagu Dinamis dengan Lebar Alami Deterministik
 interface MarqueeTrackProps {
   title: string;
   artist?: string;
   isPlaying?: boolean;
+  maxWidth?: number;
 }
 
-const MarqueeTrack: React.FC<MarqueeTrackProps> = ({ title, artist, isPlaying = true }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const textRef = useRef<HTMLSpanElement>(null);
-  const [isOverflowing, setIsOverflowing] = useState(false);
+const MarqueeTrack: React.FC<MarqueeTrackProps> = ({
+  title,
+  artist,
+  isPlaying = true,
+  maxWidth = 200,
+}) => {
+  const probeRef = useRef<HTMLSpanElement>(null);
+  const [textWidth, setTextWidth] = useState<number>(0);
 
-  const fullText = artist ? `${title} • ${artist}` : title;
-
-  useEffect(() => {
-    if (!isPlaying) {
-      setIsOverflowing(false);
-      return;
+  useLayoutEffect(() => {
+    if (probeRef.current) {
+      const measured = Math.ceil(probeRef.current.getBoundingClientRect().width);
+      setTextWidth(measured);
     }
-    const checkOverflow = () => {
-      if (containerRef.current && textRef.current) {
-        setIsOverflowing(textRef.current.scrollWidth > containerRef.current.clientWidth + 2);
-      }
-    };
-    checkOverflow();
-    window.addEventListener('resize', checkOverflow);
-    return () => window.removeEventListener('resize', checkOverflow);
-  }, [fullText, isPlaying]);
+  }, [title, artist]);
+
+  const isOverflowing = isPlaying && textWidth > maxWidth;
+  const boundedWidth = textWidth > 0 ? Math.min(textWidth, maxWidth) : undefined;
 
   const renderContent = (refProp?: React.Ref<HTMLSpanElement>, withSpacer = false) => (
     <span
       ref={refProp}
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap ${withSpacer ? 'pr-6' : ''}`}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap py-[1px] ${withSpacer ? 'pr-6' : ''}`}
     >
-      <span className="font-sans font-medium text-[11px] text-zinc-200 tracking-tight">{title}</span>
+      <span className="font-sans font-semibold text-[12px] leading-[1.35] text-white tracking-[-0.02em] antialiased">
+        {title}
+      </span>
       {artist && (
         <>
           <span className="text-zinc-600 select-none text-[10px]">•</span>
-          <span className="font-sans font-medium text-[11px] text-zinc-400 tracking-wide">{artist}</span>
+          <span className="font-sans font-normal text-[11.5px] leading-[1.35] text-zinc-400 tracking-[-0.02em] antialiased">
+            {artist}
+          </span>
         </>
       )}
     </span>
@@ -189,20 +181,35 @@ const MarqueeTrack: React.FC<MarqueeTrackProps> = ({ title, artist, isPlaying = 
 
   return (
     <div
-      ref={containerRef}
-      className={`min-w-0 overflow-hidden whitespace-nowrap relative select-none ${
+      style={boundedWidth !== undefined ? { width: boundedWidth } : undefined}
+      className={`relative min-w-0 max-w-full overflow-hidden whitespace-nowrap select-none ${
         isOverflowing
           ? '[mask-image:linear-gradient(to_right,transparent,black_8px,black_calc(100%-8px),transparent)] [-webkit-mask-image:linear-gradient(to_right,transparent,black_8px,black_calc(100%-8px),transparent)]'
           : ''
       }`}
     >
+      {/* Hidden intrinsic width probe matching exact font weights & tracking */}
+      <span
+        ref={probeRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute invisible left-0 top-0 whitespace-nowrap inline-flex items-center gap-1.5"
+      >
+        <span className="font-sans font-semibold text-[12px] tracking-[-0.02em]">{title}</span>
+        {artist && (
+          <>
+            <span className="text-[10px]">•</span>
+            <span className="font-sans font-normal text-[11.5px] tracking-[-0.02em]">{artist}</span>
+          </>
+        )}
+      </span>
+
       {isOverflowing ? (
         <div className="inline-flex animate-lyrics-marquee">
-          {renderContent(textRef, true)}
+          {renderContent(undefined, true)}
           {renderContent(undefined, true)}
         </div>
       ) : (
-        renderContent(textRef, false)
+        renderContent(undefined, false)
       )}
     </div>
   );
@@ -211,10 +218,16 @@ const MarqueeTrack: React.FC<MarqueeTrackProps> = ({ title, artist, isPlaying = 
 export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
   isExpanded = false,
   isRestingSleep = false,
-  isTuckedPeek = false,
+  isTucked = false,
+  remeasureKey = 0,
   onExpandSkill,
+  onContentWidthChange,
 }) => {
+  const measureRef = useRef<HTMLDivElement>(null);
+  const lastReportedWidthRef = useRef<number>(0);
+
   const mediaState = useSkillStore((s) => s.skillStates['core.media']);
+  const casaAudio = useCasaAudio();
   const song = mediaState?.song;
   const playbackSource = mediaState?.playbackSource || 'companion';
   const nativeTrack = mediaState?.nativeTrack;
@@ -224,137 +237,129 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
     ? Boolean(isNativePlaying && nativeTrack)
     : Boolean(song?.isPlaying && song?.title && song.title.trim() !== '');
 
+  const isIdleLyricsEnabled = Boolean(mediaState?.showIdleLyrics);
+  const activeLyricsResult =
+    playbackSource === 'native'
+      ? casaAudio.lyricsData || mediaState?.lyricsData
+      : mediaState?.lyricsData;
+  const livePositionSec =
+    playbackSource === 'native' ? casaAudio.currentTime : (song?.currentTime ?? 0);
+
+  let activeLyricText = '';
+  if (
+    isPlaying &&
+    isIdleLyricsEnabled &&
+    activeLyricsResult?.isSynced &&
+    Array.isArray(activeLyricsResult.lines) &&
+    activeLyricsResult.lines.length > 0
+  ) {
+    const active = getActiveLyrics(
+      activeLyricsResult.lines,
+      livePositionSec,
+      0.35,
+      activeLyricsResult.offsetSeconds || 0
+    );
+    if (active.current && active.current.trim() !== '') {
+      activeLyricText = active.current.trim();
+    }
+  }
+
   const isSpotifyActive = Boolean(
     playbackSource !== 'native' &&
     (song?.is_spotify || (mediaState?.isSpotifyRunning && !mediaState?.is_browser))
   );
 
-  // Akses langsung state timer dari store (BUKAN .timerState)
+  // Akses langsung state timer dari store
   const timerState = useSkillStore((s) => s.skillStates['core.timer']);
+  const { addFiveMinutes, dismissAlarm } = useTimerState();
+  const todos: TodoItem[] = useSkillStore((s) => s.skillStates['core.todo']?.todos || []);
   const isTimerActive = Boolean(timerState?.isActive);
+  const isAlarmRinging = Boolean(timerState?.isAlarmRinging);
+  const isTimerPaused = Boolean(timerState?.isPaused);
+  const timerRemaining = timerState?.remainingSeconds ?? 0;
+  const timerTotal = timerState?.totalSeconds ?? 25 * 60;
+
+  const focusedTask = useMemo(() => {
+    const targetId = timerState?.focusedTaskId;
+    if (targetId) {
+      const byFocus = todos.find((t) => !t.completed && t.id === targetId);
+      if (byFocus) return byFocus;
+    }
+    return todos.find((t) => !t.completed && t.isPinned) || null;
+  }, [todos, timerState?.focusedTaskId]);
+
+  const timerLabel = focusedTask
+    ? focusedTask.text
+    : timerState?.mode === 'rest'
+    ? 'Break Timer'
+    : 'Focus Timer';
+
+  const timerProgress =
+    timerTotal > 0 ? Math.max(0, Math.min(1, 1 - timerRemaining / timerTotal)) : 0;
 
   // Digital Clock & Tabular Date
   const [timeStr, setTimeStr] = useState('');
   const [dateStr, setDateStr] = useState('');
 
-  // Hardware Telemetry & Dynamic Morphing Alert
-  const { telemetry } = useSystemHardware();
-  const [activeAlert, setActiveAlert] = useState<{
-    id: number;
-    icon: React.ReactNode;
-    text: string;
-    colorClass: string;
-    bgClass: string;
-    borderClass: string;
-  } | null>(null);
-  const alertTimerRef = useRef<NodeJS.Timeout | null>(null);
-
-  const prevCapsRef = useRef(telemetry.is_caps_locked);
-  const prevChargingRef = useRef(telemetry.is_charging);
-  const prevDeviceRef = useRef(telemetry.audio_device_name);
-  const isInitialMount = useRef(true);
+  // Shared Hardware Telemetry & Interactive Transient System HUD (2.5s interrupt)
+  const {
+    hudAlert,
+    telemetry,
+    setHudInteracting,
+    setMasterVolume,
+    setBrightness,
+  } = useSystemHardware();
+  const isKeepAwake = Boolean(telemetry.stay_awake);
+  const idlePillStyle = useSettingsStore().settings.idlePillStyle;
+  const useClockPill = idlePillStyle === 'clock';
+  const { stats: systemStats, isLoaded: systemStatsLoaded } = useSystemTelemetry(false);
+  const [showBatteryTransient, setShowBatteryTransient] = useState(false);
+  const prevPluggedInRef = useRef<boolean | null>(null);
+  const batteryTransientTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // 0. Cold boot guard: Jangan picu false alert pada inisialisasi awal
-    if (isInitialMount.current) {
-      prevCapsRef.current = telemetry.is_caps_locked;
-      prevChargingRef.current = telemetry.is_charging;
-      prevDeviceRef.current = telemetry.audio_device_name;
-
-      // Baseline terbentuk setelah telemetry OS pertama kali diterima (bukan placeholder default)
-      if (telemetry.audio_device_name && telemetry.audio_device_name !== 'Default Audio Device') {
-        isInitialMount.current = false;
-      }
+    if (!systemStatsLoaded || !systemStats.battery.has_battery) {
       return;
     }
+    const currentPlugged = systemStats.battery.is_plugged_in;
+    if (prevPluggedInRef.current === null) {
+      prevPluggedInRef.current = currentPlugged;
+      return;
+    }
+    if (prevPluggedInRef.current !== currentPlugged) {
+      prevPluggedInRef.current = currentPlugged;
+      setShowBatteryTransient(true);
+      if (batteryTransientTimerRef.current) {
+        clearTimeout(batteryTransientTimerRef.current);
+      }
+      batteryTransientTimerRef.current = setTimeout(() => {
+        setShowBatteryTransient(false);
+        batteryTransientTimerRef.current = null;
+      }, 3500);
+    }
+  }, [systemStatsLoaded, systemStats.battery.has_battery, systemStats.battery.is_plugged_in]);
 
-    let triggeredAlert: {
-      id: number;
-      icon: React.ReactNode;
-      text: string;
-      colorClass: string;
-      bgClass: string;
-      borderClass: string;
-    } | null = null;
+  useEffect(() => {
+    return () => {
+      if (batteryTransientTimerRef.current) {
+        clearTimeout(batteryTransientTimerRef.current);
+      }
+    };
+  }, []);
+  const hudBarRef = useRef<HTMLDivElement>(null);
+  const [isDraggingHud, setIsDraggingHud] = useState(false);
 
-    // 1. Caps Lock State Change
-    if (prevCapsRef.current !== telemetry.is_caps_locked) {
-      prevCapsRef.current = telemetry.is_caps_locked;
-      triggeredAlert = {
-        id: Date.now(),
-        icon: (
-          <RabbitCapsLockIcon
-            isActive={telemetry.is_caps_locked}
-            size={13}
-            className={`shrink-0 ${telemetry.is_caps_locked ? 'text-[#c084fc]' : 'text-zinc-500'}`}
-          />
-        ),
-        text: telemetry.is_caps_locked ? 'CAPS LOCK AKTIF' : 'CAPS LOCK NONAKTIF',
-        colorClass: telemetry.is_caps_locked ? 'text-[#c084fc]' : 'text-white/70',
-        borderClass: telemetry.is_caps_locked ? 'border-[rgba(192,132,252,0.4)]' : 'border-white/20',
-        bgClass: telemetry.is_caps_locked
-          ? 'bg-[rgba(192,132,252,0.15)] shadow-[0_0_12px_rgba(192,132,252,0.35)]'
-          : 'bg-white/[0.08]',
-      };
+  const updateHudSliderFromPointer = (clientX: number, alert: SystemHudAlert) => {
+    const rect = hudBarRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const nextVal = Math.round(ratio * 100);
+    if (alert.kind === 'volume' || alert.kind === 'mute') {
+      void setMasterVolume(nextVal);
+    } else if (alert.kind === 'brightness') {
+      void setBrightness(nextVal);
     }
-    // 2. Charger Connect / Disconnect
-    else if (prevChargingRef.current !== telemetry.is_charging) {
-      prevChargingRef.current = telemetry.is_charging;
-      triggeredAlert = {
-        id: Date.now(),
-        icon: (
-          <Zap className="w-3 h-3 text-[#34D399] shrink-0 animate-pulse fill-[#34D399]/30" />
-        ),
-        text: telemetry.is_charging
-          ? `CHARGING • ${telemetry.battery_percentage}%`
-          : `BATTERY • ${telemetry.battery_percentage}%`,
-        colorClass: telemetry.is_charging ? 'text-emerald-300' : 'text-sky-300',
-        borderClass: telemetry.is_charging ? 'border-emerald-500/40' : 'border-sky-500/40',
-        bgClass: telemetry.is_charging
-          ? 'bg-emerald-500/15 shadow-[0_0_12px_rgba(52,211,153,0.35)]'
-          : 'bg-sky-500/15 shadow-[0_0_12px_rgba(56,189,248,0.25)]',
-      };
-    }
-    // 3. Audio Endpoint Connect / Switch (hanya picu saat berpindah perangkat riil, bukan transisi dari placeholder default)
-    else if (
-      prevDeviceRef.current &&
-      prevDeviceRef.current !== 'Default Audio Device' &&
-      prevDeviceRef.current !== telemetry.audio_device_name
-    ) {
-      prevDeviceRef.current = telemetry.audio_device_name;
-      const IconComp =
-        telemetry.audio_device_type === 'headphone_bluetooth'
-          ? BunnyHeadphonesBluetooth
-          : telemetry.audio_device_type === 'headphone_wired'
-          ? BunnyHeadphonesWired
-          : MoonCraterSpeaker;
-      triggeredAlert = {
-        id: Date.now(),
-        icon: <IconComp size={13} className="w-3.5 h-3.5 shrink-0 text-sky-400" />,
-        text: `AUDIO: ${telemetry.audio_device_name}`,
-        colorClass: 'text-sky-300',
-        borderClass: 'border-sky-500/40',
-        bgClass: 'bg-sky-500/15 shadow-[0_0_12px_rgba(56,189,248,0.35)]',
-      };
-    } else {
-      prevDeviceRef.current = telemetry.audio_device_name;
-    }
-
-    if (triggeredAlert) {
-      if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
-      setActiveAlert(triggeredAlert);
-      alertTimerRef.current = setTimeout(() => {
-        setActiveAlert(null);
-        alertTimerRef.current = null;
-      }, 2500); // 2.5s auto-dismiss
-    }
-  }, [
-    telemetry.is_caps_locked,
-    telemetry.is_charging,
-    telemetry.audio_device_name,
-    telemetry.battery_percentage,
-    telemetry.audio_device_type,
-  ]);
+  };
 
   useEffect(() => {
     const updateTime = () => {
@@ -375,285 +380,700 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  // =========================================================================
-  // VIEW 2: MUSIK AKTIF (Stabil 380px — Anti Berubah-Ubah ke Mata)
-  // Layout: [ MoonRabbitEmblem ] [ C Λ S Λ ] | [ Jam Digital • Tanggal ] | [ Judul Lagu (Marquee) + Equalizer Anchor ]
-  // Di luar bar di sebelah kanan, piringan satelit vinyl berputar aktif.
-  // =========================================================================
-  if (isPlaying) {
-    const trackTitle = playbackSource === 'native'
-      ? (nativeTrack?.title || 'Playing Media')
-      : (song?.title || 'Playing Media');
+  // Derive active Mode 1-5, 2.5s Transient System HUD, or Priority Focus Alarm Takeover
+  const hasLaptopBattery = systemStatsLoaded
+    ? systemStats.battery.has_battery
+    : telemetry.has_battery;
+  const laptopBatteryPct = systemStatsLoaded
+    ? systemStats.battery.percent
+    : telemetry.battery_percentage;
+  const laptopBatteryCharging = systemStatsLoaded
+    ? (systemStats.battery.is_charging || systemStats.battery.is_plugged_in)
+    : telemetry.is_charging;
+  const isLowBatteryExpression = Boolean(
+    hasLaptopBattery && !laptopBatteryCharging && laptopBatteryPct < 15
+  );
 
-    const rawArtist = playbackSource === 'native'
-      ? (nativeTrack?.artist || '')
-      : (song?.artist || '');
+  const companionExpression: CompanionExpression = resolveCompanionExpression({
+    isAlarmRinging,
+    isTimerRunning: isTimerActive && !isTimerPaused,
+    isPlaying,
+    keepAwake: isKeepAwake,
+    hasBattery: hasLaptopBattery,
+    batteryLevel: laptopBatteryPct,
+    isCharging: laptopBatteryCharging,
+  });
 
-    const artistName =
-      rawArtist && rawArtist.trim() !== '' && rawArtist !== 'Unknown Artist'
-        ? rawArtist
-        : '';
+  const isRestingMode =
+    !isAlarmRinging &&
+    !isPlaying &&
+    !isTimerActive &&
+    isRestingSleep &&
+    !isKeepAwake &&
+    !isLowBatteryExpression &&
+    !hudAlert &&
+    !useClockPill;
+  const activeModeKey = isAlarmRinging
+    ? 'alarm-takeover'
+    : hudAlert
+    ? 'system-hud'
+    : isPlaying && isTimerActive
+    ? 'dual-idle'
+    : isPlaying
+    ? 'music-idle'
+    : isTimerActive
+    ? 'timer-idle'
+    : isRestingMode
+    ? 'resting'
+    : 'idle';
 
-    return (
-      <div
-        className={`relative w-[380px] h-[38px] px-3.5 py-1.5 select-none mx-auto flex items-center shrink-0 ${
-          isExpanded ? 'pointer-events-none' : ''
-        }`}
-      >
-        {/* Sisi Kiri: Maskot Interaktif Vibing Companion (Always Awake/Alert in Status Bar) */}
-        <div className="flex items-center h-7 pt-0.5 shrink-0 overflow-visible" title="CASA Companion">
-          <CasaCompanionAvatar isPlaying={isPlaying} mood="awake" />
-        </div>
+  // ResizeObserver + intrinsic measurement -> rounded UP to even integer for crisp DPI alignment
+  const reportMeasuredWidth = () => {
+    if (isTucked) return;
+    const el = measureRef.current;
+    if (!el || !onContentWidthChange) return;
+    const rawW = el.getBoundingClientRect().width;
+    const evenW = snapEvenWidth(rawW);
+    if (evenW !== lastReportedWidthRef.current) {
+      lastReportedWidthRef.current = evenW;
+      onContentWidthChange(evenW);
+    }
+  };
 
-        {/* Separator 1 */}
-        <span className="h-3 w-[1px] bg-white/[0.08] mx-2.5 shrink-0" aria-hidden="true" />
+  useLayoutEffect(() => {
+    reportMeasuredWidth();
+  });
 
-        {/* Tengah: Jam Digital & Tanggal / Dynamic Morphing Alert */}
-        <div
-          data-idle-clock-date="true"
-          className="flex items-center shrink-0 tabular-nums select-none"
-        >
-          <AnimatePresence mode="wait">
-            {activeAlert ? (
-              <motion.div
-                key={`playing-alert-${activeAlert.id}`}
-                initial={{ opacity: 0, y: 5, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -5, scale: 0.95 }}
-                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                className={`h-[22px] px-2 rounded-full border flex items-center gap-1 select-none ${activeAlert.bgClass} ${activeAlert.borderClass}`}
-              >
-                {activeAlert.icon}
-                <span
-                  className={`font-sans text-[8.5px] tracking-[0.12em] uppercase font-bold truncate max-w-[130px] ${activeAlert.colorClass}`}
-                >
-                  {activeAlert.text}
-                </span>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="playing-clock"
-                initial={{ opacity: 0, y: -5 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 5 }}
-                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                className="flex items-center tabular-nums"
-              >
-                <span className="font-sans font-medium text-[12px] tracking-tight text-zinc-100 tabular-nums antialiased">
-                  {timeStr || '19:13'}
-                </span>
-                <span className="text-white/25 mx-1.5">•</span>
-                <span className="font-sans font-medium text-[11.5px] text-zinc-300 tracking-normal antialiased tabular-nums">
-                  {dateStr}
-                </span>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+  useEffect(() => {
+    if (isTucked) {
+      lastReportedWidthRef.current = 0;
+      return;
+    }
+    const rafId = requestAnimationFrame(() => {
+      reportMeasuredWidth();
+    });
+    const el = measureRef.current;
+    if (!el || !onContentWidthChange) {
+      return () => cancelAnimationFrame(rafId);
+    }
 
-        {/* Separator 2: Simetris dengan ml-2.5 */}
-        <span className="h-3 w-[1px] bg-white/10 ml-2.5 shrink-0" aria-hidden="true" />
+    const observer = new ResizeObserver(() => {
+      reportMeasuredWidth();
+    });
+    observer.observe(el);
+    return () => {
+      cancelAnimationFrame(rafId);
+      observer.disconnect();
+    };
+  }, [onContentWidthChange, isTucked, remeasureKey]);
 
-        {/* Sisi Kanan: Mengalir wajar dari divider (ml-2.5, tanpa ml-auto) */}
-        <div
+  const trackTitle = playbackSource === 'native'
+    ? (nativeTrack?.title || 'Playing Media')
+    : (song?.title || 'Playing Media');
+
+  const rawArtist = playbackSource === 'native'
+    ? (nativeTrack?.artist || '')
+    : (song?.artist || '');
+
+  const artistName =
+    rawArtist && rawArtist.trim() !== '' && rawArtist !== 'Unknown Artist'
+      ? rawArtist
+      : '';
+
+  const timerText = formatDurationClock(timerRemaining);
+  const showLyricFocus = Boolean(isIdleLyricsEnabled && activeLyricText);
+  const parkedFileCount = useDropZoneStore((s) => s.items.length);
+  const dropZoneIdleBadge =
+    parkedFileCount > 0 ? (
+      <>
+        <span className="h-3 w-[1px] bg-white/[0.14] shrink-0" aria-hidden="true" />
+        <button
+          type="button"
           onClick={(e) => {
             if (isExpanded) return;
             e.stopPropagation();
-            if (onExpandSkill) {
-              onExpandSkill('core.media');
-            }
+            onExpandSkill?.('core.drop_zone');
           }}
-          className={`flex items-center gap-2.5 ml-2.5 min-w-0 max-w-[180px] ${
+          title={`${parkedFileCount} berkas di Drop Zone (Klik untuk buka)`}
+          className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10.5px] font-medium text-white/80 hover:text-white hover:bg-white/[0.08] transition-colors shrink-0 ${
             isExpanded ? 'pointer-events-none' : 'cursor-pointer'
           }`}
-          title={artistName ? `${trackTitle} • ${artistName}` : trackTitle}
         >
-          {/* Wadah Teks */}
-          <div
-            className="flex-1 min-w-0 overflow-hidden text-xs select-none"
-          >
-            <MarqueeTrack title={trackTitle} artist={artistName} isPlaying={isPlaying} />
-          </div>
+          <Paperclip className="w-3 h-3 text-white/65 shrink-0" aria-hidden="true" />
+          <span className="font-mono text-[10.5px] tabular-nums leading-none">
+            {parkedFileCount}
+          </span>
+        </button>
+      </>
+    ) : null;
+  const ringRadius = 5;
+  const ringCircumference = 2 * Math.PI * ringRadius;
+  const ringDashOffset = ringCircumference * (1 - timerProgress);
 
-          {/* Equalizer Terkunci & Pure Circle Battery Ring */}
-          <div className="shrink-0 flex items-center gap-2">
-            <TwinEqualizerGlyph active={isPlaying} isSpotify={isSpotifyActive} />
-            {telemetry.has_battery && (
-              <PureCircleBattery
-                percentage={telemetry.battery_percentage}
-                isCharging={telemetry.is_charging}
-                hasBattery={telemetry.has_battery}
-                size={18}
-              />
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const showBatteryInIdle =
+    systemStats.battery.has_battery &&
+    (showBatteryTransient || systemStats.battery.status === 'low');
 
-  // =========================================================================
-  // VIEW 3: TIMER AKTIF & MUSIK MATI (Stabil 350px)
-  // Layout: [ MoonRabbitEmblem ] [ C Λ S Λ ] | [ Jam • Tanggal ] | [ 24:15 ⏱ Lunar Sky ]
-  // Teks countdown tampil permanen dan tidak pernah hilang/menciut ke mata.
-  // =========================================================================
-  if (isTimerActive) {
+  const showRamWarningDot =
+    !hudAlert && !showBatteryTransient && systemStats.ram_percent >= 90;
+
+  const idleBatterySlot = showBatteryInIdle ? (
+    <>
+      <span className="h-3 w-[1px] bg-white/[0.14] shrink-0" aria-hidden="true" />
+      <BatteryPill
+        battery={systemStats.battery}
+        showPercentage={true}
+        statusLabel={showBatteryTransient}
+      />
+    </>
+  ) : null;
+
+  const idleRamWarningDot = showRamWarningDot ? (
+    <span
+      style={{
+        backgroundColor: 'var(--casa-danger, #EF4444)',
+        boxShadow: '0 0 6px var(--casa-danger-glow, rgba(248,113,113,0.75))',
+      }}
+      className="w-1.5 h-1.5 rounded-full shrink-0"
+      title={`Penggunaan RAM tinggi: ${Math.round(systemStats.ram_percent)}%`}
+      aria-label={`RAM usage high ${Math.round(systemStats.ram_percent)}%`}
+    />
+  ) : null;
+
+  const renderHudGlyph = (alert: SystemHudAlert) => {
+    switch (alert.kind) {
+      case 'volume':
+        return (
+          <Volume2
+            className="w-3.5 h-3.5 shrink-0"
+            style={{
+              color: alert.isActive
+                ? 'var(--casa-volume, #38BDF8)'
+                : 'var(--casa-danger, #F43F5E)',
+            }}
+          />
+        );
+      case 'mute':
+        return alert.isActive ? (
+          <VolumeX
+            className="w-3.5 h-3.5 shrink-0"
+            style={{ color: 'var(--casa-danger, #F43F5E)' }}
+          />
+        ) : (
+          <Volume2
+            className="w-3.5 h-3.5 shrink-0"
+            style={{ color: 'var(--casa-volume, #38BDF8)' }}
+          />
+        );
+      case 'brightness':
+        return (
+          <Sun
+            className="w-3.5 h-3.5 shrink-0"
+            style={{ color: 'var(--casa-brightness, #FACC15)' }}
+          />
+        );
+      case 'charging':
+        return alert.isActive ? (
+          <BatteryCharging className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+        ) : (
+          <Zap className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+        );
+      case 'low_battery':
+        return <BatteryWarning className="w-3.5 h-3.5 text-rose-400 shrink-0" />;
+      case 'caps_lock':
+        return (
+          <ArrowBigUpDash
+            className={`w-3.5 h-3.5 shrink-0 ${alert.isActive ? 'text-sky-400' : 'text-white/55'}`}
+          />
+        );
+      case 'bluetooth':
+        return (
+          <Bluetooth
+            className={`w-3.5 h-3.5 shrink-0 ${alert.isActive ? 'text-sky-400' : 'text-zinc-400'}`}
+          />
+        );
+      case 'audio_output':
+        return alert.audioOutputKind === 'bluetooth' ? (
+          <Bluetooth className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+        ) : alert.audioOutputKind === 'wired' ? (
+          <Headphones className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
+        ) : (
+          <Volume2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+        );
+    }
+  };
+
+  if (isTucked) {
     return (
       <div
-        className={`relative w-[350px] h-[38px] px-3.5 select-none mx-auto flex items-center justify-between gap-2.5 shrink-0 ${
-          isExpanded ? 'pointer-events-none' : ''
-        }`}
-      >
-        {/* Sisi Kiri: Maskot Interaktif Vibing Companion (Always Awake/Alert in Status Bar) */}
-        <div className="flex items-center h-7 pt-0.5 shrink-0 overflow-visible" title="CASA Companion">
-          <CasaCompanionAvatar isPlaying={isPlaying} mood="awake" />
-        </div>
-
-        {/* Separator */}
-        <span className="h-3 w-[1px] bg-white/[0.08] shrink-0" aria-hidden="true" />
-
-        {/* Tengah: Jam Digital & Tanggal / Dynamic Morphing Alert */}
-        <div
-          data-idle-clock-date="true"
-          className="flex items-center shrink-0 tabular-nums select-none"
-        >
-          <AnimatePresence mode="wait">
-            {activeAlert ? (
-              <motion.div
-                key={`playing-alert-${activeAlert.id}`}
-                initial={{ opacity: 0, y: 5, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -5, scale: 0.95 }}
-                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                className={`h-[22px] px-2 rounded-full border flex items-center gap-1 select-none ${activeAlert.bgClass} ${activeAlert.borderClass}`}
-              >
-                {activeAlert.icon}
-                <span
-                  className={`font-sans text-[8.5px] tracking-[0.12em] uppercase font-bold truncate max-w-[130px] ${activeAlert.colorClass}`}
-                >
-                  {activeAlert.text}
-                </span>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="playing-clock"
-                initial={{ opacity: 0, y: -5 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 5 }}
-                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                className="flex items-center tabular-nums"
-              >
-                <span className="font-sans font-medium text-[12px] tracking-tight text-zinc-100 tabular-nums antialiased">
-                  {timeStr || '19:13'}
-                </span>
-                <span className="text-white/25 mx-1.5">•</span>
-                <span className="font-sans font-medium text-[11.5px] text-zinc-300 tracking-normal antialiased tabular-nums">
-                  {dateStr}
-                </span>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* Separator */}
-        <span className="h-3 w-[1px] bg-white/[0.08] shrink-0" aria-hidden="true" />
-
-        {/* Sisi Kanan: Persentase Baterai + Indikator Timer [80% ⚡] • [☽ 21m] (Graceful Collapse) */}
-        <div className={`shrink-0 flex items-center gap-2 justify-end ${isExpanded ? 'pointer-events-none' : ''}`}>
-          {telemetry.has_battery && (
-            <PureCircleBattery
-              percentage={telemetry.battery_percentage}
-              isCharging={telemetry.is_charging}
-              hasBattery={telemetry.has_battery}
-              size={18}
-              showText={true}
-            />
-          )}
-
-          <span className="text-white/20 select-none text-[9px]">•</span>
-
-          {/* Indikator Timer Astral Periwinkle (#818cf8) */}
-          <div
-            onClick={(e) => {
-              e.stopPropagation();
-              if (onExpandSkill) {
-                onExpandSkill('core.timer');
-              }
-            }}
-            className="flex items-center gap-1 shrink-0 cursor-pointer select-none px-2 py-0.5 rounded-full hover:bg-[#818cf8]/15 border border-[#818cf8]/20 transition-colors text-[#818cf8]"
-            title={`Pomodoro Timer: ${Math.floor((timerState?.remainingSeconds ?? 0) / 60)}:${((timerState?.remainingSeconds ?? 0) % 60).toString().padStart(2, '0')}`}
-            role="button"
-            aria-label="Pomodoro Timer"
-          >
-            <span className="text-[#818cf8] text-[11px] leading-none select-none font-bold">☽</span>
-            <span className="font-sans font-semibold text-[11px] tabular-nums tracking-tight leading-none text-[#818cf8]">
-              {(() => {
-                const rem = timerState?.remainingSeconds ?? 0;
-                if (rem <= 0) return '0m';
-                if (rem < 60) return `${rem}s`;
-                return `${Math.ceil(rem / 60)}m`;
-              })()}
-            </span>
-          </div>
-        </div>
-      </div>
+        ref={measureRef}
+        aria-hidden="true"
+        className="opacity-0 pointer-events-none invisible w-0 h-0 overflow-hidden"
+      />
     );
   }
 
-  // =========================================================================
-  // VIEW 4: HENING TOTAL (Musik Mati & Timer Mati)
-  // Continuous Single Wrapper: Smooth crossfade antara SashaEyes (Resting 168px)
-  // dan Jam Digital (Awake 290px) tanpa unmount mendadak!
-  // =========================================================================
   return (
     <div
-      className={`relative w-full h-[38px] flex items-center justify-center select-none mx-auto shrink-0 overflow-hidden ${
+      ref={measureRef}
+      className={`inline-flex items-center justify-center w-max h-full select-none mx-auto shrink-0 ${
         isExpanded ? 'pointer-events-none' : ''
       }`}
     >
-      {/* Sub-layer 1: RestingPill (True Resting with CasaCompanionEyes) */}
-      <div
-        data-resting-capsule="true"
-        className={`absolute inset-0 flex items-center justify-center transition-opacity duration-300 ${
-          isExpanded || !isRestingSleep
-            ? 'opacity-0 pointer-events-none'
-            : 'opacity-100 pointer-events-auto'
-        }`}
-      >
-        <RestingPill />
-      </div>
-
-      {/* Sub-layer 2: Jam Digital & Hari Tanggal + Mini Circular Battery Ring (Awake 240px Compact) */}
-      <div
-        className={`absolute inset-0 w-[240px] px-3.5 py-1.5 mx-auto flex items-center justify-between transition-opacity duration-300 ${
-          isExpanded || isRestingSleep
-            ? 'opacity-0 pointer-events-none'
-            : 'opacity-100 pointer-events-auto'
-        }`}
-      >
-        {/* Sisi Kiri: Alur Flex Rapat [Avatar | Jam · Tanggal] (Anti-Jurang Kosong) */}
-        <div className="flex items-center gap-2.5 shrink-0 select-none">
-          <div className="flex items-center h-7 shrink-0 overflow-visible" title="CASA Companion">
-            <CasaCompanionAvatar isPlaying={isPlaying} mood="awake" />
+      {activeModeKey === 'alarm-takeover' ? (
+        /* PRIORITY BANNER TAKEOVER: Focus Timer "Time's Up!" (~360px OLED + Warm Amber) */
+        <motion.div
+          key="mode-alarm-takeover"
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+          onClick={(e) => {
+            if (isExpanded) return;
+            e.stopPropagation();
+            onExpandSkill?.('core.timer');
+          }}
+          className={`w-[360px] px-3.5 h-full flex items-center justify-between gap-2.5 bg-[#000000] select-none ${
+            isExpanded ? 'pointer-events-none' : 'cursor-pointer'
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            {!useClockPill ? (
+              <CasaCompanionAvatar isPlaying={false} expression="alarm" />
+            ) : (
+              <BellRing
+                style={{ color: 'var(--casa-timer, #F59E0B)' }}
+                className="w-4 h-4 animate-pulse shrink-0"
+                aria-hidden="true"
+              />
+            )}
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <span
+                style={{ color: 'var(--casa-timer, #F59E0B)' }}
+                className="font-sans text-[11.5px] font-bold tracking-tight whitespace-nowrap shrink-0"
+              >
+                Time&apos;s Up!
+              </span>
+              <span className="text-zinc-600 text-[10px] shrink-0">·</span>
+              <span className="font-sans text-[11px] font-medium text-white/90 truncate">
+                {focusedTask ? focusedTask.text : 'Focus Session Complete'}
+              </span>
+            </div>
           </div>
-          <span className="text-white/20 select-none text-xs font-light leading-none shrink-0" aria-hidden="true">|</span>
-          <span className="text-xs font-medium text-white/90 whitespace-nowrap tabular-nums shrink-0">
-            {timeStr || '19:13'} <span className="text-white/40 font-normal">· {dateStr}</span>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                addFiveMinutes();
+              }}
+              style={{ backgroundColor: 'var(--casa-timer, #F59E0B)' }}
+              className="h-[22px] px-2 rounded-full hover:brightness-110 text-black font-sans text-[10px] font-bold transition-all cursor-pointer active:scale-95"
+              title="Tambah 5 menit & lanjutkan"
+            >
+              +5m
+            </button>
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                dismissAlarm();
+              }}
+              className="h-[22px] px-2 rounded-full bg-white/[0.10] hover:bg-white/[0.20] border border-white/15 text-white font-sans text-[10px] font-semibold transition-colors cursor-pointer active:scale-95"
+              title="Matikan alarm & reset preset"
+            >
+              Dismiss
+            </button>
+          </div>
+        </motion.div>
+      ) : activeModeKey === 'system-hud' && hudAlert ? (
+        /* TRANSIENT SYSTEM HUD (2.5s Interaktif di Pil Atas) */
+        <motion.div
+          key={`mode-hud-${hudAlert.kind}`}
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.96 }}
+          transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+          onMouseEnter={() => setHudInteracting(true)}
+          onMouseLeave={() => {
+            if (!isDraggingHud) setHudInteracting(false);
+          }}
+          className="px-3.5 h-full flex items-center gap-2.5 select-none"
+        >
+          {renderHudGlyph(hudAlert)}
+          <span className="font-sans text-[11.5px] font-semibold tracking-tight text-white whitespace-nowrap max-w-[230px] truncate">
+            {hudAlert.label}
           </span>
-        </div>
 
-        {/* Sisi Kanan: Mini Circular Battery Ring di Ujung Kanan */}
-        {telemetry.has_battery && (
-          <div className="shrink-0 ml-auto flex items-center">
-            <PureCircleBattery
-              percentage={telemetry.battery_percentage}
-              isCharging={telemetry.is_charging}
-              hasBattery={telemetry.has_battery}
-              size={18}
-            />
+          {(hudAlert.kind === 'volume' ||
+            hudAlert.kind === 'brightness' ||
+            hudAlert.kind === 'mute') &&
+            typeof hudAlert.percent === 'number' && (
+              <div
+                ref={hudBarRef}
+                role="slider"
+                aria-label={hudAlert.label}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={hudAlert.percent}
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  setIsDraggingHud(true);
+                  setHudInteracting(true);
+                  updateHudSliderFromPointer(e.clientX, hudAlert);
+                }}
+                onPointerMove={(e) => {
+                  if (!isDraggingHud) return;
+                  e.stopPropagation();
+                  updateHudSliderFromPointer(e.clientX, hudAlert);
+                }}
+                onPointerUp={(e) => {
+                  if (!isDraggingHud) return;
+                  e.stopPropagation();
+                  try {
+                    e.currentTarget.releasePointerCapture(e.pointerId);
+                  } catch {}
+                  setIsDraggingHud(false);
+                  setHudInteracting(false);
+                }}
+                className="relative w-[86px] h-[6px] rounded-full bg-white/15 overflow-hidden cursor-pointer touch-none"
+              >
+                <div
+                  className="h-full rounded-full transition-[width] duration-75"
+                  style={{
+                    width: `${Math.max(0, Math.min(100, hudAlert.percent))}%`,
+                    backgroundColor: hudAlert.accentColor,
+                  }}
+                />
+              </div>
+            )}
+
+          {hudAlert.detail && (
+            (hudAlert.kind === 'bluetooth' || hudAlert.kind === 'audio_output') ? (
+              <span
+                className={`px-1.5 py-[1px] rounded-full border font-mono text-[10px] font-semibold tabular-nums whitespace-nowrap shrink-0 ${
+                  hudAlert.detail.endsWith('%')
+                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                    : 'bg-white/[0.08] border-white/[0.12] text-white/75'
+                }`}
+              >
+                {hudAlert.detail}
+              </span>
+            ) : (
+              <span className="font-sans text-[11px] font-medium tabular-nums text-white/75 whitespace-nowrap">
+                {hudAlert.detail}
+              </span>
+            )
+          )}
+        </motion.div>
+      ) : activeModeKey === 'resting' ? (
+        /* MODE 1: RESTING — Kapsul Proporsional 128×38 dengan Mata Putih × ♥ */
+        <motion.div
+          key="mode-resting"
+          data-resting-capsule="true"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.18, ease: 'easeOut' }}
+          className="h-full flex items-center justify-center"
+        >
+          <RestingPill isSleepingActive={isRestingMode && !isKeepAwake && !isExpanded} />
+        </motion.div>
+      ) : activeModeKey === 'dual-idle' ? (
+        /* MODE 5: DUAL IDLE (Musik + Focus Ring & Task Timer Berdampingan) */
+        <motion.div
+          key="mode-dual-idle"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.18, ease: 'easeOut' }}
+          className="px-3.5 h-full flex items-center gap-2.5"
+        >
+          {useClockPill ? (
+            <span className="font-mono text-[11px] font-semibold tabular-nums tracking-tight text-white/90 leading-none shrink-0">
+              {timeStr || '19:13'}
+            </span>
+          ) : (
+            <div className="flex items-center h-6 shrink-0 overflow-visible" title="CASA">
+              <CasaCompanionAvatar isPlaying={isPlaying} expression={companionExpression} mood="awake" />
+            </div>
+          )}
+
+          <span className="h-3 w-[1px] bg-white/[0.14] shrink-0" aria-hidden="true" />
+
+          {/* Segmen Musik: Klik langsung buka tab Media di Mode 6 */}
+          <div
+            onClick={(e) => {
+              if (isExpanded) return;
+              e.stopPropagation();
+              onExpandSkill?.('core.media');
+            }}
+            className={`flex items-center gap-2 rounded-full -mx-1 px-1 py-0.5 hover:bg-white/[0.06] transition-colors ${
+              isExpanded ? 'pointer-events-none' : 'cursor-pointer'
+            }`}
+            title={artistName ? `${trackTitle} • ${artistName}` : trackTitle}
+          >
+            <MarqueeTrack title={trackTitle} artist={artistName} isPlaying={isPlaying} maxWidth={140} />
+            <TwinEqualizerGlyph active={isPlaying} isSpotify={isSpotifyActive} />
           </div>
-        )}
-      </div>
+
+          <span className="h-3 w-[1px] bg-white/[0.14] shrink-0" aria-hidden="true" />
+
+          {/* Segmen Focus Timer: Micro Ring + Task + Countdown */}
+          <div
+            onClick={(e) => {
+              if (isExpanded) return;
+              e.stopPropagation();
+              onExpandSkill?.('core.timer');
+            }}
+            className={`flex items-center gap-1.5 rounded-full -mx-1 px-1 py-0.5 hover:bg-white/[0.06] transition-colors shrink-0 ${
+              isExpanded ? 'pointer-events-none' : 'cursor-pointer'
+            } ${isTimerPaused ? 'opacity-60' : 'opacity-100'}`}
+            title={`${timerLabel} ${isTimerPaused ? '(Paused) ' : ''}· ${timerText}`}
+            role="button"
+            aria-label="Focus Timer Countdown"
+          >
+            {focusedTask ? (
+              <>
+                <svg className="w-3.5 h-3.5 -rotate-90 shrink-0" viewBox="0 0 14 14" aria-hidden="true">
+                  <circle cx="7" cy="7" r={ringRadius} fill="none" stroke="rgba(255,255,255,0.18)" strokeWidth="1.8" />
+                  <circle
+                    cx="7"
+                    cy="7"
+                    r={ringRadius}
+                    fill="none"
+                    stroke={
+                      timerState?.mode === 'rest'
+                        ? 'var(--casa-rest, #10B981)'
+                        : 'var(--casa-timer, #F59E0B)'
+                    }
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeDasharray={ringCircumference}
+                    strokeDashoffset={ringDashOffset}
+                  />
+                </svg>
+                <span className="font-sans text-[11px] font-medium text-white/80 truncate max-w-[74px]">
+                  {focusedTask.text}
+                </span>
+                <span className="text-white/35 text-[10px]">·</span>
+              </>
+            ) : (
+              <Timer
+                className="w-3.5 h-3.5 shrink-0"
+                style={{
+                  color:
+                    timerState?.mode === 'rest'
+                      ? 'var(--casa-rest, #10B981)'
+                      : 'var(--casa-timer, #F59E0B)',
+                }}
+                aria-hidden="true"
+              />
+            )}
+            <span className="font-sans font-semibold text-[11.5px] tracking-[-0.02em] tabular-nums leading-none text-white antialiased">
+              {timerText}
+            </span>
+          </div>
+          {idleBatterySlot}
+          {idleRamWarningDot}
+          {dropZoneIdleBadge}
+        </motion.div>
+      ) : activeModeKey === 'music-idle' ? (
+        /* MODE 3: IDLE MUSIK — Mata × ♥ meluncur halus & lirik statis single-line simetris saat Idle Lyrics aktif */
+        <motion.div
+          key="mode-music-idle"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.18, ease: 'easeOut' }}
+          className="px-4 h-full flex items-center"
+        >
+          <motion.div
+            initial={false}
+            animate={{
+              width: showLyricFocus ? 0 : 'auto',
+              opacity: showLyricFocus ? 0 : 1,
+              marginRight: showLyricFocus ? 0 : 10,
+            }}
+            transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+            aria-hidden={showLyricFocus}
+            className="flex items-center gap-2.5 overflow-hidden shrink-0"
+          >
+            <div className="flex items-center h-6 shrink-0 overflow-visible" title="CASA">
+              {useClockPill ? (
+                <span className="font-mono text-[11px] font-semibold tabular-nums tracking-tight text-white/90 leading-none">
+                  {timeStr || '19:13'}
+                </span>
+              ) : (
+                <CasaCompanionAvatar isPlaying={isPlaying} expression={companionExpression} mood="awake" />
+              )}
+            </div>
+            <span className="h-3 w-[1px] bg-white/[0.14] shrink-0" aria-hidden="true" />
+          </motion.div>
+
+          <div
+            onClick={(e) => {
+              if (isExpanded) return;
+              e.stopPropagation();
+              onExpandSkill?.('core.media');
+            }}
+            className={`flex items-center gap-2 rounded-full -mx-1 px-1 py-0.5 hover:bg-white/[0.06] transition-colors ${
+              isExpanded ? 'pointer-events-none' : 'cursor-pointer'
+            }`}
+            title={
+              activeLyricText
+                ? `${activeLyricText} (${trackTitle})`
+                : artistName
+                ? `${trackTitle} • ${artistName}`
+                : trackTitle
+            }
+          >
+            {showLyricFocus ? (
+              <div className="inline-flex items-center overflow-hidden transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]">
+                <motion.span
+                  key={activeLyricText}
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+                  className="font-sans font-semibold text-[12px] leading-[1.35] inline-block py-[2px] text-white tracking-[-0.02em] whitespace-nowrap max-w-[680px] overflow-hidden text-ellipsis antialiased select-none"
+                >
+                  {activeLyricText}
+                </motion.span>
+              </div>
+            ) : (
+              <MarqueeTrack title={trackTitle} artist={artistName} isPlaying={isPlaying} maxWidth={200} />
+            )}
+            <TwinEqualizerGlyph active={isPlaying} isSpotify={isSpotifyActive} />
+          </div>
+          {idleBatterySlot}
+          {!showLyricFocus && (
+            <>
+              {idleRamWarningDot}
+              {dropZoneIdleBadge}
+            </>
+          )}
+        </motion.div>
+      ) : activeModeKey === 'timer-idle' ? (
+        /* MODE 4: IDLE TIMER — [ × ♥ | ◯ Active Task · MM:SS ] */
+        <motion.div
+          key="mode-timer-idle"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.18, ease: 'easeOut' }}
+          className="px-3.5 h-full flex items-center gap-2.5"
+        >
+          <div className="flex items-center h-6 shrink-0 overflow-visible" title="CASA">
+            {useClockPill ? (
+              <span className="font-mono text-[11px] font-semibold tabular-nums tracking-tight text-white/90 leading-none">
+                {timeStr || '19:13'}
+              </span>
+            ) : (
+              <CasaCompanionAvatar isPlaying={false} expression={companionExpression} mood="awake" />
+            )}
+          </div>
+
+          <span className="h-3 w-[1px] bg-white/[0.14] shrink-0" aria-hidden="true" />
+
+          <div
+            onClick={(e) => {
+              if (isExpanded) return;
+              e.stopPropagation();
+              onExpandSkill?.('core.timer');
+            }}
+            className={`flex items-center gap-1.5 rounded-full -mx-1 px-1 py-0.5 hover:bg-white/[0.06] transition-colors shrink-0 ${
+              isExpanded ? 'pointer-events-none' : 'cursor-pointer'
+            } ${isTimerPaused ? 'opacity-60' : 'opacity-100'}`}
+            title={`${timerLabel} ${isTimerPaused ? '(Paused) ' : ''}· ${timerText}`}
+            role="button"
+            aria-label="Focus Timer Countdown"
+          >
+            {focusedTask ? (
+              <>
+                <svg className="w-3.5 h-3.5 -rotate-90 shrink-0" viewBox="0 0 14 14" aria-hidden="true">
+                  <circle cx="7" cy="7" r={ringRadius} fill="none" stroke="rgba(255,255,255,0.18)" strokeWidth="1.8" />
+                  <circle
+                    cx="7"
+                    cy="7"
+                    r={ringRadius}
+                    fill="none"
+                    stroke={
+                      timerState?.mode === 'rest'
+                        ? 'var(--casa-rest, #10B981)'
+                        : 'var(--casa-timer, #F59E0B)'
+                    }
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeDasharray={ringCircumference}
+                    strokeDashoffset={ringDashOffset}
+                  />
+                </svg>
+                <span className="font-sans text-[11.5px] font-medium text-white/85 truncate max-w-[115px]">
+                  {focusedTask.text}
+                </span>
+                <span className="text-white/35 text-[10px]">·</span>
+              </>
+            ) : (
+              <Timer
+                className="w-3.5 h-3.5 shrink-0"
+                style={{
+                  color:
+                    timerState?.mode === 'rest'
+                      ? 'var(--casa-rest, #10B981)'
+                      : 'var(--casa-timer, #F59E0B)',
+                }}
+                aria-hidden="true"
+              />
+            )}
+            <span className="font-sans font-semibold text-[12px] tracking-[-0.02em] tabular-nums leading-none text-white antialiased">
+              {timerText}
+            </span>
+          </div>
+          {idleBatterySlot}
+          {idleRamWarningDot}
+          {dropZoneIdleBadge}
+        </motion.div>
+      ) : (
+        /* MODE 2: IDLE STANDBY — [ × ♥ | Jam · Tanggal | Baterai ] */
+        <motion.div
+          key="mode-idle"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.18, ease: 'easeOut' }}
+          className="px-3.5 h-full flex items-center gap-2.5"
+        >
+          {!useClockPill && (
+            <>
+              <div className="flex items-center h-6 shrink-0 overflow-visible" title="CASA">
+                <CasaCompanionAvatar isPlaying={false} expression={companionExpression} mood="awake" />
+              </div>
+
+              <span className="h-3 w-[1px] bg-white/[0.14] shrink-0" aria-hidden="true" />
+            </>
+          )}
+
+          <div
+            data-idle-clock-date="true"
+            className="flex items-center shrink-0 tabular-nums select-none"
+          >
+            <div className="flex items-center gap-1.5 whitespace-nowrap tabular-nums">
+              <span className="font-sans font-semibold text-[12.5px] tracking-[-0.02em] text-white tabular-nums antialiased">
+                {timeStr || '19:13'}
+              </span>
+              <span className="text-zinc-600 select-none">·</span>
+              <span className="font-sans font-normal text-[11.5px] tracking-[-0.02em] text-zinc-400 tabular-nums antialiased">
+                {dateStr}
+              </span>
+            </div>
+          </div>
+
+          {idleBatterySlot}
+          {idleRamWarningDot}
+          {dropZoneIdleBadge}
+        </motion.div>
+      )}
     </div>
   );
 };

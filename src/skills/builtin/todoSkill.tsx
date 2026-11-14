@@ -29,9 +29,9 @@ export const todoSkill: CasaSkill<TodoSkillState> = {
 
   initialState: {
     todos: [
-      { id: '1', text: 'Review CASA Top-Bezel Notch styling', completed: true, isPinned: true },
-      { id: '2', text: 'Fine-tune 2-column split-card music & timer', completed: false, isPinned: false },
-      { id: '3', text: 'Configure Win32 WS_EX_NOACTIVATE focus lock', completed: false, isPinned: false },
+      { id: '1', text: 'Review CASA Top-Bezel Notch styling', completed: true, isPinned: false, scheduledTime: '09:00' },
+      { id: '2', text: 'Fine-tune 2-column split-card music & timer', completed: false, isPinned: true, scheduledTime: '10:30' },
+      { id: '3', text: 'Configure Win32 WS_EX_NOACTIVATE focus lock', completed: false, isPinned: false, scheduledTime: '14:00' },
       { id: '4', text: 'Verify Micro-Status Header clock and wave', completed: false, isPinned: false },
     ],
   },

@@ -1,31 +1,43 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { CasaAudioProvider } from './context/CasaAudioContext';
 import { CasaIsland } from './components/CasaIsland';
 import { DevTriggerBar } from './components/views/DevTriggerBar';
+import { DesktopSettingsWindow } from './components/settings/DesktopSettingsWindow';
 import { IslandMode, CompactSubtype } from './types/island';
 import { toggleGamingMode, playChimeCue } from './utils/tauriBridge';
+import { getCurrentWindowLabel } from './utils/settingsWindow';
 import { initializeSkillsEngine } from './skills';
 
-// Initialize CASA Universal Skills Engine
-initializeSkillsEngine();
+const IS_SETTINGS_WINDOW = getCurrentWindowLabel() === 'settings';
 
-export function App() {
+// Initialize CASA Universal Skills Engine ONLY in main island window
+if (!IS_SETTINGS_WINDOW) {
+  initializeSkillsEngine();
+}
+
+function MainIslandApp() {
   const [mode, setMode] = useState<IslandMode>('idle');
   const [compactSubtype, setCompactSubtype] = useState<CompactSubtype>('charging');
   const [isGamingMode, setIsGamingMode] = useState<boolean>(false);
   const [showDevTrigger, setShowDevTrigger] = useState<boolean>(false);
 
   const handleToggleDevTrigger = () => {
+    if (!import.meta.env.DEV) return;
     setShowDevTrigger((prev) => !prev);
   };
 
-  // Global keyboard shortcuts (Escape to collapse back to idle, Ctrl+Shift+D or F2 to toggle DevTrigger)
+  // Global keyboard shortcuts (Escape to collapse back to idle, Ctrl+Shift+D in dev mode to toggle DevTrigger)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setMode('idle');
         playChimeCue('tap');
-      } else if ((e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) || e.key === 'F2') {
+      } else if (
+        import.meta.env.DEV &&
+        e.ctrlKey &&
+        e.shiftKey &&
+        (e.key === 'D' || e.key === 'd')
+      ) {
         e.preventDefault();
         playChimeCue('tap');
         handleToggleDevTrigger();
@@ -61,12 +73,12 @@ export function App() {
           compactSubtype={compactSubtype}
           onChangeMode={handleSetMode}
           isGamingMode={isGamingMode}
-          showDevTrigger={showDevTrigger}
-          onToggleDevTrigger={handleToggleDevTrigger}
+          showDevTrigger={import.meta.env.DEV ? showDevTrigger : false}
+          onToggleDevTrigger={import.meta.env.DEV ? handleToggleDevTrigger : undefined}
         />
 
-        {/* Developer Trigger Bar flowing naturally under Island with clean flexbox */}
-        {showDevTrigger && (
+        {/* Developer Trigger Bar: strictly dev-only (stripped from production builds) */}
+        {import.meta.env.DEV && showDevTrigger && (
           <DevTriggerBar
             currentMode={mode}
             compactSubtype={compactSubtype}
@@ -79,6 +91,23 @@ export function App() {
       </main>
     </CasaAudioProvider>
   );
+}
+
+export function App() {
+  useLayoutEffect(() => {
+    if (IS_SETTINGS_WINDOW) {
+      document.documentElement.setAttribute('data-casa-window', 'settings');
+      document.title = 'CASA Settings';
+    } else {
+      document.documentElement.removeAttribute('data-casa-window');
+    }
+  }, []);
+
+  if (IS_SETTINGS_WINDOW) {
+    return <DesktopSettingsWindow />;
+  }
+
+  return <MainIslandApp />;
 }
 
 export default App;

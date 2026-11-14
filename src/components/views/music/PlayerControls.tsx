@@ -122,11 +122,26 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
     onSeek(scrubPosition);
   }, [isScrubbing, scrubPosition, onSeek]);
 
-  const displayTime = isScrubbing ? scrubPosition : currentTimeSeconds;
-  const remainingSeconds = Math.max(0, durationSeconds - displayTime);
+  const displayDurationSec =
+    typeof durationSeconds === 'number' && Number.isFinite(durationSeconds) && durationSeconds > 0
+      ? durationSeconds
+      : 0;
+  const rawElapsedSec =
+    displayDurationSec > 0
+      ? Math.min(
+          displayDurationSec,
+          Math.max(0, Number.isFinite(currentTimeSeconds) ? currentTimeSeconds : 0)
+        )
+      : Math.max(0, Number.isFinite(currentTimeSeconds) ? currentTimeSeconds : 0);
+  const displayElapsedSec = isScrubbing
+    ? displayDurationSec > 0
+      ? Math.min(displayDurationSec, Math.max(0, scrubPosition))
+      : Math.max(0, scrubPosition)
+    : rawElapsedSec;
+  const remainingSeconds = Math.max(0, displayDurationSec - displayElapsedSec);
   const progressPercent =
-    durationSeconds > 0
-      ? Math.min(100, Math.max(0, (displayTime / durationSeconds) * 100))
+    displayDurationSec > 0
+      ? Math.min(100, Math.max(0, (displayElapsedSec / displayDurationSec) * 100))
       : 0;
 
   const handleLyricsToggle = useCallback(() => {
@@ -178,7 +193,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
           </div>
         </div>
         <div className="flex items-center justify-between text-[10px] font-mono tabular-nums text-zinc-400 px-0.5 mt-0.5">
-          <span>{formatTime(displayTime)}</span>
+          <span>{formatTime(displayElapsedSec)}</span>
           <span>-{formatTime(remainingSeconds)}</span>
         </div>
       </div>

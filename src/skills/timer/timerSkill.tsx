@@ -3,9 +3,11 @@ import { LunarBunnyGlyph } from '../../components/LunarBunnyGlyph';
 import { CasaSkill, SkillPriorityTier } from '../types';
 import { TimerState } from '../../types/island';
 import { TimerCardView } from '../../components/views/TimerCardView';
-import { playChimeCue } from '../../utils/tauriBridge';
+import { playAlarmNoticeOnce, startAlarmChime } from '../../utils/alarmChime';
+import { getSettingsSnapshot } from '../../stores/useSettingsStore';
 import { TimerExpandedView } from '../../features/timer/TimerExpandedView';
 import { TimerPillSlot } from '../../features/timer/TimerPillSlot';
+import { formatDurationClock } from '../../features/timer/timerUtils';
 
 export const timerSkill: CasaSkill<TimerState> = {
   manifest: {
@@ -29,11 +31,15 @@ export const timerSkill: CasaSkill<TimerState> = {
     isPaused: true,
     totalSeconds: 25 * 60,
     remainingSeconds: 25 * 60,
+    presetTotalSeconds: 25 * 60,
     currentCycle: 1,
     mode: 'focus',
+    focusedTaskId: null,
+    isAlarmRinging: false,
   },
 
   getPriority: (state: TimerState): SkillPriorityTier => {
+    if (state.isAlarmRinging) return 'alert';
     if (!state.isActive) return 'idle';
     if (state.remainingSeconds <= 1) return 'alert';
     if (!state.isPaused) return 'active';
@@ -43,22 +49,41 @@ export const timerSkill: CasaSkill<TimerState> = {
   onMount: (getState, setState) => {
     const interval = setInterval(() => {
       const state = getState();
-      if (!state.isActive || state.isPaused) return;
+      if (!state.isActive || state.isPaused || state.isAlarmRinging) return;
 
       if (state.remainingSeconds <= 1) {
-        playChimeCue('ding');
-        const nextMode = state.mode === 'focus' ? 'rest' : 'focus';
-        const nextTotal = nextMode === 'focus' ? 25 * 60 : 5 * 60;
-        const nextCycle =
-          nextMode === 'focus' ? Math.min(4, state.currentCycle + 1) : state.currentCycle;
-
-        setState({
-          mode: nextMode,
-          totalSeconds: nextTotal,
-          remainingSeconds: nextTotal,
-          currentCycle: nextCycle,
-          isPaused: false,
-        });
+        if (getSettingsSnapshot().autoStartNextCycle) {
+          playAlarmNoticeOnce();
+          setState((prev: TimerState) => {
+            const nextMode = prev.mode === 'focus' ? 'rest' : 'focus';
+            const focusPreset =
+              prev.presetTotalSeconds && prev.presetTotalSeconds >= 60
+                ? prev.presetTotalSeconds
+                : 25 * 60;
+            const nextTotal = nextMode === 'rest' ? 5 * 60 : focusPreset;
+            return {
+              ...prev,
+              mode: nextMode,
+              totalSeconds: nextTotal,
+              remainingSeconds: nextTotal,
+              presetTotalSeconds: focusPreset,
+              currentCycle:
+                nextMode === 'focus' ? prev.currentCycle + 1 : prev.currentCycle,
+              isActive: true,
+              isPaused: false,
+              isAlarmRinging: false,
+            };
+          });
+        } else {
+          startAlarmChime();
+          setState((prev: TimerState) => ({
+            ...prev,
+            remainingSeconds: 0,
+            isPaused: true,
+            isAlarmRinging: true,
+            presetTotalSeconds: prev.presetTotalSeconds || prev.totalSeconds || 25 * 60,
+          }));
+        }
       } else {
         setState((prev: TimerState) => ({
           ...prev,
@@ -97,7 +122,7 @@ export const timerSkill: CasaSkill<TimerState> = {
         <div
           onClick={onClick}
           className="w-[36px] h-[36px] rounded-full bg-[#09090b] border border-[#27272a] flex items-center justify-center cursor-pointer hover:border-zinc-700 active:scale-[0.97] transition-all duration-100 ease-out shadow-[0_4px_16px_rgba(0,0,0,0.85)]"
-          title={`Active Timer: ${Math.floor(state.remainingSeconds / 60)}:${(state.remainingSeconds % 60).toString().padStart(2, '0')}`}
+          title={`Active Timer: ${formatDurationClock(state.remainingSeconds)}`}
           role="button"
           aria-label="Active Timer Bubble"
         >
