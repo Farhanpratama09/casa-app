@@ -19,8 +19,9 @@ import {
 import {
   MusicTrackLike,
   NormalizedMusicTrack,
-  normalizeTrackMetadata,
+  normalizeTrackForPlaylist,
 } from '../../../utils/musicQueueEngine';
+import { focusIslandWindow } from '../../../utils/tauriBridge';
 import { formatDuration } from './constants';
 
 export interface MusicPlaylistViewProps {
@@ -37,9 +38,10 @@ function toNativeTrack(t: NormalizedMusicTrack): NativeTrack {
     artist: t.artist,
     durationSeconds: t.durationSeconds || 0,
     thumbnailUrl: t.thumbnailUrl || '',
-    streamUrl: t.streamUrl,
+    streamUrl: t.streamUrl || t.url || t.path,
     candidates: t.candidates,
     isLocal: t.isLocal,
+    source: t.source,
   };
 }
 
@@ -136,7 +138,7 @@ export const MusicPlaylistView: React.FC<MusicPlaylistViewProps> = ({
                 onClick={() =>
                   addTrackToPlaylist(
                     selectedPlaylist.id,
-                    normalizeTrackMetadata(currentTrack)
+                    normalizeTrackForPlaylist(currentTrack)
                   )
                 }
                 className="h-5 px-1.5 rounded-full bg-white/[0.06] hover:bg-white/15 text-zinc-200 border border-white/15 flex items-center gap-1 text-[9px] font-medium transition-colors"
@@ -258,12 +260,34 @@ export const MusicPlaylistView: React.FC<MusicPlaylistViewProps> = ({
     <div className="flex flex-col h-full min-h-0 select-none">
       {/* Quick + New Playlist Bar */}
       <form
+        data-tauri-drag-region="false"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        onPointerDown={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
         onSubmit={handleCreatePlaylist}
         className="flex items-center gap-1.5 pb-1 border-b border-white/10 shrink-0"
       >
         <input
           type="text"
+          data-tauri-drag-region="false"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           value={newPlaylistName}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            void focusIslandWindow();
+          }}
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            void focusIslandWindow();
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            void focusIslandWindow();
+          }}
+          onFocus={() => {
+            void focusIslandWindow();
+          }}
           onChange={(e) => setNewPlaylistName(e.target.value)}
           onKeyDown={(e) => {
             e.stopPropagation();
@@ -273,12 +297,17 @@ export const MusicPlaylistView: React.FC<MusicPlaylistViewProps> = ({
             }
           }}
           placeholder="+ New Playlist (Enter)"
-          className="flex-1 min-w-0 h-6 bg-[#0a0a0a] border border-white/15 focus:border-white/40 rounded-lg px-2 text-[10.5px] text-white placeholder-zinc-500 outline-none transition-colors"
+          className="flex-1 min-w-0 h-6 bg-[#0a0a0a] border border-white/15 focus:border-white/40 rounded-lg px-2 text-[10.5px] text-white placeholder-zinc-500 outline-none transition-colors select-text"
         />
         <button
           type="submit"
+          data-tauri-drag-region="false"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
           disabled={!newPlaylistName.trim()}
-          className="h-6 px-2 rounded-lg bg-white text-black disabled:opacity-30 hover:bg-zinc-200 text-[10px] font-semibold flex items-center gap-1 shrink-0 transition-colors"
+          className="h-6 px-2 rounded-lg bg-white text-black disabled:opacity-30 hover:bg-zinc-200 text-[10px] font-semibold flex items-center gap-1 shrink-0 transition-colors cursor-pointer"
         >
           <Plus className="w-3 h-3" strokeWidth={2.4} />
           <span>Create</span>

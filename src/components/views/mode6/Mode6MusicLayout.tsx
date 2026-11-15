@@ -36,7 +36,11 @@ import { NativeTrack, searchTracks } from '../../../services/nativeAudioService'
 import { playChimeCue, focusIslandWindow } from '../../../utils/tauriBridge';
 import { useMusicAffinity } from '../../../hooks/useMusicAffinity';
 import { useQueueStore } from '../../../stores/useQueueStore';
-import { normalizeTrackMetadata } from '../../../utils/musicQueueEngine';
+import { setSearchDrawerExtraHeight } from '../../../utils/islandLayoutState';
+import {
+  normalizeTrackForPlaylist,
+  normalizeTrackMetadata,
+} from '../../../utils/musicQueueEngine';
 
 const SpotifyCornerLogo: React.FC<{ className?: string }> = ({ className = 'w-3 h-3' }) => (
   <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -293,6 +297,16 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
   const [nativeResults, setNativeResults] = useState<NativeTrack[]>([]);
   const [isSearchingNative, setIsSearchingNative] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const leftSearchPodRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!isSearchPodOpen || !canShowSearchAndQueue) {
+      setSearchDrawerExtraHeight(0);
+    }
+    return () => {
+      setSearchDrawerExtraHeight(0);
+    };
+  }, [isSearchPodOpen, canShowSearchAndQueue]);
 
   // Auto-focus search input & Win32 window when Search Pod opens
   useEffect(() => {
@@ -429,7 +443,7 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
   };
 
   const activeTrackPayload = hasActiveSession
-    ? normalizeTrackMetadata({
+    ? normalizeTrackForPlaylist({
         id: nativeTrack?.id || `${effectiveTitle}-${effectiveArtist}`,
         title: effectiveTitle,
         artist: effectiveArtist,
@@ -453,6 +467,7 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
     streamUrl: t.streamUrl,
     candidates: t.candidates,
     isLocal: t.isLocal,
+    source: t.source,
   }));
 
   const displayedNativeList = nativeQuery.trim() ? nativeResults : affinityAsNativeTracks;
@@ -464,13 +479,14 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
 
   const podsMarkup = (
     <div
-      className="pointer-events-none w-[1100px] h-[196px] relative select-none"
+      className="pointer-events-none w-[1100px] min-h-[196px] overflow-visible relative select-none"
       data-tauri-drag-region="false"
     >
       {/* LEFT SATELLITE POD: SEARCH (10px gap left of adaptive Mode 6 box) */}
       <AnimatePresence>
         {canShowSearchAndQueue && isSearchPodOpen && (
           <motion.aside
+            ref={leftSearchPodRef}
             key="left-search-pod"
             data-pod="left"
             data-satellite-pod="true"
@@ -478,6 +494,10 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
             animate={{ opacity: 1, x: 0, scale: 1, left: leftPodX, height: podHeight }}
             exit={{ opacity: 0, x: 10, scale: 0.96 }}
             transition={{ type: 'spring', stiffness: 420, damping: 32, mass: 0.7 }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              onInteractionLock?.();
+            }}
             onMouseDown={(e) => {
               e.stopPropagation();
               onInteractionLock?.();
@@ -491,7 +511,7 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
               top: 15,
               width: POD_WIDTH,
             }}
-            className="pointer-events-auto absolute bg-[#000000] border border-white/[0.12] rounded-2xl p-2.5 flex flex-col gap-2 shadow-[0_12px_32px_rgba(0,0,0,0.9)] overflow-hidden"
+            className="pointer-events-auto absolute bg-[#000000] border border-white/[0.12] rounded-2xl p-2.5 flex flex-col gap-2 shadow-[0_12px_32px_rgba(0,0,0,0.9)] overflow-visible"
           >
             {/* Search Input Header */}
             <div className="flex items-center gap-1.5 shrink-0">
@@ -578,7 +598,7 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
             </div>
 
             {/* Search Results List */}
-            <div className="flex-1 min-h-0 overflow-y-auto pr-0.5 space-y-1 [&::-webkit-scrollbar]:w-[2px] [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full">
+            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pr-0.5 space-y-1 [&::-webkit-scrollbar]:w-[2px] [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full">
               {!isCasaLibraryMode ? (
                 !spotifySearchQuery.trim() ? (
                   <div className="h-full flex flex-col justify-start gap-1.5 px-1 py-1">
@@ -641,7 +661,13 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
                             </div>
                           </div>
                         </button>
-                        <AddToPlaylistPopover track={{ ...track, source: 'spotify' }} compact />
+                        <AddToPlaylistPopover
+                          track={normalizeTrackForPlaylist({ ...track, source: 'spotify' })}
+                          containerRef={leftSearchPodRef}
+                          containedInCard
+                          reportSearchDrawerHitbox
+                          compact
+                        />
                         <button
                           type="button"
                           onClick={(e) => {
@@ -707,7 +733,13 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
                             </div>
                           </div>
                         </button>
-                        <AddToPlaylistPopover track={track} compact />
+                        <AddToPlaylistPopover
+                          track={normalizeTrackForPlaylist(track)}
+                          containerRef={leftSearchPodRef}
+                          containedInCard
+                          reportSearchDrawerHitbox
+                          compact
+                        />
                         <button
                           type="button"
                           onClick={(e) => {
@@ -768,7 +800,13 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
                         </div>
                       </button>
 
-                      <AddToPlaylistPopover track={track} compact />
+                      <AddToPlaylistPopover
+                        track={normalizeTrackForPlaylist(track)}
+                        containerRef={leftSearchPodRef}
+                        containedInCard
+                        reportSearchDrawerHitbox
+                        compact
+                      />
                       <button
                         type="button"
                         onClick={(e) => {

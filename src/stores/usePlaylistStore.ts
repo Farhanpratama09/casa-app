@@ -20,6 +20,7 @@ import {
   isSameTrack,
   MusicTrackLike,
   NormalizedMusicTrack,
+  normalizeTrackForPlaylist,
   normalizeTrackMetadata,
 } from '../utils/musicQueueEngine';
 
@@ -46,11 +47,13 @@ const CALM_FOCUS_REGEX =
   /\b(lofi|lo-fi|chill|ambient|instrumental|acoustic|piano|focus|study|sleep|calm|jazz|soft|rain|night)\b/i;
 
 function sanitizePlaylistTrackForStorage(track: NormalizedMusicTrack): NormalizedMusicTrack {
-  const hasBlob = Boolean(track.streamUrl && track.streamUrl.startsWith('blob:'));
+  const hasBlobStream = Boolean(track.streamUrl && track.streamUrl.startsWith('blob:'));
+  const hasBlobUrl = Boolean(track.url && track.url.startsWith('blob:'));
   return {
     ...track,
-    streamUrl: hasBlob ? undefined : track.streamUrl,
-    candidates: hasBlob ? undefined : track.candidates,
+    streamUrl: hasBlobStream ? undefined : track.streamUrl,
+    url: hasBlobUrl ? undefined : track.url,
+    candidates: hasBlobStream || hasBlobUrl ? undefined : track.candidates,
   };
 }
 
@@ -96,8 +99,14 @@ function hydrateSessionTrack(
 ): NormalizedMusicTrack {
   const key = getTrackIdentityKey(track);
   const cached = sessionCache[key];
-  if (cached && cached.streamUrl) {
-    return { ...track, streamUrl: cached.streamUrl, candidates: cached.candidates };
+  if (cached && (cached.streamUrl || cached.url)) {
+    return {
+      ...track,
+      streamUrl: cached.streamUrl || cached.url,
+      url: cached.url || cached.streamUrl || track.url,
+      path: cached.path || track.path,
+      candidates: cached.candidates,
+    };
   }
   return track;
 }
@@ -153,7 +162,7 @@ function createPlaylistAction(
   const now = Date.now();
   const normalizedInitial: NormalizedMusicTrack[] = [];
   for (const raw of initialTracks) {
-    const norm = normalizeTrackMetadata(raw);
+    const norm = normalizeTrackForPlaylist(raw, { addedAt: now });
     if (!normalizedInitial.some((t) => isSameTrack(t, norm))) {
       normalizedInitial.push(norm);
     }
@@ -192,7 +201,7 @@ function deletePlaylistAction(playlistId: string): void {
 
 function addTrackToPlaylistAction(playlistId: string, rawTrack: MusicTrackLike): boolean {
   if (!rawTrack) return false;
-  const norm = normalizeTrackMetadata({ ...rawTrack, addedAt: Date.now() });
+  const norm = normalizeTrackForPlaylist(rawTrack, { addedAt: Date.now() });
   let added = false;
 
   const next = sharedCustomPlaylists.map((p) => {

@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react';
 import type { IslandMode, IslandState } from '../types/island';
 
 export type EffectiveIslandState = 'tucked' | 'idle' | 'expanded';
@@ -163,4 +164,74 @@ export function resolveEffectiveIslandLayout(
     bottomCornerRadius: 16,
     topCornerRadius: input.isFloatingMode ? 16 : 0,
   };
+}
+
+export interface SearchDrawerBoundsInput {
+  centerOffsetX: number;
+  capsuleWidth: number;
+  capsuleHeight: number;
+  topOffset: number;
+  podWidth?: number;
+  extraPopoverHeight?: number;
+  windowHeight?: number;
+}
+
+export interface SearchDrawerBoundsRect {
+  center_offset_x: number;
+  top_offset: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Computes the Win32 hit-test rectangle for the Left Search Satellite Pod,
+ * dynamically expanding downward when an anchored SAVE TO PLAYLIST popover protrudes
+ * below the base pod height while clamping inside the native overlay window height.
+ */
+export function computeSearchDrawerBounds(
+  input: SearchDrawerBoundsInput
+): SearchDrawerBoundsRect {
+  const podWidth = input.podWidth ?? 204;
+  const podOffsetX = Math.round(input.capsuleWidth / 2 + 10 + podWidth / 2);
+  const podHitboxTop = input.topOffset + 14;
+  const baseHeight = Math.max(140, input.capsuleHeight - 14);
+  const extraHeight = Math.max(0, Math.ceil(input.extraPopoverHeight ?? 0));
+  const windowHeight = input.windowHeight ?? 340;
+  const maxHeight = Math.max(baseHeight, windowHeight - podHitboxTop - 2);
+
+  return {
+    center_offset_x: input.centerOffsetX - podOffsetX,
+    top_offset: podHitboxTop,
+    width: podWidth,
+    height: Math.min(maxHeight, baseHeight + extraHeight),
+  };
+}
+
+let searchDrawerExtraHeightPx = 0;
+const searchDrawerListeners = new Set<() => void>();
+
+export function setSearchDrawerExtraHeight(extraHeightPx: number): void {
+  const normalized = Math.max(0, Math.min(180, Math.ceil(extraHeightPx)));
+  if (normalized === searchDrawerExtraHeightPx) return;
+  searchDrawerExtraHeightPx = normalized;
+  searchDrawerListeners.forEach((listener) => listener());
+}
+
+export function getSearchDrawerExtraHeight(): number {
+  return searchDrawerExtraHeightPx;
+}
+
+function subscribeSearchDrawerExtraHeight(listener: () => void): () => void {
+  searchDrawerListeners.add(listener);
+  return () => {
+    searchDrawerListeners.delete(listener);
+  };
+}
+
+export function useSearchDrawerExtraHeight(): number {
+  return useSyncExternalStore(
+    subscribeSearchDrawerExtraHeight,
+    getSearchDrawerExtraHeight,
+    getSearchDrawerExtraHeight
+  );
 }

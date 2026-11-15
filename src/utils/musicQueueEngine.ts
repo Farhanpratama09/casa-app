@@ -10,12 +10,15 @@ export interface MusicTrackLike {
   title?: string;
   name?: string;
   artist?: string;
+  duration?: number;
   durationSeconds?: number;
   durationMs?: number;
   thumbnailUrl?: string;
   albumArt?: string;
   artworkUrl?: string;
   streamUrl?: string;
+  url?: string;
+  path?: string;
   candidates?: string[];
   album?: string;
   albumName?: string;
@@ -32,7 +35,10 @@ export interface NormalizedMusicTrack extends NativeTrack {
   normalizedTitle: string;
   normalizedArtist: string;
   trackPairKey: string;
+  duration: number;
   durationMs: number;
+  url?: string;
+  path?: string;
   album?: string;
   uri?: string;
   source: 'native' | 'spotify' | 'local';
@@ -115,8 +121,10 @@ export function normalizeTrackMetadata(
     options?.isLocal ||
       raw.isLocal ||
       raw.source === 'local' ||
+      Boolean(raw.path) ||
       (raw.id && raw.id.startsWith('local-')) ||
-      (raw.streamUrl && raw.streamUrl.startsWith('blob:'))
+      (raw.streamUrl && (raw.streamUrl.startsWith('blob:') || raw.streamUrl.startsWith('file://'))) ||
+      (raw.url && (raw.url.startsWith('blob:') || raw.url.startsWith('file://')))
   );
 
   const rawTitleInput = (raw.title || raw.name || 'Untitled Track').trim();
@@ -181,6 +189,8 @@ export function normalizeTrackMetadata(
   const durationSec =
     typeof raw.durationSeconds === 'number' && Number.isFinite(raw.durationSeconds)
       ? Math.max(0, Math.round(raw.durationSeconds))
+      : typeof raw.duration === 'number' && Number.isFinite(raw.duration)
+      ? Math.max(0, Math.round(raw.duration))
       : typeof raw.durationMs === 'number' && Number.isFinite(raw.durationMs)
       ? Math.max(0, Math.round(raw.durationMs / 1000))
       : 0;
@@ -194,10 +204,13 @@ export function normalizeTrackMetadata(
   const source: 'native' | 'spotify' | 'local' = isLocal
     ? 'local'
     : raw.source || 'native';
+  const resolvedStreamUrl = raw.streamUrl || raw.url || raw.path || undefined;
+  const resolvedUrl = raw.url || raw.streamUrl || raw.path || raw.uri || undefined;
 
   const id =
     (raw.id && raw.id.trim()) ||
     raw.uri ||
+    raw.path ||
     `${isLocal ? 'local' : 'trk'}-${trackPairKey || Date.now().toString(36)}`;
 
   return {
@@ -207,12 +220,15 @@ export function normalizeTrackMetadata(
     normalizedTitle,
     normalizedArtist,
     trackPairKey,
+    duration: durationSec,
     durationSeconds: durationSec,
     durationMs,
     thumbnailUrl: art,
     albumArt: art,
     artworkUrl: art,
-    streamUrl: raw.streamUrl,
+    streamUrl: resolvedStreamUrl,
+    url: resolvedUrl,
+    path: raw.path,
     candidates: raw.candidates,
     album: raw.album || raw.albumName || '',
     uri: raw.uri,
@@ -222,6 +238,21 @@ export function normalizeTrackMetadata(
     isSmartQueue: Boolean(raw.isSmartQueue || raw.isRadio),
     addedAt: raw.addedAt,
     playedDuringFocus: raw.playedDuringFocus,
+  };
+}
+
+/**
+ * Normalizes any track candidate (local audio, InnerTube native search result, or Spotify track)
+ * into a unified payload guaranteed to carry consistent `id`, `title`, `artist`, `duration`, and `url`.
+ */
+export function normalizeTrackForPlaylist(
+  raw: MusicTrackLike,
+  options?: { isLocal?: boolean; addedAt?: number }
+): NormalizedMusicTrack {
+  const norm = normalizeTrackMetadata(raw, options);
+  return {
+    ...norm,
+    addedAt: options?.addedAt ?? norm.addedAt ?? Date.now(),
   };
 }
 

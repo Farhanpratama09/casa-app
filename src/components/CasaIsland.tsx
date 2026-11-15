@@ -39,9 +39,11 @@ import {
   recordCanvasResizeCall,
 } from '../utils/islandStressTester';
 import {
+  computeSearchDrawerBounds,
   ISLAND_DIMENSIONS,
   resolveEffectiveIslandLayout,
   snapEvenDimension,
+  useSearchDrawerExtraHeight,
 } from '../utils/islandLayoutState';
 
 interface CasaIslandProps {
@@ -439,6 +441,10 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
 
   const getActiveIdleHitboxHeight = useCallback(() => IDLE_WINDOW_HEIGHT, []);
 
+  const searchDrawerExtraHeight = useSearchDrawerExtraHeight();
+  const searchDrawerExtraHeightRef = useRef<number>(searchDrawerExtraHeight);
+  searchDrawerExtraHeightRef.current = searchDrawerExtraHeight;
+
   const buildHitboxRects = useCallback(
     (
       capsuleW: number,
@@ -490,12 +496,17 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
 
       if (leftPodOpen) {
         // Left Search/Wi-Fi Satellite Pod (204px, 10px gap left of dynamic Mode 6 box)
-        rects.push({
-          center_offset_x: centerOffsetX - podOffsetX,
-          top_offset: podHitboxTop,
-          width: POD_WIDTH,
-          height: podHitboxHeight,
-        });
+        // Expands downward dynamically when anchored SAVE TO PLAYLIST popover protrudes
+        rects.push(
+          computeSearchDrawerBounds({
+            centerOffsetX,
+            capsuleWidth: roundedW,
+            capsuleHeight: roundedH,
+            topOffset,
+            podWidth: POD_WIDTH,
+            extraPopoverHeight: searchDrawerExtraHeightRef.current,
+          })
+        );
       }
 
       if (rightPodOpen) {
@@ -870,6 +881,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     showDevTrigger,
     effectiveLeftPodOpen,
     effectiveRightPodOpen,
+    searchDrawerExtraHeight,
     applyWindowSize,
     getActiveIdleWindowWidth,
     getActiveIdleHitboxHeight,
@@ -1857,7 +1869,10 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   // Global click-outside (WebView + Win32 OS desktop) & Escape listeners for persistent Mode 6
   useEffect(() => {
     const handleGlobalClick = (e: MouseEvent) => {
-      if ((e.target as HTMLElement)?.closest('[data-dev-trigger="true"]')) {
+      if (
+        (e.target as HTMLElement)?.closest('[data-dev-trigger="true"]') ||
+        (e.target as HTMLElement)?.closest('[data-casa-popover="true"]')
+      ) {
         return;
       }
       if (islandRef.current && !islandRef.current.contains(e.target as Node)) {
@@ -2271,7 +2286,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       <div
         ref={setPodHostEl}
         data-satellite-pod-host="true"
-        className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-[1100px] h-[196px] z-40"
+        className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-[1100px] h-[196px] overflow-visible z-40"
       />
 
       {/* Dynamic Hover Sensor Wrapper tightly embracing capsule */}
