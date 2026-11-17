@@ -647,7 +647,7 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
 export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   if (!isTauriEnv) {
     return {
-      currentVersion: '2.0.2',
+      currentVersion: '2.0.3',
       available: false,
       version: null,
       body: null,
@@ -664,4 +664,13 @@ export async function installAppUpdate(): Promise<void> {
     throw new Error('Instalasi pembaruan hanya tersedia di aplikasi desktop CASA.');
   }
   await invoke('install_app_update');
+}
+
+export async function quitCasaApp(): Promise<void> {
+  if (!isTauriEnv) return;
+  try {
+    await invoke('quit_app');
+  } catch (err) {
+    console.warn('[CASA IPC] quit_app failed:', err);
+  }
 }

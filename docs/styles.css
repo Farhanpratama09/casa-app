@@ -840,6 +840,7 @@ textarea {
 
 /* Mode 6 Music + Split Lyrics (640x192 layout) */
 .casa-m6-music {
+  position: relative;
   padding: 6px 14px 10px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -953,9 +954,16 @@ textarea {
   text-overflow: ellipsis;
 }
 
+.casa-track-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .casa-circle-btn {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border-radius: 9999px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: #0d0d10;
@@ -964,6 +972,12 @@ textarea {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.casa-circle-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
 }
 
 .casa-circle-btn.active {
@@ -1031,10 +1045,95 @@ textarea {
   cursor: pointer;
 }
 
-.casa-music-queue {
+.casa-music-playlists {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding-top: 6px;
+}
+
+.casa-playlist-mini-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.casa-music-queue {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 4px;
+}
+
+.casa-queue-popout {
+  position: absolute;
+  top: 4px;
+  right: 12px;
+  bottom: 8px;
+  width: calc(50% - 14px);
+  background: #000000;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  padding: 8px 10px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.92);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 20;
+}
+
+.casa-queue-popout-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.casa-queue-popout-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.casa-queue-popout-title {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.casa-queue-count-pill {
+  padding: 1px 5px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.65);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+}
+
+.casa-queue-close-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.casa-queue-close-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
 }
 
 .casa-queue-mini-list {
@@ -2319,6 +2418,14 @@ textarea {
   .casa-m6-music,
   .casa-m6-focus {
     grid-template-columns: 1fr;
+  }
+
+  .casa-queue-popout {
+    width: calc(100% - 16px);
+    left: 8px;
+    right: 8px;
+    top: 8px;
+    bottom: 8px;
   }
 
   .casa-music-main,

@@ -13,7 +13,7 @@ import puppeteer from 'puppeteer-core';
 
 const DOCS_DIR = path.resolve('docs');
 const EXE_BUNDLE_PATH = path.resolve(
-  'src-tauri/target/release/bundle/nsis/CASA_2.0.2_x64-setup.exe'
+  'src-tauri/target/release/bundle/nsis/CASA_2.0.3_x64-setup.exe'
 );
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -120,19 +120,19 @@ async function main() {
           contentType: 'application/json',
           body: JSON.stringify([
             {
-              tag_name: 'v2.0.2',
+              tag_name: 'v2.0.3',
               assets: [
                 {
-                  name: 'CASA_2.0.2_x64-setup.exe',
-                  size: 4652960,
+                  name: 'CASA_2.0.3_x64-setup.exe',
+                  size: 4654290,
                   download_count: 8,
                   browser_download_url:
-                    'https://github.com/Farhanpratama09/casa-app/releases/download/v2.0.2/CASA_2.0.2_x64-setup.exe',
+                    'https://github.com/Farhanpratama09/casa-app/releases/download/v2.0.3/CASA_2.0.3_x64-setup.exe',
                 },
-                { name: 'CASA_2.0.2_x64-setup.exe.sig', size: 432, download_count: 90 },
-                { name: 'CASA_2.0.2_x64_en-US.msi', size: 6729728, download_count: 3 },
-                { name: 'CASA_2.0.2_x64_en-US.msi.sig', size: 432, download_count: 45 },
-                { name: 'latest.json', size: 795, download_count: 500 },
+                { name: 'CASA_2.0.3_x64-setup.exe.sig', size: 432, download_count: 90 },
+                { name: 'CASA_2.0.3_x64_en-US.msi', size: 6729728, download_count: 3 },
+                { name: 'CASA_2.0.3_x64_en-US.msi.sig', size: 432, download_count: 45 },
+                { name: 'latest.json', size: 781, download_count: 500 },
               ],
             },
             {
@@ -212,12 +212,12 @@ async function main() {
     );
     check(
       layoutAudit.hasPrimaryExe &&
-        layoutAudit.primaryHref.includes('CASA_2.0.2_x64-setup.exe') &&
+        layoutAudit.primaryHref.includes('CASA_2.0.3_x64-setup.exe') &&
         layoutAudit.shaClosedInitially &&
         layoutAudit.shaSummaryText === 'Verify SHA-256 checksum' &&
         /^[0-9A-F]{64}$/.test(layoutAudit.shaText) &&
         (!expectedExeSha || layoutAudit.shaText === expectedExeSha),
-      `Download section links CASA_2.0.2_x64-setup.exe + collapsed SHA-256 valid (${layoutAudit.shaText.slice(0, 12)}...)`
+      `Download section links CASA_2.0.3_x64-setup.exe + collapsed SHA-256 valid (${layoutAudit.shaText.slice(0, 12)}...)`
     );
     check(
       !layoutAudit.dlCountHidden &&
@@ -345,9 +345,44 @@ async function main() {
       `Alt+Space toggles Mode 6 (${m6OpenCheck.variant}) and collapses cleanly back to compact × ♥`
     );
 
-    // Mode 2: Lyrics & Queue + Idle Lyric Minimize
+    // Mode 2: Lyrics & Queue (Player | Playlists sub-nav + Right QUEUE Popout) + Idle Lyric Minimize
     await page.click('button[data-vm-mode="lyrics"]');
     await new Promise((r) => setTimeout(r, 150));
+
+    const musicNavAudit = await page.evaluate(() => {
+      const pills = Array.from(document.querySelectorAll('#vm-exp-music .casa-sub-pill')).map((el) =>
+        (el.textContent || '').trim()
+      );
+      return { pills };
+    });
+    await page.click('#vm-exp-queue-toggle');
+    await new Promise((r) => setTimeout(r, 120));
+    const popoutAudit = await page.evaluate(() => ({
+      open: document.getElementById('vm-exp-queue-popout')?.hidden === false,
+      title: document.getElementById('vm-exp-queue-title')?.textContent?.trim(),
+      items: document.querySelectorAll('#vm-exp-queue-list .casa-q-mini-btn').length,
+    }));
+    await page.click('#vm-exp-queue-close');
+    await page.click('button[data-music-sub="playlists"]');
+    await new Promise((r) => setTimeout(r, 100));
+    const playlistAudit = await page.evaluate(() => ({
+      playlistsVisible: document.getElementById('vm-music-sub-playlists')?.hidden === false,
+      playlistRows: document.querySelectorAll('#vm-exp-playlist-list .casa-q-mini-btn').length,
+    }));
+    await page.click('button[data-music-sub="player"]');
+
+    check(
+      musicNavAudit.pills.length === 2 &&
+        musicNavAudit.pills[0] === 'Player' &&
+        musicNavAudit.pills[1] === 'Playlists' &&
+        popoutAudit.open &&
+        popoutAudit.title === 'QUEUE' &&
+        popoutAudit.items === 4 &&
+        playlistAudit.playlistsVisible &&
+        playlistAudit.playlistRows === 3,
+      `Mode 2 Sub-Nav (${musicNavAudit.pills.join('|')}) & Popout Header (${popoutAudit.title}, ${popoutAudit.items} items)`
+    );
+
     const qBtns = await page.$$('#vm-queue-list .vm-queue-btn');
     await qBtns[1].click();
     await page.click('#vm-idle-lyric-btn');

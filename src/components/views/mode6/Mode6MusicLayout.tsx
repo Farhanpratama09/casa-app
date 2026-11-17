@@ -293,8 +293,8 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
   const storeRemoveManualTrack = useQueueStore((s) => s.removeFromManualQueue);
   const storeRemoveSmartTrack = useQueueStore((s) => s.removeFromRadioQueue);
 
-  // Mode 6 compact sub-navigation: Player | Playlists | Queue
-  const [musicSubTab, setMusicSubTab] = useState<'player' | 'playlists' | 'queue'>('player');
+  // Mode 6 compact sub-navigation: Player | Playlists
+  const [musicSubTab, setMusicSubTab] = useState<'player' | 'playlists'>('player');
 
   // Native Search state scoped inside Search Pod when in CASA Player / Standby
   const [nativeQuery, setNativeQuery] = useState('');
@@ -865,13 +865,14 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
             {/* Queue Pod Header */}
             <div className="flex items-center justify-between gap-1 pb-1.5 border-b border-white/[0.08] shrink-0">
               <div className="flex items-center gap-1.5 min-w-0">
-                <ListMusic className="w-3.5 h-3.5 text-white/75 shrink-0" />
-                <span className="text-[10.5px] font-semibold text-white truncate">
-                  {isCasaLibraryMode
-                    ? 'CASA PLAYER Queue'
-                    : spotifyQueueContextTitle || 'Queue'}
+                <ListMusic className="w-3 h-3 text-white/60 shrink-0" />
+                <span
+                  className="text-[9.5px] font-mono font-semibold uppercase tracking-wider text-white/85"
+                  title={isCasaLibraryMode ? 'CASA Player Queue' : spotifyQueueContextTitle || 'Queue'}
+                >
+                  QUEUE
                 </span>
-                <span className="text-[9px] font-mono text-white/55 bg-white/[0.08] px-1.5 py-[1px] rounded-full tabular-nums">
+                <span className="text-[9px] font-mono text-white/55 bg-white/[0.08] px-1.5 py-[1px] rounded-full tabular-nums shrink-0">
                   {isCasaLibraryMode ? nativeQueue.length : spotifyQueueTracks.length}
                 </span>
               </div>
@@ -992,20 +993,19 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
           isLyricsOpen ? 'grid-cols-2 gap-3' : 'grid-cols-1'
         }`}
       >
-        {/* SISI KIRI: COMPACT SUB-NAV + (PLAYER | PLAYLISTS | QUEUE) */}
+        {/* SISI KIRI: COMPACT SUB-NAV + (PLAYER | PLAYLISTS) */}
         <div
           className={`flex flex-col min-w-0 min-h-0 h-full overflow-hidden ${
             isLyricsOpen ? 'pr-3 border-r border-white/[0.08]' : ''
           }`}
         >
-          {/* Compact Sub-Nav Strip: Player | Playlists | Queue + Shuffle / Repeat */}
+          {/* Compact Sub-Nav Strip: Player | Playlists + Shuffle / Repeat */}
           <div className="flex items-center justify-between gap-2 mb-1 shrink-0 h-[18px]">
             <div className="flex items-center gap-1 bg-[#0a0a0a] border border-white/10 rounded-full p-[2px]">
               {(
                 [
                   { id: 'player', label: 'Player' },
                   { id: 'playlists', label: 'Playlists' },
-                  { id: 'queue', label: 'Queue' },
                 ] as const
               ).map((tab) => {
                 const active = musicSubTab === tab.id;
@@ -1089,59 +1089,6 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
                 }}
                 onAddToQueue={onAddToNativeQueue}
               />
-            </div>
-          ) : musicSubTab === 'queue' ? (
-            <div className="flex-1 min-h-0 overflow-hidden">
-              {isCasaLibraryMode ? (
-                <MusicQueueView
-                  compact
-                  currentTrack={nativeTrack}
-                  manualQueue={storeManualQueue}
-                  smartQueue={storeSmartQueue}
-                  isPlaying={isEffectivePlaying}
-                  isResolving={isResolvingAudio}
-                  isShuffle={effectiveShuffle}
-                  isRepeat={effectiveRepeat}
-                  isFetchingSmart={storeIsFetchingSmart}
-                  onToggleShuffle={handleShuffleAction}
-                  onToggleRepeat={handleRepeatAction}
-                  onSelectManualTrack={(manualIdx) =>
-                    onSelectNativeQueueTrack(nativeTrack ? manualIdx + 1 : manualIdx)
-                  }
-                  onRemoveManualTrack={(manualIdx) => storeRemoveManualTrack(manualIdx)}
-                  onSelectSmartTrack={(smartIdx) => onPlaySmartQueueTrack?.(smartIdx)}
-                  onRemoveSmartTrack={(smartIdx) =>
-                    onRemoveSmartQueueTrack ? onRemoveSmartQueueTrack(smartIdx) : storeRemoveSmartTrack(smartIdx)
-                  }
-                  onClearQueue={(e) => onClearNativeQueue(e as any)}
-                />
-              ) : (
-                <div className="h-full overflow-y-auto scrollbar-none space-y-1">
-                  {spotifyQueueTracks.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-[10px] text-zinc-500">
-                      Antrean Spotify kosong
-                    </div>
-                  ) : (
-                    spotifyQueueTracks.map((track, idx) => (
-                      <button
-                        key={`${track.id}-${idx}`}
-                        type="button"
-                        onClick={() => onPlaySpotifyQueueTrack(track, idx)}
-                        className="w-full flex items-center gap-2 p-1 rounded-lg hover:bg-white/[0.07] text-left cursor-pointer"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[10.5px] font-medium text-white truncate">
-                            {track.title}
-                          </div>
-                          <div className="text-[9px] text-zinc-400 truncate">
-                            {track.artist}
-                          </div>
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </div>
-              )}
             </div>
           ) : (
             <div className="flex-1 min-h-0 flex flex-col justify-between">

@@ -78,6 +78,12 @@
     },
   ];
 
+  const SAMPLE_PLAYLISTS = [
+    { id: 'pl-focus', name: 'Focus Lo-Fi', count: '4 tracks', startIdx: 0 },
+    { id: 'pl-night', name: 'Late Night Code', count: '3 tracks', startIdx: 1 },
+    { id: 'pl-bunny', name: 'Rabbit Island', count: '3 tracks', startIdx: 2 },
+  ];
+
   const INITIAL_TODOS = [
     { id: 'td-1', text: 'Audit border hairline OLED', done: true },
     { id: 'td-2', text: 'Verifikasi OTA signed key', done: false },
@@ -96,7 +102,10 @@
     isRestingSleep: false,
     expression: 'idle', // 'idle' | 'music' | 'focus' | 'dual_active'
     idleLyricMinimized: false,
-    musicSubTab: 'player', // 'player' | 'queue'
+    musicSubTab: 'player', // 'player' | 'playlists'
+    isLyricsOpen: true,
+    isQueuePopoutOpen: false,
+    activePlaylistId: 'pl-focus',
     musicPlaying: true,
     trackIndex: 0,
     lyricIndex: 0,
@@ -174,11 +183,20 @@
 
     musicSubButtons: Array.from(document.querySelectorAll('[data-music-sub]')),
     musicSubPlayer: $('vm-music-sub-player'),
-    musicSubQueue: $('vm-music-sub-queue'),
+    musicSubPlaylists: $('vm-music-sub-playlists'),
+    expPlaylistList: $('vm-exp-playlist-list'),
     expAudioLabel: $('vm-exp-audio-label'),
     expTrackTitle: $('vm-exp-track-title'),
     expTrackArtist: $('vm-exp-track-artist'),
+    expSaveBtn: $('vm-exp-save-btn'),
     expLyricsToggle: $('vm-exp-lyrics-toggle'),
+    expSearchBtn: $('vm-exp-search-btn'),
+    expQueueToggle: $('vm-exp-queue-toggle'),
+    expQueuePopout: $('vm-exp-queue-popout'),
+    expQueueTitle: $('vm-exp-queue-title'),
+    expQueueCount: $('vm-exp-queue-count'),
+    expQueueClose: $('vm-exp-queue-close'),
+    expLyricsPane: $('vm-exp-lyrics-pane'),
     scrubElapsed: $('vm-scrub-elapsed'),
     scrubFill: $('vm-scrub-fill'),
     scrubTotal: $('vm-scrub-total'),
@@ -506,8 +524,42 @@
     if (el.queueCountTag) {
       el.queueCountTag.textContent = `${QUEUE_TRACKS.length} lagu`;
     }
+    if (el.expQueueCount) {
+      el.expQueueCount.textContent = String(QUEUE_TRACKS.length);
+    }
 
-    // Desktop Queue List & Embedded Mode 6 Queue List
+    // Mode 6 Playlists List (`Player | Playlists`)
+    if (el.expPlaylistList) {
+      clearNode(el.expPlaylistList);
+      SAMPLE_PLAYLISTS.forEach((pl) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'casa-q-mini-btn';
+        if (pl.id === state.activePlaylistId) {
+          btn.setAttribute('aria-current', 'true');
+        }
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          state.activePlaylistId = pl.id;
+          state.trackIndex = pl.startIdx % QUEUE_TRACKS.length;
+          state.lyricIndex = 0;
+          state.musicPlaying = true;
+          state.musicSubTab = 'player';
+          syncUI();
+        });
+
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = pl.name;
+        const metaSpan = document.createElement('span');
+        metaSpan.className = 'tabular';
+        metaSpan.textContent = pl.count;
+        btn.appendChild(nameSpan);
+        btn.appendChild(metaSpan);
+        el.expPlaylistList.appendChild(btn);
+      });
+    }
+
+    // Desktop Queue List & Popout QUEUE Card List
     [el.queueList, el.expQueueList].forEach((listEl, isMini) => {
       if (!listEl) return;
       clearNode(listEl);
@@ -957,7 +1009,17 @@
     if (el.scrubFill) el.scrubFill.style.width = `${track.progressPct}%`;
     if (el.expPlayBtn) el.expPlayBtn.textContent = state.musicPlaying ? 'Pause' : 'Play';
     if (el.musicSubPlayer) el.musicSubPlayer.hidden = state.musicSubTab !== 'player';
-    if (el.musicSubQueue) el.musicSubQueue.hidden = state.musicSubTab !== 'queue';
+    if (el.musicSubPlaylists) el.musicSubPlaylists.hidden = state.musicSubTab !== 'playlists';
+    if (el.expQueuePopout) el.expQueuePopout.hidden = !state.isQueuePopoutOpen;
+    if (el.expQueueToggle) {
+      el.expQueueToggle.classList.toggle('active', state.isQueuePopoutOpen);
+    }
+    if (el.expLyricsToggle) {
+      el.expLyricsToggle.classList.toggle('active', state.isLyricsOpen);
+    }
+    if (el.expLyricsPane) {
+      el.expLyricsPane.style.opacity = state.isLyricsOpen ? '1' : '0.35';
+    }
     el.musicSubButtons.forEach((b) => {
       b.setAttribute(
         'aria-pressed',
@@ -1448,6 +1510,44 @@
         syncUI();
       });
     }
+    if (el.expQueueToggle) {
+      el.expQueueToggle.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.isQueuePopoutOpen = !state.isQueuePopoutOpen;
+        syncCapsuleUI();
+      });
+    }
+    if (el.expQueueClose) {
+      el.expQueueClose.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.isQueuePopoutOpen = false;
+        syncCapsuleUI();
+      });
+    }
+    if (el.expLyricsToggle) {
+      el.expLyricsToggle.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.isLyricsOpen = !state.isLyricsOpen;
+        state.isQueuePopoutOpen = false;
+        syncCapsuleUI();
+      });
+    }
+    if (el.expSaveBtn) {
+      el.expSaveBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        el.expSaveBtn.classList.add('active');
+        window.setTimeout(() => {
+          if (el.expSaveBtn) el.expSaveBtn.classList.remove('active');
+        }, 900);
+      });
+    }
+    if (el.expSearchBtn) {
+      el.expSearchBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.musicSubTab = state.musicSubTab === 'playlists' ? 'player' : 'playlists';
+        syncCapsuleUI();
+      });
+    }
 
     // To-Do & Focus Presets
     if (el.todoForm && el.todoInput) {
@@ -1689,7 +1789,7 @@
       }
       isCooldown = true;
       const labelNode = el.primaryDownloadLabel || btn.querySelector('span') || btn;
-      const originalText = labelNode.textContent || 'Download CASA v2.0.2 for Windows (.exe)';
+      const originalText = labelNode.textContent || 'Download CASA v2.0.3 for Windows (.exe)';
       btn.setAttribute('aria-disabled', 'true');
       btn.classList.add('is-cooldown');
       labelNode.textContent = 'Memulai unduhan...';
@@ -1751,7 +1851,7 @@
         if (!m) return false;
         const minor = Number(m[1]);
         const patch = Number(m[2]);
-        return minor > 0 || patch >= 2;
+        return minor > 0 || patch >= 3;
       });
 
       let exeUrl = null;
@@ -1762,7 +1862,7 @@
         );
         if (exeAsset && isSafeGitHubUrl(exeAsset.browser_download_url)) {
           exeUrl = exeAsset.browser_download_url;
-          exeSize = formatMegabytes(exeAsset.size) || '4.44 MB';
+          exeSize = formatMegabytes(exeAsset.size) || '4.43 MB';
         }
       }
 
@@ -1780,7 +1880,7 @@
         );
       } catch (_err) {}
     } catch (_err) {
-      // Keep static v2.0.2 fallback link & hide download count gracefully when offline/rate-limited
+      // Keep static v2.0.3 fallback link & hide download count gracefully when offline/rate-limited
     }
   }
 

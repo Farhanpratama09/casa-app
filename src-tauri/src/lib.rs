@@ -331,6 +331,17 @@ fn toggle_gaming_mode(app: tauri::AppHandle, enabled: bool) -> Result<bool, Stri
     Ok(enabled)
 }
 
+/// Command to cleanly terminate the application and unregister global shortcuts
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    #[cfg(desktop)]
+    {
+        use tauri_plugin_global_shortcut::GlobalShortcutExt;
+        let _ = app.global_shortcut().unregister_all();
+    }
+    app.exit(0);
+}
+
 #[cfg(windows)]
 fn apply_win32_window_styles(window: &tauri::WebviewWindow) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -436,9 +447,9 @@ pub fn run() {
             }
 
             // Create System Tray Companion
-            let show_hide = MenuItem::with_id(app, "toggle_visibility", "Tampilkan / Sembunyikan CASA", true, None::<&str>)?;
-            let toggle_gaming = MenuItem::with_id(app, "toggle_gaming", "Mode Gaming: Otomatis", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Keluar", true, None::<&str>)?;
+            let show_hide = MenuItem::with_id(app, "toggle_visibility", "Show / Hide CASA", true, None::<&str>)?;
+            let toggle_gaming = MenuItem::with_id(app, "toggle_gaming", "Gaming Mode: Auto", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit CASA", true, None::<&str>)?;
             let tray_menu = Menu::with_items(app, &[&show_hide, &toggle_gaming, &quit])?;
 
             let mut tray_builder = TrayIconBuilder::new()
@@ -459,6 +470,11 @@ pub fn run() {
                             let _ = app.emit("tray-toggle-gaming", ());
                         }
                         "quit" => {
+                            #[cfg(desktop)]
+                            {
+                                use tauri_plugin_global_shortcut::GlobalShortcutExt;
+                                let _ = app.global_shortcut().unregister_all();
+                            }
                             app.exit(0);
                         }
                         _ => {}
@@ -486,6 +502,7 @@ pub fn run() {
             set_ignore_cursor_events,
             get_system_metrics,
             toggle_gaming_mode,
+            quit_app,
             focus_island_window,
             adjust_window_size,
             media::media_play_pause,

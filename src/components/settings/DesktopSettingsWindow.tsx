@@ -21,6 +21,7 @@ import {
   Cpu,
   MemoryStick,
   Radio,
+  Power,
 } from 'lucide-react';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { check, type Update } from '@tauri-apps/plugin-updater';
@@ -53,6 +54,7 @@ import {
   getGlobalShortcutStatus,
   openExternalUrl,
   playChimeCue,
+  quitCasaApp,
   setAutostartEnabled,
 } from '../../utils/tauriBridge';
 
@@ -587,7 +589,7 @@ export const DesktopSettingsWindow: React.FC = () => {
     playChimeCue('tap');
     if (!isTauriRuntime()) {
       setUpdateResult({
-        currentVersion: '2.0.2',
+        currentVersion: '2.0.3',
         available: false,
         version: null,
         body: null,
@@ -618,13 +620,13 @@ export const DesktopSettingsWindow: React.FC = () => {
         });
       } else {
         setUpdateResult({
-          currentVersion: '2.0.2',
+          currentVersion: '2.0.3',
           available: false,
           version: null,
           body: null,
           date: null,
           statusKind: 'up-to-date',
-          message: 'CASA sudah menggunakan versi terbaru (v2.0.2).',
+          message: 'CASA sudah menggunakan versi terbaru (v2.0.3).',
         });
       }
     } catch (err) {
@@ -640,7 +642,7 @@ export const DesktopSettingsWindow: React.FC = () => {
         lower.includes('network');
 
       setUpdateResult({
-        currentVersion: '2.0.2',
+        currentVersion: '2.0.3',
         available: false,
         version: null,
         body: msg,
@@ -675,7 +677,7 @@ export const DesktopSettingsWindow: React.FC = () => {
 
       if (!update) {
         setUpdateResult({
-          currentVersion: '2.0.2',
+          currentVersion: '2.0.3',
           available: false,
           version: null,
           body: null,
@@ -717,7 +719,7 @@ export const DesktopSettingsWindow: React.FC = () => {
       await relaunch();
     } catch (err) {
       setUpdateResult((prev) => ({
-        currentVersion: prev?.currentVersion ?? '2.0.2',
+        currentVersion: prev?.currentVersion ?? '2.0.3',
         available: prev?.available ?? false,
         version: prev?.version ?? null,
         body: null,
@@ -816,7 +818,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                   CASA
                 </span>
                 <span className="px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.10] text-[10px] font-mono text-white/75">
-                  v2.0.2
+                  v2.0.3
                 </span>
               </div>
               <div className="text-[10px] font-mono text-white/40 mt-0.5 truncate">
@@ -857,19 +859,34 @@ export const DesktopSettingsWindow: React.FC = () => {
             </nav>
           </div>
 
-          {/* Sidebar Bottom Status (Monochrome Sync Icon instead of green dot) */}
-          <div className="pt-3 border-t border-white/[0.07] space-y-1.5 px-1">
-            <div className="flex items-center gap-2 text-[10.5px] font-mono text-white/60">
-              <Radio className="w-[13px] h-[13px] text-white/65 shrink-0" />
-              <span>Sinkronisasi real-time</span>
+          {/* Sidebar Bottom Status + Monochrome Quit CASA Button */}
+          <div className="pt-3 border-t border-white/[0.07] space-y-2.5 px-1">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-[10.5px] font-mono text-white/60">
+                <Radio className="w-[13px] h-[13px] text-white/65 shrink-0" />
+                <span>Sinkronisasi real-time</span>
+              </div>
+              <div className="text-[10px] text-white/35 flex items-center gap-1.5">
+                <span>Tekan</span>
+                <kbd className="px-1.5 py-0.5 rounded-[4px] bg-[#121215] border border-white/20 border-b-2 text-[9.5px] font-mono text-white/75">
+                  Esc
+                </kbd>
+                <span>tutup</span>
+              </div>
             </div>
-            <div className="text-[10px] text-white/35 flex items-center gap-1.5">
-              <span>Tekan</span>
-              <kbd className="px-1.5 py-0.5 rounded-[4px] bg-[#121215] border border-white/20 border-b-2 text-[9.5px] font-mono text-white/75">
-                Esc
-              </kbd>
-              <span>tutup</span>
-            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                playChimeCue('tap');
+                void quitCasaApp();
+              }}
+              className="w-full h-[30px] px-2.5 rounded-lg bg-[#08080A] hover:bg-white/[0.08] border border-white/[0.08] hover:border-white/20 text-[11px] font-medium text-white/65 hover:text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-[0.98]"
+              title="Keluar dan hentikan aplikasi CASA sepenuhnya"
+            >
+              <Power className="w-3.5 h-3.5 shrink-0" />
+              <span>Quit CASA</span>
+            </button>
           </div>
         </aside>
 
@@ -1297,7 +1314,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-[13px] font-semibold text-white">
-                            CASA v{updateResult?.currentVersion ?? '2.0.2'}
+                            CASA v{updateResult?.currentVersion ?? '2.0.3'}
                           </span>
                           <span className="text-[10px] font-mono text-white/45 px-1.5 py-0.5 rounded border border-white/[0.08] bg-[#08080A]">
                             Signed Updater
