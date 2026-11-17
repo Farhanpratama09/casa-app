@@ -1,7 +1,11 @@
 # Environment
-.env
-.env.*
+.env*
 !.env.example
+
+# Keys & Certificates
+*.key
+*.pem
+
 node_modules/
 npm-debug.log*
 yarn-debug.log*
