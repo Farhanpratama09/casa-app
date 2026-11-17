@@ -19,6 +19,7 @@
     "drag:default",
     "global-shortcut:default",
     "autostart:default",
+    "process:default",
     "updater:default"
   ]
 }

@@ -360,6 +360,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(system_stats::SystemStatsState::new())
         .plugin(tauri_plugin_drag::init())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 // Apply Win32 NOACTIVATE and TOOLWINDOW styles, stripping WS_EX_TRANSPARENT

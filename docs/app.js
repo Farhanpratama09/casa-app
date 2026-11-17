@@ -1,5 +1,5 @@
 /**
- * CASA v2.0.0 — Showcase Website Interactive Runtime
+ * CASA — Dynamic Rabbit Island for Windows · Showcase Interactive Runtime
  * Zero dependencies, CSP-strict (no eval, no inline HTML injection, URL allowlists).
  */
 
@@ -11,136 +11,178 @@
   const RELEASES_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases`;
   const RELEASES_PAGE_URL = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases`;
   const NEW_ISSUE_URL = `https://github.com/${REPO_OWNER}/${REPO_NAME}/issues/new`;
-
-  // Optional direct webhook endpoint (Web3Forms or Formspree).
-  // Leave blank to use the built-in pre-filled GitHub Issue fallback automatically.
   const FEEDBACK_ENDPOINT = '';
   const ALLOWED_FEEDBACK_HOSTS = ['api.web3forms.com', 'formspree.io'];
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
-  const CHIME_NOTES_HZ = [523.25, 659.25, 783.99, 987.77]; // C5 -> E5 -> G5 -> B5
+  const RING_CIRCUMFERENCE = 47.12; // 2 * PI * 7.5
 
-  const THEME_LABELS = {
-    default: 'Warm Amber',
-    monochrome: 'Monochrome',
-    colorblind: 'Colorblind Safe',
-  };
-
-  const EXPRESSION_LABELS = {
-    idle: '× ♥ Idle',
-    dual_active: '•̀ ♪ Focus+Musik',
-    focus: '•̀ ♥ Focus',
-    music: '♪ ♥ Musik',
-    awake_lock: '✦ ♥ Keep Awake',
-    alarm: '> < Alarm',
-  };
-
-  const DEMO_TRACKS = [
+  const QUEUE_TRACKS = [
     {
+      id: 'trk-midnight',
       title: 'Midnight Coding',
-      artist: 'Lo-Fi Bunny · Spotify SMTC',
-      lyric: 'Pure OLED black, zero distractions.',
+      artist: 'Lo-Fi Bunny · SMTC',
+      duration: '03:12',
+      lyrics: [
+        'Silence hums across an OLED screen',
+        'Two monochrome eyes watch the top bezel',
+        'Keystrokes fall in steady midnight rain',
+        'Zero clutter across every open window',
+        'Stay inside the flow until dawn breaks',
+      ],
     },
     {
+      id: 'trk-obsidian',
       title: 'Obsidian Horizon',
-      artist: 'CASA Synthwave · LRCLIB',
-      lyric: '4px Smart-Tuck keeps fullscreen crystal clear.',
+      artist: 'CASA Synth · LRCLIB',
+      duration: '02:48',
+      lyrics: [
+        '4px Smart-Tuck rests along the top edge',
+        'Wait for the cue when the movie ends',
+        'Smooth morph back to the digital clock',
+        'Quiet telemetry ticking in pure black',
+      ],
     },
     {
-      title: 'Coffee & Focus',
-      artist: 'Pomodoro Sessions · Local',
-      lyric: 'Alt + Space summons your workspace capsule.',
+      id: 'trk-rabbit-island',
+      title: 'Rabbit Island Waltz',
+      artist: 'Asa & Sasha · Studio',
+      duration: '03:27',
+      lyrics: [
+        'Tiny heart beside a calm tilted cross',
+        'Press Alt + Space to widen the workspace',
+        'Every lyric synced inside the narrow pill',
+        'Clean focus ring counting down to rest',
+      ],
+    },
+    {
+      id: 'trk-crimson',
+      title: 'Velvet Monochrome',
+      artist: 'Crimson · Instrumental',
+      duration: '02:55',
+      lyrics: [
+        'No stray pixels, only sharp hairlines',
+        'Carry files right into the top Drop Zone',
+        'Copy back to desktop in a single click',
+        'Crafted cleanly for Windows 11 OLED',
+      ],
     },
   ];
 
-  const AUDIO_OUTPUTS = [
-    { kind: 'wired', label: 'Wired Earphone (Realtek USB)', short: 'Wired' },
-    { kind: 'speaker', label: 'Speakers (Realtek Audio)', short: 'Speaker' },
-    { kind: 'bluetooth', label: 'BT Earphone • 85%', short: 'BT 85%' },
+  const INITIAL_TODOS = [
+    { id: 'td-1', text: 'Audit border hairline OLED', done: true },
+    { id: 'td-2', text: 'Verifikasi OTA signed key', done: false },
+    { id: 'td-3', text: 'Rilis build Windows x64', done: false },
+  ];
+
+  const SAMPLE_FILES = [
+    { id: 'file-brief', name: 'brief-casa.pdf', kind: 'PDF · 420 KB' },
+    { id: 'file-sasha', name: 'sasha-icon.svg', kind: 'SVG · 14 KB' },
+    { id: 'file-mix', name: 'mix-playlist.url', kind: 'URL · Web' },
   ];
 
   const state = {
-    theme: 'default',
-    placement: 'docked',
-    tucked: false,
-    expanded: false,
-    expression: 'idle',
-    activeTab: 'control',
-    keepAwake: false,
-    focusRunning: false,
-    focusSeconds: 25 * 60,
-    musicPlaying: false,
+    mode: 'resting', // 'resting' | 'lyrics' | 'todo' | 'hud' | 'dropzone'
+    capsuleState: 'idle', // 'resting' | 'idle' | 'expanded'
+    expression: 'idle', // 'resting' | 'idle' | 'music' | 'focus' | 'dual_active'
+    idleLyricMinimized: false,
+    musicPlaying: true,
     trackIndex: 0,
-    outputIndex: 0,
+    lyricIndex: 0,
+    todos: INITIAL_TODOS.map((t) => ({ ...t })),
+    focusTimerRunning: true,
+    focusSeconds: 18 * 60 + 45,
+    dualIdleActive: false,
+    volume: 68,
+    audioOutputLabel: 'Speakers',
+    hudText: '',
     hudTimerId: null,
-    hudKind: null,
-    alarmRinging: false,
-    audioCtx: null,
-    hoverOpenTimer: null,
-    hoverCloseTimer: null,
-    focusIntervalId: null,
+    droppedIds: [],
+    introTimers: [],
+    lyricIntervalId: null,
+    clockIntervalId: null,
+    focusTickId: null,
+    pointerDrag: null,
   };
 
-  // DOM helpers
   const $ = (id) => document.getElementById(id);
   const el = {
-    html: document.documentElement,
-    notchMount: $('live-notch-mount'),
-    notchShell: $('casa-notch-shell'),
-    notchEyes: $('notch-eyes-svg'),
-    notchPrimary: $('notch-primary-text'),
-    notchSecondary: $('notch-secondary-text'),
-    notchHudChip: $('notch-hud-chip'),
-    notchAlarmActions: $('notch-alarm-actions'),
-    notchSnoozeBtn: $('notch-snooze-btn'),
-    notchDismissBtn: $('notch-dismiss-btn'),
-    notchBatteryLabel: $('notch-battery-label'),
-    notchExpClock: $('notch-exp-clock'),
-    notchCollapseBtn: $('notch-collapse-btn'),
-    notchTabButtons: Array.from(document.querySelectorAll('[data-notch-tab]')),
-    notchBodyControl: $('notch-exp-body-control'),
-    notchBodyMusic: $('notch-exp-body-music'),
-    notchTimerDisplay: $('notch-timer-display'),
-    notchTimerStatus: $('notch-timer-status'),
-    notchFocusToggle: $('notch-focus-toggle'),
-    notchAwakeToggle: $('notch-awake-toggle'),
-    notchMusicToggle: $('notch-music-toggle'),
-    notchChimeMini: $('notch-chime-mini'),
-    notchExpTrack: $('notch-exp-track'),
-    notchExpArtist: $('notch-exp-artist'),
-    notchMusicTitle: $('notch-music-title'),
-    notchMusicArtist: $('notch-music-artist'),
-    notchMusicLyric: $('notch-music-lyric'),
-    notchPrevTrack: $('notch-prev-track'),
-    notchPlayPauseBtn: $('notch-play-pause-btn'),
-    notchNextTrack: $('notch-next-track'),
-    notchOutputLabel: $('notch-output-label'),
-    notchBtLabel: $('notch-bt-label'),
-    notchHudBtMini: $('notch-hud-bt-mini'),
-    notchHudOutMini: $('notch-hud-out-mini'),
-    heroEyeLeft: $('hero-eye-left'),
-    heroEyeRight: $('hero-eye-right'),
-    mascotCard: $('mascot-card'),
-    mascotExpressionLabel: $('mascot-expression-label'),
-    mascotPlacementLabel: $('mascot-placement-label'),
-    themeStatusPill: $('theme-status-pill'),
-    placementStatusPill: $('placement-status-pill'),
-    exprCodePill: $('expr-code-pill'),
-    themeButtons: Array.from(document.querySelectorAll('[data-theme-btn]')),
-    placementButtons: Array.from(document.querySelectorAll('[data-placement-btn]')),
-    exprButtons: Array.from(document.querySelectorAll('[data-expr-btn]')),
-    simTuckBtn: $('sim-tuck-btn'),
-    simExpandBtn: $('sim-expand-btn'),
-    simChimeBtn: $('sim-chime-btn'),
-    simBtBtn: $('sim-bt-btn'),
-    simOutputBtn: $('sim-output-btn'),
-    heroToggleNotchBtn: $('hero-toggle-notch-btn'),
-    heroDownloadBtn: $('hero-download-btn'),
-    heroDownloadsSummary: $('hero-downloads-summary'),
-    releaseVersionBadge: $('release-version-badge'),
-    releaseDateBadge: $('release-date-badge'),
+    monitor: $('virtual-monitor'),
+    monitorScreen: $('monitor-screen'),
+    introOverlay: $('intro-overlay'),
+    capsule: $('vm-notch-capsule'),
+    eyes: $('vm-notch-eyes'),
+    title: $('vm-notch-title'),
+    subtitle: $('vm-notch-subtitle'),
+    miniLyricPill: $('vm-mini-lyric-pill'),
+    hudChip: $('vm-hud-chip'),
+    focusRingWrap: $('vm-focus-ring-wrap'),
+    focusRingArc: $('vm-focus-ring-arc'),
+    focusMiniPct: $('vm-focus-mini-pct'),
+    batteryBadge: $('vm-battery-badge'),
+    expandedPanel: $('vm-notch-expanded'),
+    expModeTitle: $('vm-exp-mode-title'),
+    expClock: $('vm-exp-clock'),
+    collapseBtn: $('vm-notch-collapse-btn'),
+    expControl: $('vm-exp-control'),
+    expMusic: $('vm-exp-music'),
+    expFocus: $('vm-exp-focus'),
+    expDropzone: $('vm-exp-dropzone'),
+    expRestBtn: $('vm-exp-rest-btn'),
+    expTrackTitle: $('vm-exp-track-title'),
+    expTrackArtist: $('vm-exp-track-artist'),
+    expLyricLine: $('vm-exp-lyric-line'),
+    idleLyricBtn: $('vm-idle-lyric-btn'),
+    expPlayBtn: $('vm-exp-play-btn'),
+    expFocusLabel: $('vm-exp-focus-label'),
+    expFocusSub: $('vm-exp-focus-sub'),
+    expTimerBtn: $('vm-exp-timer-btn'),
+    dropzonePrompt: $('vm-dropzone-prompt'),
+    droppedItems: $('vm-dropped-items'),
+    dropzoneCount: $('vm-dropzone-count'),
+    copyBackBtn: $('vm-copy-back-btn'),
+
+    // Scenes
+    sceneResting: $('scene-resting'),
+    sceneLyrics: $('scene-lyrics'),
+    sceneTodo: $('scene-todo'),
+    sceneHud: $('scene-hud'),
+    sceneDropzone: $('scene-dropzone'),
+
+    // Scene controls
+    desktopTime: $('vm-desktop-time'),
+    clockStatus: $('vm-clock-status'),
+    sceneToggleRestBtn: $('scene-toggle-rest-btn'),
+    sceneToggleExpandBtn: $('scene-toggle-expand-btn'),
+    lyricStage: $('vm-lyric-stage'),
+    queueList: $('vm-queue-list'),
+    queueCountTag: $('vm-queue-count-tag'),
+    sceneLyricMinimizeBtn: $('scene-lyric-minimize-btn'),
+    todoList: $('vm-todo-list'),
+    todoForm: $('vm-todo-form'),
+    todoInput: $('vm-todo-input'),
+    todoProgressText: $('vm-todo-progress-text'),
+    focusEyeBadge: $('vm-focus-eye-badge'),
+    todoDualBtn: $('vm-todo-dual-btn'),
+    todoTimerBtn: $('vm-todo-timer-btn'),
+    hudReadout: $('vm-hud-readout'),
+    volumeSlider: $('vm-volume-slider'),
+    volumePct: $('vm-volume-pct'),
+    simBtBtn: $('vm-sim-bt-btn'),
+    simWiredBtn: $('vm-sim-wired-btn'),
+    desktopFiles: $('vm-desktop-files'),
+    simDropAllBtn: $('vm-sim-drop-all-btn'),
+
+    // Bottom Dock & Replay
+    modeButtons: Array.from(document.querySelectorAll('[data-vm-mode]')),
+    replayIntroBtn: $('replay-intro-btn'),
+
+    // Release Hub & Feedback
     primaryDownloadBtn: $('primary-download-btn'),
     msiDownloadBtn: $('msi-download-btn'),
+    heroDownloadBtn: $('hero-download-btn'),
+    releaseVersionBadge: $('release-version-badge'),
+    releaseDateBadge: $('release-date-badge'),
     releaseStatusNote: $('release-status-note'),
     statExeSize: $('stat-exe-size'),
     statMsiSize: $('stat-msi-size'),
@@ -170,818 +212,937 @@
     }
   }
 
+  function formatClockHHMM(date = new Date()) {
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mm = String(date.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+  }
+
+  function formatMMSS(sec) {
+    const safe = Math.max(0, Math.floor(sec));
+    const m = Math.floor(safe / 60);
+    const s = safe % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+
   /**
-   * Renders CASA companion SVG eye geometry safely into both the pinned Notch SVG (34x16)
-   * and the Hero Obsidian Bunny centerpiece SVG (240x240) using pure createElementNS primitives.
+   * Renders SVG eye geometry inside the virtual monitor Notch (strict monochrome #FFFFFF).
    */
-  function renderEyeGeometry(expr) {
-    const heartPathNotch =
+  function renderNotchEyes(expr) {
+    if (!el.eyes) return;
+    clearNode(el.eyes);
+    const heartPath =
       'M 25,13.5 L 24.3,12.8 C 21.1,10.0 19.6,8.3 19.6,6.1 C 19.6,4.4 20.9,3.1 22.5,3.1 C 23.6,3.1 24.5,3.7 25,4.6 C 25.5,3.7 26.4,3.1 27.5,3.1 C 29.1,3.1 30.4,4.4 30.4,6.1 C 30.4,8.3 28.9,10.0 25.7,12.8 Z';
 
-    const heroHeartPath =
-      'M 148 167 C 148 167, 133.5 157, 133.5 148.5 C 133.5 143.2, 137.7 139.5, 142 139.5 C 144.7 139.5, 146.9 141.2, 148 143.3 C 149.1 141.2, 151.3 139.5, 154 139.5 C 158.3 139.5, 162.5 143.2, 162.5 148.5 C 162.5 157, 148 167, 148 167 Z';
-
-    // 1. Pinned Notch SVG (viewBox 0 0 34 16)
-    if (el.notchEyes) {
-      clearNode(el.notchEyes);
-      if (expr === 'alarm') {
-        el.notchEyes.appendChild(
-          createSvgNode('path', {
-            d: 'M 4.5,3.2 L 12.5,8 L 4.5,12.8',
-            fill: 'none',
-            stroke: 'var(--casa-accent)',
-            'stroke-width': 2.1,
-            'stroke-linecap': 'round',
-            'stroke-linejoin': 'round',
-          })
-        );
-        el.notchEyes.appendChild(
-          createSvgNode('path', {
-            d: 'M 29.5,3.2 L 21.5,8 L 29.5,12.8',
-            fill: 'none',
-            stroke: 'var(--casa-accent)',
-            'stroke-width': 2.1,
-            'stroke-linecap': 'round',
-            'stroke-linejoin': 'round',
-          })
-        );
-      } else {
-        // Left eye
-        if (expr === 'dual_active' || expr === 'focus') {
-          el.notchEyes.appendChild(
-            createSvgNode('path', {
-              d: 'M 4.2,3.0 L 12.2,5.6',
-              fill: 'none',
-              stroke: '#ffffff',
-              'stroke-width': 1.9,
-              'stroke-linecap': 'round',
-            })
-          );
-          el.notchEyes.appendChild(
-            createSvgNode('circle', {
-              cx: 8.4,
-              cy: 9.8,
-              r: 2.7,
-              fill: '#ffffff',
-            })
-          );
-        } else if (expr === 'music') {
-          el.notchEyes.appendChild(
-            createSvgNode('path', {
-              d: 'M 9.8,11.6 L 9.8,3.2 L 14.2,4.8',
-              fill: 'none',
-              stroke: '#ffffff',
-              'stroke-width': 1.9,
-              'stroke-linecap': 'round',
-              'stroke-linejoin': 'round',
-            })
-          );
-          el.notchEyes.appendChild(
-            createSvgNode('ellipse', {
-              cx: 6.8,
-              cy: 11.6,
-              rx: 3.0,
-              ry: 2.2,
-              transform: 'rotate(-18 6.8 11.6)',
-              fill: '#ffffff',
-            })
-          );
-        } else if (expr === 'awake_lock') {
-          el.notchEyes.appendChild(
-            createSvgNode('path', {
-              d: 'M 8.5,1.8 Q 8.8,7.6 14.6,8 Q 8.8,8.4 8.5,14.2 Q 8.2,8.4 2.4,8 Q 8.2,7.6 8.5,1.8 Z',
-              fill: '#ffffff',
-            })
-          );
-        } else {
-          el.notchEyes.appendChild(
-            createSvgNode('path', {
-              d: 'M 3.5,3.5 L 12.5,12.5 M 12.5,3.5 L 3.5,12.5',
-              fill: 'none',
-              stroke: '#ffffff',
-              'stroke-width': 2.1,
-              'stroke-linecap': 'round',
-            })
-          );
-        }
-
-        // Right eye
-        if (expr === 'dual_active') {
-          el.notchEyes.appendChild(
-            createSvgNode('path', {
-              d: 'M 26.2,11.6 L 26.2,3.2 L 30.6,4.8',
-              fill: 'none',
-              stroke: '#ffffff',
-              'stroke-width': 1.9,
-              'stroke-linecap': 'round',
-              'stroke-linejoin': 'round',
-            })
-          );
-          el.notchEyes.appendChild(
-            createSvgNode('ellipse', {
-              cx: 23.2,
-              cy: 11.6,
-              rx: 3.0,
-              ry: 2.2,
-              transform: 'rotate(-18 23.2 11.6)',
-              fill: '#ffffff',
-            })
-          );
-        } else {
-          el.notchEyes.appendChild(
-            createSvgNode('path', {
-              d: heartPathNotch,
-              fill: '#ffffff',
-            })
-          );
-        }
-      }
+    if (expr === 'resting') {
+      el.eyes.appendChild(
+        createSvgNode('path', {
+          d: 'M 3.5,8.5 Q 8,12 12.5,8.5',
+          fill: 'none',
+          stroke: '#a1a1aa',
+          'stroke-width': 2.0,
+          'stroke-linecap': 'round',
+        })
+      );
+      el.eyes.appendChild(
+        createSvgNode('path', {
+          d: 'M 20.5,8.5 Q 25,12 29.5,8.5',
+          fill: 'none',
+          stroke: '#a1a1aa',
+          'stroke-width': 2.0,
+          'stroke-linecap': 'round',
+        })
+      );
+      return;
     }
 
-    // 2. Hero Obsidian Bunny SVG Eyes (centered around left=(92,155), right=(148,153))
-    if (el.heroEyeLeft && el.heroEyeRight) {
-      clearNode(el.heroEyeLeft);
-      clearNode(el.heroEyeRight);
+    // Left eye by active expression
+    if (expr === 'music') {
+      el.eyes.appendChild(
+        createSvgNode('path', {
+          d: 'M 7.5,12 L 7.5,4 L 13,2.8',
+          fill: 'none',
+          stroke: '#ffffff',
+          'stroke-width': 1.9,
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+        })
+      );
+      el.eyes.appendChild(
+        createSvgNode('circle', { cx: 6.2, cy: 12.2, r: 2.2, fill: '#ffffff' })
+      );
+    } else if (expr === 'focus' || expr === 'dual_active') {
+      el.eyes.appendChild(
+        createSvgNode('path', {
+          d: 'M 3.5,3.8 L 12.5,6.4',
+          fill: 'none',
+          stroke: '#ffffff',
+          'stroke-width': 2.0,
+          'stroke-linecap': 'round',
+        })
+      );
+      el.eyes.appendChild(
+        createSvgNode('circle', { cx: 8.5, cy: 10.6, r: 2.3, fill: '#ffffff' })
+      );
+    } else {
+      // Idle ×
+      el.eyes.appendChild(
+        createSvgNode('path', {
+          d: 'M 3.5,3.5 L 12.5,12.5 M 12.5,3.5 L 3.5,12.5',
+          fill: 'none',
+          stroke: '#ffffff',
+          'stroke-width': 2.2,
+          'stroke-linecap': 'round',
+        })
+      );
+    }
 
-      if (expr === 'alarm') {
-        el.heroEyeLeft.appendChild(
-          createSvgNode('path', {
-            d: 'M 81 144 L 103 155 L 81 166',
-            fill: 'none',
-            stroke: 'var(--casa-accent)',
-            'stroke-width': 6.4,
-            'stroke-linecap': 'round',
-            'stroke-linejoin': 'round',
-          })
-        );
-        el.heroEyeRight.appendChild(
-          createSvgNode('path', {
-            d: 'M 159 144 L 137 155 L 159 166',
-            fill: 'none',
-            stroke: 'var(--casa-accent)',
-            'stroke-width': 6.4,
-            'stroke-linecap': 'round',
-            'stroke-linejoin': 'round',
-          })
-        );
-        return;
-      }
-
-      // Hero Left Eye
-      if (expr === 'dual_active' || expr === 'focus') {
-        el.heroEyeLeft.appendChild(
-          createSvgNode('path', {
-            d: 'M 80 142 L 104 149',
-            fill: 'none',
-            stroke: '#FFFFFF',
-            'stroke-width': 5.6,
-            'stroke-linecap': 'round',
-          })
-        );
-        el.heroEyeLeft.appendChild(
-          createSvgNode('circle', {
-            cx: 92,
-            cy: 160,
-            r: 7.4,
-            fill: '#FFFFFF',
-          })
-        );
-      } else if (expr === 'music') {
-        el.heroEyeLeft.appendChild(
-          createSvgNode('path', {
-            d: 'M 95 162 L 95 140 L 108 145',
-            fill: 'none',
-            stroke: '#FFFFFF',
-            'stroke-width': 5.4,
-            'stroke-linecap': 'round',
-            'stroke-linejoin': 'round',
-          })
-        );
-        el.heroEyeLeft.appendChild(
-          createSvgNode('ellipse', {
-            cx: 87,
-            cy: 162,
-            rx: 8.2,
-            ry: 6.0,
-            transform: 'rotate(-18 87 162)',
-            fill: '#FFFFFF',
-          })
-        );
-      } else if (expr === 'awake_lock') {
-        el.heroEyeLeft.appendChild(
-          createSvgNode('path', {
-            d: 'M 92 138 Q 93.2 153 108 155 Q 93.2 157 92 172 Q 90.8 157 76 155 Q 90.8 153 92 138 Z',
-            fill: '#FFFFFF',
-          })
-        );
-      } else {
-        el.heroEyeLeft.appendChild(
-          createSvgNode('path', {
-            d: 'M 83 146 L 101 164 M 101 146 L 83 164',
-            fill: 'none',
-            stroke: '#FFFFFF',
-            'stroke-width': 6.8,
-            'stroke-linecap': 'round',
-          })
-        );
-      }
-
-      // Hero Right Eye
-      if (expr === 'dual_active') {
-        el.heroEyeRight.appendChild(
-          createSvgNode('path', {
-            d: 'M 151 162 L 151 140 L 164 145',
-            fill: 'none',
-            stroke: '#FFFFFF',
-            'stroke-width': 5.4,
-            'stroke-linecap': 'round',
-            'stroke-linejoin': 'round',
-          })
-        );
-        el.heroEyeRight.appendChild(
-          createSvgNode('ellipse', {
-            cx: 143,
-            cy: 162,
-            rx: 8.2,
-            ry: 6.0,
-            transform: 'rotate(-18 143 162)',
-            fill: '#FFFFFF',
-          })
-        );
-      } else {
-        el.heroEyeRight.appendChild(
-          createSvgNode('path', {
-            d: heroHeartPath,
-            fill: '#FFFFFF',
-          })
-        );
-      }
+    // Right eye
+    if (expr === 'dual_active') {
+      el.eyes.appendChild(
+        createSvgNode('path', {
+          d: 'M 25.5,12 L 25.5,4 L 30.8,2.8',
+          fill: 'none',
+          stroke: '#ffffff',
+          'stroke-width': 1.9,
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+        })
+      );
+      el.eyes.appendChild(
+        createSvgNode('circle', { cx: 24.2, cy: 12.2, r: 2.2, fill: '#ffffff' })
+      );
+    } else {
+      el.eyes.appendChild(createSvgNode('path', { d: heartPath, fill: '#ffffff' }));
     }
   }
 
-  function formatMmSs(totalSeconds) {
-    const clamped = Math.max(0, Math.floor(totalSeconds));
-    const mins = String(Math.floor(clamped / 60)).padStart(2, '0');
-    const secs = String(clamped % 60).padStart(2, '0');
-    return `${mins}:${secs}`;
+  function showHudChip(label) {
+    if (state.hudTimerId) {
+      window.clearTimeout(state.hudTimerId);
+      state.hudTimerId = null;
+    }
+    state.hudText = label;
+    syncCapsuleUI();
+    state.hudTimerId = window.setTimeout(() => {
+      state.hudText = '';
+      state.hudTimerId = null;
+      syncCapsuleUI();
+    }, 2600);
   }
 
-  function computeCurrentExpression() {
-    if (state.alarmRinging) return 'alarm';
-    if (state.expression !== 'idle') return state.expression;
-    if (state.focusRunning && state.musicPlaying) return 'dual_active';
-    if (state.focusRunning) return 'focus';
-    if (state.musicPlaying) return 'music';
-    if (state.keepAwake) return 'awake_lock';
-    return 'idle';
+  function clearIntroTimers() {
+    state.introTimers.forEach((id) => window.clearTimeout(id));
+    state.introTimers = [];
+  }
+
+  function startIntroMorphSequence() {
+    clearIntroTimers();
+    if (!el.monitor || !el.introOverlay) return;
+
+    state.mode = 'resting';
+    state.capsuleState = 'idle';
+    state.expression = 'resting';
+    state.idleLyricMinimized = false;
+    state.hudText = '';
+
+    el.introOverlay.hidden = false;
+    el.monitor.setAttribute('data-intro-phase', 'hi');
+    syncUI();
+
+    const t1 = window.setTimeout(() => {
+      el.monitor.setAttribute('data-intro-phase', 'morph');
+    }, 1500);
+
+    const t2 = window.setTimeout(() => {
+      el.monitor.setAttribute('data-intro-phase', 'resting');
+      el.introOverlay.hidden = true;
+      state.expression = 'resting';
+      syncCapsuleUI();
+    }, 2180);
+
+    const t3 = window.setTimeout(() => {
+      el.monitor.setAttribute('data-intro-phase', 'ready');
+      state.expression = 'idle';
+      syncCapsuleUI();
+    }, 2700);
+
+    state.introTimers.push(t1, t2, t3);
+  }
+
+  function getActiveTrack() {
+    return QUEUE_TRACKS[state.trackIndex] || QUEUE_TRACKS[0];
+  }
+
+  function renderLyricsScene() {
+    const track = getActiveTrack();
+    if (el.lyricStage) {
+      clearNode(el.lyricStage);
+      track.lyrics.forEach((line, idx) => {
+        const row = document.createElement('div');
+        row.className = idx === state.lyricIndex ? 'vm-lyric-row active' : 'vm-lyric-row';
+        row.textContent = line;
+        el.lyricStage.appendChild(row);
+      });
+    }
+
+    if (el.queueCountTag) {
+      el.queueCountTag.textContent = `${QUEUE_TRACKS.length} lagu`;
+    }
+
+    if (el.queueList) {
+      clearNode(el.queueList);
+      QUEUE_TRACKS.forEach((item, idx) => {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'vm-queue-btn';
+        if (idx === state.trackIndex) {
+          btn.setAttribute('aria-current', 'true');
+        }
+        btn.addEventListener('click', () => {
+          state.trackIndex = idx;
+          state.lyricIndex = 0;
+          state.musicPlaying = true;
+          syncUI();
+        });
+
+        const left = document.createElement('div');
+        const tEl = document.createElement('div');
+        tEl.className = 'vm-queue-title';
+        tEl.textContent = item.title;
+        const aEl = document.createElement('div');
+        aEl.className = 'vm-queue-artist';
+        aEl.textContent = item.artist;
+        left.appendChild(tEl);
+        left.appendChild(aEl);
+
+        const right = document.createElement('span');
+        right.className = 'vm-queue-artist tabular';
+        right.textContent = item.duration;
+
+        btn.appendChild(left);
+        btn.appendChild(right);
+        li.appendChild(btn);
+        el.queueList.appendChild(li);
+      });
+    }
+  }
+
+  function renderTodoScene() {
+    const doneCount = state.todos.filter((t) => t.done).length;
+    const totalCount = Math.max(1, state.todos.length);
+    const ratio = doneCount / totalCount;
+
+    if (el.todoProgressText) {
+      el.todoProgressText.textContent = `${doneCount} / ${state.todos.length} selesai`;
+    }
+    if (el.focusEyeBadge) {
+      el.focusEyeBadge.textContent = state.dualIdleActive ? '•̀ ♪ Dual-Idle' : '•̀ ♥ Focus';
+    }
+    if (el.focusRingArc) {
+      const offset = RING_CIRCUMFERENCE * (1 - ratio);
+      el.focusRingArc.style.strokeDashoffset = String(offset.toFixed(2));
+    }
+    if (el.focusMiniPct) {
+      el.focusMiniPct.textContent = `${doneCount}/${state.todos.length}`;
+    }
+
+    if (el.todoList) {
+      clearNode(el.todoList);
+      state.todos.forEach((task) => {
+        const li = document.createElement('li');
+        const label = document.createElement('label');
+        label.className = 'vm-todo-item';
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'vm-todo-checkbox';
+        cb.checked = task.done;
+        cb.addEventListener('change', () => {
+          task.done = cb.checked;
+          syncUI();
+        });
+
+        const span = document.createElement('span');
+        span.className = task.done ? 'vm-todo-text done' : 'vm-todo-text';
+        span.textContent = task.text;
+
+        label.appendChild(cb);
+        label.appendChild(span);
+        li.appendChild(label);
+        el.todoList.appendChild(li);
+      });
+    }
+  }
+
+  function renderDropzoneScene() {
+    if (el.desktopFiles) {
+      clearNode(el.desktopFiles);
+      SAMPLE_FILES.forEach((file) => {
+        const isDropped = state.droppedIds.includes(file.id);
+        const card = document.createElement('div');
+        card.className = isDropped ? 'vm-file-card stashed' : 'vm-file-card';
+        card.setAttribute('draggable', isDropped ? 'false' : 'true');
+        card.setAttribute('data-file-id', file.id);
+
+        const title = document.createElement('div');
+        title.className = 'vm-file-name';
+        title.textContent = file.name;
+
+        const meta = document.createElement('div');
+        meta.className = 'vm-file-meta';
+        meta.textContent = isDropped ? 'Tersimpan di Drop Zone' : file.kind;
+
+        card.appendChild(title);
+        card.appendChild(meta);
+
+        if (!isDropped) {
+          card.addEventListener('dragstart', (ev) => {
+            if (ev.dataTransfer) {
+              ev.dataTransfer.setData('text/plain', file.id);
+              ev.dataTransfer.effectAllowed = 'copyMove';
+            }
+            card.classList.add('dragging');
+            openDropZoneTarget(true);
+          });
+
+          card.addEventListener('dragend', () => {
+            card.classList.remove('dragging');
+            if (el.capsule) el.capsule.removeAttribute('data-drop-hover');
+          });
+
+          card.addEventListener('pointerdown', (ev) => {
+            if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+            state.pointerDrag = {
+              fileId: file.id,
+              startY: ev.clientY,
+              moved: false,
+            };
+            card.classList.add('dragging');
+            try {
+              card.setPointerCapture(ev.pointerId);
+            } catch (_err) {}
+          });
+
+          card.addEventListener('pointermove', (ev) => {
+            if (!state.pointerDrag || state.pointerDrag.fileId !== file.id) return;
+            const dy = state.pointerDrag.startY - ev.clientY;
+            if (dy > 14) {
+              state.pointerDrag.moved = true;
+              openDropZoneTarget(true);
+            }
+            if (el.monitorScreen) {
+              const sRect = el.monitorScreen.getBoundingClientRect();
+              const nearTopLip = ev.clientY <= sRect.top + 110;
+              if (el.capsule) {
+                el.capsule.setAttribute('data-drop-hover', nearTopLip ? 'true' : 'false');
+              }
+            }
+          });
+
+          const endPointerDrag = (ev) => {
+            if (!state.pointerDrag || state.pointerDrag.fileId !== file.id) return;
+            card.classList.remove('dragging');
+            const sRect = el.monitorScreen ? el.monitorScreen.getBoundingClientRect() : null;
+            const droppedNearTop =
+              state.pointerDrag.moved && sRect && ev.clientY <= sRect.top + 125;
+            state.pointerDrag = null;
+            if (el.capsule) el.capsule.removeAttribute('data-drop-hover');
+            if (droppedNearTop) {
+              captureFileIntoDropZone(file.id);
+            }
+          };
+
+          card.addEventListener('pointerup', endPointerDrag);
+          card.addEventListener('pointercancel', endPointerDrag);
+        }
+
+        el.desktopFiles.appendChild(card);
+      });
+    }
+
+    // Populate Drop Zone Shelf inside expanded Notch
+    if (el.droppedItems) {
+      clearNode(el.droppedItems);
+      state.droppedIds.forEach((fid) => {
+        const meta = SAMPLE_FILES.find((f) => f.id === fid);
+        if (!meta) return;
+        const chip = document.createElement('span');
+        chip.className = 'vm-dropped-chip';
+        chip.textContent = meta.name;
+        el.droppedItems.appendChild(chip);
+      });
+    }
+
+    if (el.dropzonePrompt) {
+      el.dropzonePrompt.hidden = state.droppedIds.length > 0;
+    }
+    if (el.dropzoneCount) {
+      el.dropzoneCount.textContent = `${state.droppedIds.length} file di rak`;
+    }
+    if (el.copyBackBtn) {
+      el.copyBackBtn.hidden = state.droppedIds.length === 0;
+    }
+  }
+
+  function openDropZoneTarget(expand) {
+    if (expand) {
+      state.capsuleState = 'expanded';
+      if (el.capsule) el.capsule.setAttribute('data-drop-hover', 'true');
+      syncCapsuleUI();
+    }
+  }
+
+  function captureFileIntoDropZone(fileId) {
+    if (!fileId) return;
+    if (!state.droppedIds.includes(fileId)) {
+      state.droppedIds.push(fileId);
+    }
+    state.mode = 'dropzone';
+    state.capsuleState = 'expanded';
+    syncUI();
+  }
+
+  function copyDropZoneBackToDesktop() {
+    state.droppedIds = [];
+    if (el.capsule) el.capsule.removeAttribute('data-drop-hover');
+    state.capsuleState = 'idle';
+    syncUI();
+    showHudChip('Copied Back to Desktop');
+  }
+
+  function syncCapsuleUI() {
+    const nowText = formatClockHHMM();
+    const track = getActiveTrack();
+    const activeLyric = track.lyrics[state.lyricIndex] || track.lyrics[0];
+
+    let activeExpr = state.expression;
+    if (state.mode === 'resting') {
+      activeExpr = state.expression === 'resting' ? 'resting' : 'idle';
+    } else if (state.mode === 'lyrics') {
+      activeExpr = 'music';
+    } else if (state.mode === 'todo') {
+      activeExpr = state.dualIdleActive ? 'dual_active' : 'focus';
+    } else if (state.mode === 'hud') {
+      activeExpr = 'idle';
+    } else if (state.mode === 'dropzone') {
+      activeExpr = 'idle';
+    }
+
+    renderNotchEyes(activeExpr);
+
+    const isExpanded = state.capsuleState === 'expanded';
+    if (el.capsule) {
+      el.capsule.setAttribute('data-state', isExpanded ? 'expanded' : 'idle');
+      el.capsule.setAttribute('data-hud-active', state.hudText ? 'true' : 'false');
+    }
+    if (el.expandedPanel) {
+      el.expandedPanel.hidden = !isExpanded;
+    }
+
+    // Pill row text & widgets
+    if (state.mode === 'lyrics') {
+      if (el.title) el.title.textContent = state.idleLyricMinimized ? track.title : nowText;
+      if (el.subtitle) {
+        el.subtitle.textContent = state.idleLyricMinimized ? '' : track.title;
+      }
+      if (el.miniLyricPill) {
+        el.miniLyricPill.hidden = !state.idleLyricMinimized;
+        if (state.idleLyricMinimized) {
+          el.miniLyricPill.textContent = activeLyric;
+        }
+      }
+    } else if (state.mode === 'todo') {
+      if (el.title) el.title.textContent = formatMMSS(state.focusSeconds);
+      if (el.subtitle) {
+        el.subtitle.textContent = state.dualIdleActive ? 'Dual Focus' : 'Focus Active';
+      }
+      if (el.miniLyricPill) el.miniLyricPill.hidden = true;
+    } else {
+      if (el.title) el.title.textContent = nowText;
+      if (el.subtitle) {
+        el.subtitle.textContent =
+          activeExpr === 'resting'
+            ? 'Resting'
+            : state.mode === 'dropzone'
+            ? 'Drop Ready'
+            : 'Awake';
+      }
+      if (el.miniLyricPill) el.miniLyricPill.hidden = true;
+    }
+
+    if (el.focusRingWrap) {
+      el.focusRingWrap.hidden = state.mode !== 'todo';
+    }
+    if (el.hudChip) {
+      if (state.hudText) {
+        el.hudChip.hidden = false;
+        el.hudChip.textContent = state.hudText;
+      } else {
+        el.hudChip.hidden = true;
+        el.hudChip.textContent = '';
+      }
+    }
+    if (el.batteryBadge) {
+      el.batteryBadge.hidden = state.mode === 'lyrics' && state.idleLyricMinimized;
+    }
+
+    // Expanded panel active subview matching current monitor scenario
+    if (el.expClock) el.expClock.textContent = nowText;
+    if (el.expControl) el.expControl.hidden = state.mode !== 'resting' && state.mode !== 'hud';
+    if (el.expMusic) el.expMusic.hidden = state.mode !== 'lyrics';
+    if (el.expFocus) el.expFocus.hidden = state.mode !== 'todo';
+    if (el.expDropzone) el.expDropzone.hidden = state.mode !== 'dropzone';
+
+    if (el.expModeTitle) {
+      el.expModeTitle.textContent =
+        state.mode === 'lyrics'
+          ? 'Music & Lyrics'
+          : state.mode === 'todo'
+          ? 'Focus & To-Do'
+          : state.mode === 'dropzone'
+          ? 'Drop Zone Shelf'
+          : 'CASA Capsule';
+    }
+    if (el.expTrackTitle) el.expTrackTitle.textContent = track.title;
+    if (el.expTrackArtist) el.expTrackArtist.textContent = track.artist;
+    if (el.expLyricLine) el.expLyricLine.textContent = activeLyric;
+    if (el.expPlayBtn) el.expPlayBtn.textContent = state.musicPlaying ? 'Pause' : 'Play';
+    if (el.idleLyricBtn) {
+      el.idleLyricBtn.textContent = state.idleLyricMinimized
+        ? 'Expand Lyrics'
+        : 'Idle Lyric Minimize';
+    }
+    if (el.sceneLyricMinimizeBtn) {
+      el.sceneLyricMinimizeBtn.textContent = state.idleLyricMinimized
+        ? 'Restore Capsule'
+        : 'Idle Lyric Minimize';
+    }
+
+    const doneCount = state.todos.filter((t) => t.done).length;
+    if (el.expFocusLabel) {
+      el.expFocusLabel.textContent = `Sesi Fokus · ${formatMMSS(state.focusSeconds)}`;
+    }
+    if (el.expFocusSub) {
+      el.expFocusSub.textContent = `${doneCount} / ${state.todos.length} To-Do selesai`;
+    }
+    if (el.expTimerBtn) {
+      el.expTimerBtn.textContent = state.focusTimerRunning ? 'Jeda Timer' : 'Lanjut Focus';
+    }
   }
 
   function syncUI() {
-    const resolvedExpr = computeCurrentExpression();
-    renderEyeGeometry(resolvedExpr);
-
-    // Theme tokens
-    el.html.setAttribute('data-theme', state.theme);
-    if (el.themeStatusPill) {
-      el.themeStatusPill.textContent = THEME_LABELS[state.theme] || 'Warm Amber';
+    if (el.monitor) {
+      el.monitor.setAttribute('data-mode', state.mode);
     }
-    el.themeButtons.forEach((btn) => {
-      btn.setAttribute('aria-pressed', String(btn.dataset.themeBtn === state.theme));
+
+    if (el.sceneResting) el.sceneResting.hidden = state.mode !== 'resting';
+    if (el.sceneLyrics) el.sceneLyrics.hidden = state.mode !== 'lyrics';
+    if (el.sceneTodo) el.sceneTodo.hidden = state.mode !== 'todo';
+    if (el.sceneHud) el.sceneHud.hidden = state.mode !== 'hud';
+    if (el.sceneDropzone) el.sceneDropzone.hidden = state.mode !== 'dropzone';
+
+    el.modeButtons.forEach((btn) => {
+      btn.setAttribute(
+        'aria-pressed',
+        btn.getAttribute('data-vm-mode') === state.mode ? 'true' : 'false'
+      );
     });
 
-    // Placement & Smart-Tuck
-    if (el.notchMount) {
-      el.notchMount.setAttribute('data-placement', state.placement);
-      el.notchMount.setAttribute('data-tucked', String(state.tucked && !state.expanded && !state.alarmRinging));
-    }
-    el.placementButtons.forEach((btn) => {
-      btn.setAttribute('aria-pressed', String(btn.dataset.placementBtn === state.placement));
-    });
-    if (el.simTuckBtn) {
-      el.simTuckBtn.setAttribute('aria-pressed', String(state.tucked));
-    }
-    if (el.simExpandBtn) {
-      el.simExpandBtn.setAttribute('aria-pressed', String(state.expanded));
-    }
-    if (el.placementStatusPill) {
-      el.placementStatusPill.textContent = state.tucked
-        ? '4px Smart-Tuck'
-        : state.placement === 'floating'
-        ? 'Floating 12px'
-        : 'Docked 0px';
-    }
-    if (el.mascotPlacementLabel) {
-      el.mascotPlacementLabel.textContent = state.tucked
-        ? 'Smart-Tuck 4px'
-        : state.placement === 'floating'
-        ? 'Floating 12px'
-        : 'Docked 0px';
+    if (el.desktopTime) el.desktopTime.textContent = formatClockHHMM();
+    if (el.clockStatus) {
+      el.clockStatus.textContent =
+        state.expression === 'resting'
+          ? 'Mode Resting — arahkan kursor ke kapsul atas atau tekan Alt + Space untuk membangunkan'
+          : state.capsuleState === 'expanded'
+          ? 'Kapsul Mekar — klik Tutup atau tekan Alt + Space untuk kembali ringkas'
+          : 'Kapsul Aktif (× ♥) — klik kapsul di bezel atas untuk membuka kontrol penuh';
     }
 
-    // Expressions
-    const exprLabel = EXPRESSION_LABELS[resolvedExpr] || EXPRESSION_LABELS.idle;
-    if (el.exprCodePill) el.exprCodePill.textContent = exprLabel;
-    if (el.mascotExpressionLabel) el.mascotExpressionLabel.textContent = exprLabel;
-    el.exprButtons.forEach((btn) => {
-      btn.setAttribute('aria-pressed', String(btn.dataset.exprBtn === state.expression));
-    });
-
-    // Live Notch State Machine ('tucked' | 'expanded' | 'alarm' | 'hud' | 'idle')
-    let shellState = 'idle';
-    if (state.expanded) {
-      shellState = 'expanded';
-    } else if (state.alarmRinging) {
-      shellState = 'alarm';
-    } else if (state.hudKind) {
-      shellState = 'hud';
-    } else if (state.tucked) {
-      shellState = 'tucked';
+    if (el.hudReadout) {
+      el.hudReadout.textContent = `Volume ${state.volume}% · ${state.audioOutputLabel}`;
+    }
+    if (el.volumePct) {
+      el.volumePct.textContent = `${state.volume}%`;
     }
 
-    if (el.notchShell) {
-      el.notchShell.setAttribute('data-state', shellState);
-    }
-
-    // Update idle / HUD / alarm content inside Notch
-    if (el.notchHudChip && el.notchAlarmActions && el.notchBatteryLabel) {
-      el.notchHudChip.hidden = true;
-      el.notchAlarmActions.hidden = true;
-      el.notchBatteryLabel.hidden = false;
-
-      if (state.alarmRinging) {
-        el.notchPrimary.textContent = "Time's Up!";
-        el.notchSecondary.textContent = 'Focus selesai';
-        el.notchAlarmActions.hidden = false;
-        el.notchBatteryLabel.hidden = true;
-      } else if (state.hudKind === 'bluetooth') {
-        el.notchPrimary.textContent = 'Bluetooth Connected';
-        el.notchSecondary.textContent = '';
-        el.notchHudChip.textContent = 'BT Earphone • 85%';
-        el.notchHudChip.hidden = false;
-        el.notchBatteryLabel.hidden = true;
-      } else if (state.hudKind === 'audio_output') {
-        const currentOutput = AUDIO_OUTPUTS[state.outputIndex];
-        el.notchPrimary.textContent = 'Audio Output';
-        el.notchSecondary.textContent = currentOutput.short;
-        el.notchHudChip.textContent = 'WASAPI';
-        el.notchHudChip.hidden = false;
-        el.notchBatteryLabel.hidden = true;
-      } else if (resolvedExpr === 'music' || resolvedExpr === 'dual_active') {
-        const track = DEMO_TRACKS[state.trackIndex];
-        el.notchPrimary.textContent = track.title;
-        el.notchSecondary.textContent = resolvedExpr === 'dual_active' ? formatMmSs(state.focusSeconds) : '♪ Spotify';
-      } else if (resolvedExpr === 'focus') {
-        el.notchPrimary.textContent = 'Focus Session';
-        el.notchSecondary.textContent = formatMmSs(state.focusSeconds);
-      } else if (resolvedExpr === 'awake_lock') {
-        el.notchPrimary.textContent = 'Keep Awake';
-        el.notchSecondary.textContent = 'Display On';
-      } else {
-        const now = new Date();
-        const hh = String(now.getHours()).padStart(2, '0');
-        const mm = String(now.getMinutes()).padStart(2, '0');
-        el.notchPrimary.textContent = `${hh}:${mm}`;
-        el.notchSecondary.textContent = 'Sab, 14 Nov';
-      }
-    }
-
-    // Expanded panel content
-    if (el.notchTimerDisplay) {
-      el.notchTimerDisplay.textContent = formatMmSs(state.focusSeconds);
-    }
-    if (el.notchTimerStatus) {
-      el.notchTimerStatus.textContent = state.alarmRinging
-        ? "Time's Up!"
-        : state.focusRunning
-        ? 'Focus Aktif'
-        : 'Ready';
-    }
-    if (el.notchFocusToggle) {
-      el.notchFocusToggle.textContent = state.focusRunning ? 'Pause Focus' : 'Start Focus';
-      el.notchFocusToggle.classList.toggle('active', state.focusRunning);
-    }
-    if (el.notchAwakeToggle) {
-      el.notchAwakeToggle.setAttribute('aria-pressed', String(state.keepAwake));
-      el.notchAwakeToggle.classList.toggle('active', state.keepAwake);
-    }
-    if (el.notchMusicToggle) {
-      el.notchMusicToggle.setAttribute('aria-pressed', String(state.musicPlaying));
-      el.notchMusicToggle.classList.toggle('active', state.musicPlaying);
-      el.notchMusicToggle.textContent = state.musicPlaying ? 'Pause Track' : 'Play Track';
-    }
-
-    const activeTrack = DEMO_TRACKS[state.trackIndex];
-    if (el.notchExpTrack) el.notchExpTrack.textContent = activeTrack.title;
-    if (el.notchExpArtist) el.notchExpArtist.textContent = activeTrack.artist;
-    if (el.notchMusicTitle) el.notchMusicTitle.textContent = activeTrack.title;
-    if (el.notchMusicArtist) el.notchMusicArtist.textContent = activeTrack.artist;
-    if (el.notchMusicLyric) el.notchMusicLyric.textContent = activeTrack.lyric;
-
-    const currentOutput = AUDIO_OUTPUTS[state.outputIndex];
-    if (el.notchOutputLabel) el.notchOutputLabel.textContent = currentOutput.label;
-    if (el.notchBtLabel) {
-      el.notchBtLabel.textContent =
-        currentOutput.kind === 'bluetooth'
-          ? 'Active Sink: BT Earphone • 85%'
-          : 'BT Earphone • 85% Ready';
-    }
+    renderLyricsScene();
+    renderTodoScene();
+    renderDropzoneScene();
+    syncCapsuleUI();
   }
 
-  /**
-   * Pure Web Audio API Harmonic Chime matching CASA alarmChime.ts (C5 -> E5 -> G5 -> B5)
-   */
-  function playHarmonicChimePreview() {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtx) return;
+  function switchMode(nextMode) {
+    // Cancel opening animation cleanly if user interacts early
+    clearIntroTimers();
+    if (el.introOverlay) el.introOverlay.hidden = true;
+    if (el.monitor) el.monitor.setAttribute('data-intro-phase', 'ready');
 
-    if (!state.audioCtx) {
-      state.audioCtx = new AudioCtx();
-    }
-    const ctx = state.audioCtx;
-    if (ctx.state === 'suspended') {
-      ctx.resume().catch(() => {});
-    }
-
-    const now = ctx.currentTime + 0.02;
-    const masterGain = ctx.createGain();
-    masterGain.gain.setValueAtTime(0.85, now);
-    masterGain.connect(ctx.destination);
-
-    CHIME_NOTES_HZ.forEach((freq, idx) => {
-      const noteStart = now + idx * 0.14;
-      const noteDuration = idx === CHIME_NOTES_HZ.length - 1 ? 1.15 : 0.78;
-
-      const oscMain = ctx.createOscillator();
-      oscMain.type = 'sine';
-      oscMain.frequency.setValueAtTime(freq, noteStart);
-
-      const oscHarmonic = ctx.createOscillator();
-      oscHarmonic.type = 'triangle';
-      oscHarmonic.frequency.setValueAtTime(freq * 2, noteStart);
-
-      const mainGain = ctx.createGain();
-      mainGain.gain.setValueAtTime(0.0001, noteStart);
-      mainGain.gain.linearRampToValueAtTime(0.16, noteStart + 0.02);
-      mainGain.gain.exponentialRampToValueAtTime(0.0008, noteStart + noteDuration);
-
-      const harmonicGain = ctx.createGain();
-      harmonicGain.gain.setValueAtTime(0.0001, noteStart);
-      harmonicGain.gain.linearRampToValueAtTime(0.028, noteStart + 0.015);
-      harmonicGain.gain.exponentialRampToValueAtTime(0.0005, noteStart + noteDuration * 0.65);
-
-      oscMain.connect(mainGain);
-      mainGain.connect(masterGain);
-      oscHarmonic.connect(harmonicGain);
-      harmonicGain.connect(masterGain);
-
-      oscMain.start(noteStart);
-      oscMain.stop(noteStart + noteDuration + 0.04);
-      oscHarmonic.start(noteStart);
-      oscHarmonic.stop(noteStart + noteDuration + 0.04);
-    });
-  }
-
-  function triggerHudBanner(kind) {
-    if (state.hudTimerId) {
-      window.clearTimeout(state.hudTimerId);
-    }
-    state.expanded = false;
-    state.tucked = false;
-    state.alarmRinging = false;
-    state.hudKind = kind;
-    syncUI();
-
-    state.hudTimerId = window.setTimeout(() => {
-      state.hudKind = null;
-      state.hudTimerId = null;
-      syncUI();
-    }, 3200);
-  }
-
-  function triggerAlarmDemo() {
-    playHarmonicChimePreview();
-    state.expanded = false;
-    state.tucked = false;
-    state.hudKind = null;
-    state.alarmRinging = true;
-    state.expression = 'alarm';
-    syncUI();
-  }
-
-  function dismissAlarmDemo(snoozeMinutes) {
-    state.alarmRinging = false;
-    if (snoozeMinutes > 0) {
-      state.focusSeconds = snoozeMinutes * 60;
-      state.focusRunning = true;
-      state.expression = 'focus';
-      ensureFocusTick();
-    } else if (state.expression === 'alarm') {
+    state.mode = nextMode;
+    if (nextMode === 'resting') {
       state.expression = 'idle';
+      state.capsuleState = 'idle';
+      state.idleLyricMinimized = false;
+    } else if (nextMode === 'lyrics') {
+      state.expression = 'music';
+      state.capsuleState = 'idle';
+      state.idleLyricMinimized = false;
+    } else if (nextMode === 'todo') {
+      state.expression = state.dualIdleActive ? 'dual_active' : 'focus';
+      state.capsuleState = 'idle';
+      state.idleLyricMinimized = false;
+    } else if (nextMode === 'hud') {
+      state.expression = 'idle';
+      state.capsuleState = 'idle';
+      showHudChip(`Vol ${state.volume}%`);
+    } else if (nextMode === 'dropzone') {
+      state.expression = 'idle';
+      state.capsuleState = 'expanded';
     }
     syncUI();
   }
 
-  function ensureFocusTick() {
-    if (state.focusIntervalId) return;
-    state.focusIntervalId = window.setInterval(() => {
-      if (!state.focusRunning) return;
-      if (state.focusSeconds > 1) {
-        state.focusSeconds -= 1;
+  function initVirtualMonitorControls() {
+    // Mode dock switches
+    el.modeButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const next = btn.getAttribute('data-vm-mode');
+        if (next) switchMode(next);
+      });
+    });
+
+    if (el.replayIntroBtn) {
+      el.replayIntroBtn.addEventListener('click', startIntroMorphSequence);
+    }
+
+    // Capsule Hover & Click Wake
+    if (el.capsule) {
+      el.capsule.addEventListener('mouseenter', () => {
+        if (state.mode === 'resting' && state.expression === 'resting') {
+          state.expression = 'idle';
+          syncUI();
+        }
+      });
+
+      el.capsule.addEventListener('click', (ev) => {
+        if (ev.target && ev.target.closest('button')) return;
+        if (state.capsuleState === 'idle') {
+          if (state.expression === 'resting') {
+            state.expression = 'idle';
+          }
+          state.capsuleState = 'expanded';
+          state.idleLyricMinimized = false;
+          syncUI();
+        }
+      });
+
+      el.capsule.addEventListener('dragover', (ev) => {
+        ev.preventDefault();
+        el.capsule.setAttribute('data-drop-hover', 'true');
+      });
+
+      el.capsule.addEventListener('dragleave', () => {
+        el.capsule.removeAttribute('data-drop-hover');
+      });
+
+      el.capsule.addEventListener('drop', (ev) => {
+        ev.preventDefault();
+        el.capsule.removeAttribute('data-drop-hover');
+        const fid = ev.dataTransfer ? ev.dataTransfer.getData('text/plain') : '';
+        if (fid) {
+          captureFileIntoDropZone(fid);
+        }
+      });
+    }
+
+    // Monitor screen HTML5 dragover zone near top bezel
+    if (el.monitorScreen) {
+      el.monitorScreen.addEventListener('dragover', (ev) => {
+        if (state.mode !== 'dropzone') return;
+        ev.preventDefault();
+        const rect = el.monitorScreen.getBoundingClientRect();
+        if (ev.clientY <= rect.top + 115) {
+          openDropZoneTarget(true);
+        }
+      });
+
+      el.monitorScreen.addEventListener('drop', (ev) => {
+        if (state.mode !== 'dropzone') return;
+        const rect = el.monitorScreen.getBoundingClientRect();
+        if (ev.clientY <= rect.top + 130) {
+          ev.preventDefault();
+          if (el.capsule) el.capsule.removeAttribute('data-drop-hover');
+          const fid = ev.dataTransfer ? ev.dataTransfer.getData('text/plain') : '';
+          if (fid) captureFileIntoDropZone(fid);
+        }
+      });
+    }
+
+    if (el.collapseBtn) {
+      el.collapseBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.capsuleState = 'idle';
         syncUI();
-      } else {
-        state.focusSeconds = 0;
-        state.focusRunning = false;
-        triggerAlarmDemo();
+      });
+    }
+
+    if (el.expRestBtn) {
+      el.expRestBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.capsuleState = 'idle';
+        state.expression = 'resting';
+        syncUI();
+      });
+    }
+
+    // Global Alt + Space inside monitor showcase
+    window.addEventListener('keydown', (ev) => {
+      if (ev.altKey && ev.code === 'Space') {
+        ev.preventDefault();
+        if (state.expression === 'resting') {
+          state.expression = 'idle';
+          state.capsuleState = 'expanded';
+        } else {
+          state.capsuleState = state.capsuleState === 'expanded' ? 'idle' : 'expanded';
+        }
+        syncUI();
+      }
+    });
+
+    // Scene 1: Resting & Wake buttons
+    if (el.sceneToggleRestBtn) {
+      el.sceneToggleRestBtn.addEventListener('click', () => {
+        state.expression = state.expression === 'resting' ? 'idle' : 'resting';
+        if (state.expression === 'resting') state.capsuleState = 'idle';
+        syncUI();
+      });
+    }
+
+    if (el.sceneToggleExpandBtn) {
+      el.sceneToggleExpandBtn.addEventListener('click', () => {
+        state.expression = 'idle';
+        state.capsuleState = state.capsuleState === 'expanded' ? 'idle' : 'expanded';
+        syncUI();
+      });
+    }
+
+    // Scene 2: Lyrics & Idle Lyric Minimize
+    const toggleIdleLyricMinimize = (ev) => {
+      if (ev) ev.stopPropagation();
+      state.mode = 'lyrics';
+      state.idleLyricMinimized = !state.idleLyricMinimized;
+      state.capsuleState = 'idle';
+      state.expression = 'music';
+      syncUI();
+    };
+
+    if (el.sceneLyricMinimizeBtn) {
+      el.sceneLyricMinimizeBtn.addEventListener('click', toggleIdleLyricMinimize);
+    }
+    if (el.idleLyricBtn) {
+      el.idleLyricBtn.addEventListener('click', toggleIdleLyricMinimize);
+    }
+    if (el.expPlayBtn) {
+      el.expPlayBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.musicPlaying = !state.musicPlaying;
+        syncCapsuleUI();
+      });
+    }
+
+    // Scene 3: To-Do & Focus
+    if (el.todoForm && el.todoInput) {
+      el.todoForm.addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        const text = el.todoInput.value.trim();
+        if (!text) return;
+        state.todos.push({
+          id: `td-${Date.now().toString(36)}`,
+          text,
+          done: false,
+        });
+        el.todoInput.value = '';
+        syncUI();
+      });
+    }
+    if (el.todoDualBtn) {
+      el.todoDualBtn.addEventListener('click', () => {
+        state.dualIdleActive = !state.dualIdleActive;
+        syncUI();
+      });
+    }
+    if (el.todoTimerBtn) {
+      el.todoTimerBtn.addEventListener('click', () => {
+        state.focusTimerRunning = !state.focusTimerRunning;
+        syncUI();
+      });
+    }
+    if (el.expTimerBtn) {
+      el.expTimerBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.focusTimerRunning = !state.focusTimerRunning;
+        syncUI();
+      });
+    }
+
+    // Scene 4: Volume & BT HUD
+    if (el.volumeSlider) {
+      el.volumeSlider.addEventListener('input', () => {
+        state.volume = Number(el.volumeSlider.value);
+        if (el.volumePct) el.volumePct.textContent = `${state.volume}%`;
+        if (el.hudReadout) {
+          el.hudReadout.textContent = `Volume ${state.volume}% · ${state.audioOutputLabel}`;
+        }
+        showHudChip(`Vol ${state.volume}%`);
+      });
+    }
+    if (el.simBtBtn) {
+      el.simBtBtn.addEventListener('click', () => {
+        state.audioOutputLabel = 'BT Earphone • 85%';
+        syncUI();
+        showHudChip('BT Earphone · 85%');
+      });
+    }
+    if (el.simWiredBtn) {
+      el.simWiredBtn.addEventListener('click', () => {
+        state.audioOutputLabel = 'Wired Earphone';
+        syncUI();
+        showHudChip('Wired Earphone');
+      });
+    }
+
+    // Scene 5: Simulate Drop + Copy Back to Desktop
+    if (el.simDropAllBtn) {
+      el.simDropAllBtn.addEventListener('click', () => {
+        const nextFile =
+          SAMPLE_FILES.find((f) => !state.droppedIds.includes(f.id)) || SAMPLE_FILES[0];
+        captureFileIntoDropZone(nextFile.id);
+      });
+    }
+    if (el.copyBackBtn) {
+      el.copyBackBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        copyDropZoneBackToDesktop();
+      });
+    }
+
+    // Auto intervals (lyrics ticker, clock refresh, focus countdown)
+    state.lyricIntervalId = window.setInterval(() => {
+      if (state.mode === 'lyrics' && state.musicPlaying) {
+        const track = getActiveTrack();
+        state.lyricIndex = (state.lyricIndex + 1) % track.lyrics.length;
+        renderLyricsScene();
+        syncCapsuleUI();
+      }
+    }, 2200);
+
+    state.focusTickId = window.setInterval(() => {
+      if (state.mode === 'todo' && state.focusTimerRunning) {
+        state.focusSeconds = state.focusSeconds > 0 ? state.focusSeconds - 1 : 25 * 60;
+        syncCapsuleUI();
       }
     }, 1000);
-  }
 
-  function switchNotchTab(tabName) {
-    state.activeTab = tabName;
-    el.notchTabButtons.forEach((btn) => {
-      btn.setAttribute('aria-selected', String(btn.dataset.notchTab === tabName));
-    });
-    if (el.notchBodyControl) el.notchBodyControl.hidden = tabName !== 'control';
-    if (el.notchBodyMusic) el.notchBodyMusic.hidden = tabName !== 'music';
-  }
+    state.clockIntervalId = window.setInterval(() => {
+      if (el.desktopTime) el.desktopTime.textContent = formatClockHHMM();
+      if (state.capsuleState === 'idle' && state.mode === 'resting') {
+        syncCapsuleUI();
+      }
+    }, 15000);
 
-  function initInteractiveSimulator() {
-    // Theme switching
-    el.themeButtons.forEach((btn) => {
-      btn.addEventListener('click', () => {
-        state.theme = btn.dataset.themeBtn || 'default';
-        syncUI();
-      });
-    });
-
-    // Placement switching
-    el.placementButtons.forEach((btn) => {
-      btn.addEventListener('click', () => {
-        state.placement = btn.dataset.placementBtn === 'floating' ? 'floating' : 'docked';
-        state.tucked = false;
-        syncUI();
-      });
-    });
-
-    // Expression switching
-    el.exprButtons.forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const nextExpr = btn.dataset.exprBtn || 'idle';
-        state.expression = nextExpr;
-        state.alarmRinging = nextExpr === 'alarm';
-        state.tucked = false;
-        if (nextExpr === 'music') {
-          state.musicPlaying = true;
-        }
-        syncUI();
-      });
-    });
-
-    // Smart-Tuck toggle
-    if (el.simTuckBtn) {
-      el.simTuckBtn.addEventListener('click', () => {
-        state.tucked = !state.tucked;
-        if (state.tucked) {
-          state.expanded = false;
-          state.alarmRinging = false;
-          state.hudKind = null;
-        }
-        syncUI();
-      });
-    }
-
-    // Expand toggle controls
-    const toggleExpand = () => {
-      state.tucked = false;
-      state.expanded = !state.expanded;
-      syncUI();
+    // Trigger opening morph intro when virtual monitor enters viewport
+    let introTriggered = false;
+    const triggerIntroOnce = () => {
+      if (introTriggered) return;
+      introTriggered = true;
+      startIntroMorphSequence();
     };
 
-    if (el.simExpandBtn) el.simExpandBtn.addEventListener('click', toggleExpand);
-    if (el.heroToggleNotchBtn) el.heroToggleNotchBtn.addEventListener('click', toggleExpand);
-    if (el.notchCollapseBtn) {
-      el.notchCollapseBtn.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        state.expanded = false;
-        syncUI();
-      });
-    }
-
-    // Top-lip Notch pointer hover + click interactions
-    if (el.notchShell) {
-      el.notchShell.addEventListener('pointerenter', () => {
-        if (state.alarmRinging || state.expanded) return;
-        window.clearTimeout(state.hoverCloseTimer);
-        state.hoverOpenTimer = window.setTimeout(() => {
-          if (!state.alarmRinging) {
-            state.tucked = false;
-            state.expanded = true;
-            syncUI();
+    if ('IntersectionObserver' in window && el.monitor) {
+      const obs = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) {
+            obs.disconnect();
+            triggerIntroOnce();
           }
-        }, 220);
-      });
-
-      el.notchShell.addEventListener('pointerleave', () => {
-        window.clearTimeout(state.hoverOpenTimer);
-        if (!state.expanded) return;
-        state.hoverCloseTimer = window.setTimeout(() => {
-          state.expanded = false;
-          syncUI();
-        }, 260);
-      });
-
-      el.notchShell.addEventListener('click', () => {
-        if (!state.expanded && !state.alarmRinging) {
-          state.tucked = false;
-          state.expanded = true;
-          syncUI();
-        }
-      });
+        },
+        { threshold: 0.2 }
+      );
+      obs.observe(el.monitor);
+    } else {
+      triggerIntroOnce();
     }
-
-    // Alt + Space Global Shortcut simulation inside showcase page
-    document.addEventListener('keydown', (ev) => {
-      if (ev.altKey && (ev.code === 'Space' || ev.key === ' ')) {
-        ev.preventDefault();
-        toggleExpand();
-      }
-    });
-
-    // Notch Expanded internal tabs & mini buttons
-    el.notchTabButtons.forEach((btn) => {
-      btn.addEventListener('click', () => {
-        switchNotchTab(btn.dataset.notchTab || 'control');
-      });
-    });
-
-    if (el.notchFocusToggle) {
-      el.notchFocusToggle.addEventListener('click', () => {
-        state.focusRunning = !state.focusRunning;
-        if (state.focusRunning) {
-          ensureFocusTick();
-          state.expression = state.musicPlaying ? 'dual_active' : 'focus';
-        } else if (state.expression === 'focus' || state.expression === 'dual_active') {
-          state.expression = state.musicPlaying ? 'music' : 'idle';
-        }
-        syncUI();
-      });
-    }
-
-    if (el.notchAwakeToggle) {
-      el.notchAwakeToggle.addEventListener('click', () => {
-        state.keepAwake = !state.keepAwake;
-        if (state.keepAwake && !state.focusRunning && !state.musicPlaying) {
-          state.expression = 'awake_lock';
-        } else if (!state.keepAwake && state.expression === 'awake_lock') {
-          state.expression = 'idle';
-        }
-        syncUI();
-      });
-    }
-
-    const toggleMusicDemo = () => {
-      state.musicPlaying = !state.musicPlaying;
-      if (state.musicPlaying) {
-        state.expression = state.focusRunning ? 'dual_active' : 'music';
-      } else if (state.expression === 'music' || state.expression === 'dual_active') {
-        state.expression = state.focusRunning ? 'focus' : 'idle';
-      }
-      syncUI();
-    };
-
-    if (el.notchMusicToggle) el.notchMusicToggle.addEventListener('click', toggleMusicDemo);
-    if (el.notchPlayPauseBtn) el.notchPlayPauseBtn.addEventListener('click', toggleMusicDemo);
-
-    if (el.notchPrevTrack) {
-      el.notchPrevTrack.addEventListener('click', () => {
-        state.trackIndex = (state.trackIndex - 1 + DEMO_TRACKS.length) % DEMO_TRACKS.length;
-        state.musicPlaying = true;
-        syncUI();
-      });
-    }
-
-    if (el.notchNextTrack) {
-      el.notchNextTrack.addEventListener('click', () => {
-        state.trackIndex = (state.trackIndex + 1) % DEMO_TRACKS.length;
-        state.musicPlaying = true;
-        syncUI();
-      });
-    }
-
-    // Alarm chime & banner buttons
-    if (el.simChimeBtn) el.simChimeBtn.addEventListener('click', triggerAlarmDemo);
-    if (el.notchChimeMini) el.notchChimeMini.addEventListener('click', triggerAlarmDemo);
-
-    if (el.notchSnoozeBtn) {
-      el.notchSnoozeBtn.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        dismissAlarmDemo(5);
-      });
-    }
-
-    if (el.notchDismissBtn) {
-      el.notchDismissBtn.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        dismissAlarmDemo(0);
-      });
-    }
-
-    // Hardware HUD simulations
-    if (el.simBtBtn) el.simBtBtn.addEventListener('click', () => triggerHudBanner('bluetooth'));
-    if (el.notchHudBtMini) el.notchHudBtMini.addEventListener('click', () => triggerHudBanner('bluetooth'));
-
-    const cycleAudioOutput = () => {
-      state.outputIndex = (state.outputIndex + 1) % AUDIO_OUTPUTS.length;
-      triggerHudBanner('audio_output');
-    };
-
-    if (el.simOutputBtn) el.simOutputBtn.addEventListener('click', cycleAudioOutput);
-    if (el.notchHudOutMini) el.notchHudOutMini.addEventListener('click', cycleAudioOutput);
   }
 
   /**
-   * 3D Mouse Parallax Hover Tilt on Hero Obsidian Bunny Card
+   * Smart GitHub Release Hub (Strict URL validation, DOM safe rendering)
    */
-  function initHeroMascotTilt() {
-    if (!el.mascotCard) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
-    el.mascotCard.addEventListener('pointermove', (ev) => {
-      const rect = el.mascotCard.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      const relX = (ev.clientX - rect.left) / rect.width - 0.5;
-      const relY = (ev.clientY - rect.top) / rect.height - 0.5;
-      const rotateY = (relX * 14).toFixed(2);
-      const rotateX = (-relY * 14).toFixed(2);
-      el.mascotCard.style.transform = `rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
-    });
-
-    el.mascotCard.addEventListener('pointerleave', () => {
-      el.mascotCard.style.transform = 'rotateX(0deg) rotateY(0deg)';
-    });
-  }
-
-  /**
-   * Checks safe GitHub HTTPS URLs before binding anchors rendered from API responses.
-   */
-  function isSafeGitHubUrl(rawUrl) {
-    if (typeof rawUrl !== 'string') return false;
-    return (
-      rawUrl.startsWith(`https://github.com/${REPO_OWNER}/${REPO_NAME}/`) ||
-      rawUrl.startsWith('https://objects.githubusercontent.com/')
-    );
+  function isSafeGitHubUrl(urlStr) {
+    if (!urlStr || typeof urlStr !== 'string') return false;
+    try {
+      const parsed = new URL(urlStr);
+      return (
+        parsed.protocol === 'https:' &&
+        (parsed.hostname === 'github.com' ||
+          parsed.hostname === 'objects.githubusercontent.com' ||
+          parsed.hostname === 'release-assets.githubusercontent.com')
+      );
+    } catch (_err) {
+      return false;
+    }
   }
 
   function formatMegabytes(bytes) {
-    if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) {
-      return null;
-    }
+    if (!Number.isFinite(bytes) || bytes <= 0) return null;
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   }
 
   function formatReleaseDate(isoStr) {
-    if (typeof isoStr !== 'string' || !isoStr) return 'GitHub Release';
+    if (!isoStr) return 'Latest Build';
     const d = new Date(isoStr);
-    if (Number.isNaN(d.getTime())) return 'GitHub Release';
+    if (Number.isNaN(d.getTime())) return 'Latest Build';
     return d.toLocaleDateString('id-ID', {
-      day: 'numeric',
+      day: '2-digit',
       month: 'short',
       year: 'numeric',
     });
   }
 
-  function renderArchiveReleases(releases) {
+  function renderArchiveReleases(archiveReleases) {
     if (!el.archiveList) return;
     clearNode(el.archiveList);
 
-    if (!Array.isArray(releases) || releases.length === 0) {
-      const item = document.createElement('li');
-      item.className = 'archive-item';
+    if (!archiveReleases || archiveReleases.length === 0) {
+      const emptyLi = document.createElement('li');
+      emptyLi.className = 'archive-item';
 
-      const meta = document.createElement('div');
-      meta.className = 'archive-item-meta';
-      const title = document.createElement('strong');
-      title.textContent = 'Riwayat Rilis GitHub';
+      const metaDiv = document.createElement('div');
+      metaDiv.className = 'archive-item-meta';
+      const strong = document.createElement('strong');
+      strong.textContent = 'Riwayat Rilis GitHub';
       const sub = document.createElement('span');
       sub.className = 'archive-item-sub';
-      sub.textContent = 'Lihat seluruh catatan rilis & biner resmi';
-      meta.append(title, sub);
+      sub.textContent = 'Lihat seluruh changelog & biner resmi di GitHub Releases.';
+      metaDiv.appendChild(strong);
+      metaDiv.appendChild(sub);
 
       const link = document.createElement('a');
       link.href = RELEASES_PAGE_URL;
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
       link.className = 'archive-link';
-      link.textContent = 'Buka Releases ↗';
+      link.textContent = 'GitHub Releases ↗';
 
-      item.append(meta, link);
-      el.archiveList.appendChild(item);
+      emptyLi.appendChild(metaDiv);
+      emptyLi.appendChild(link);
+      el.archiveList.appendChild(emptyLi);
       return;
     }
 
-    releases.slice(0, 5).forEach((rel) => {
-      const item = document.createElement('li');
-      item.className = 'archive-item';
+    archiveReleases.slice(0, 4).forEach((rel) => {
+      const li = document.createElement('li');
+      li.className = 'archive-item';
 
       const meta = document.createElement('div');
       meta.className = 'archive-item-meta';
@@ -989,77 +1150,51 @@
       const title = document.createElement('strong');
       title.textContent = rel.tag_name || rel.name || 'Release';
 
-      const assets = Array.isArray(rel.assets) ? rel.assets : [];
-      const exeAsset = assets.find((a) => typeof a.name === 'string' && a.name.endsWith('.exe'));
-      const downloads = assets.reduce(
-        (sum, a) => sum + (typeof a.download_count === 'number' ? a.download_count : 0),
-        0
-      );
+      const relDownloads = Array.isArray(rel.assets)
+        ? rel.assets.reduce((sum, a) => sum + (Number(a.download_count) || 0), 0)
+        : 0;
 
       const sub = document.createElement('span');
       sub.className = 'archive-item-sub';
-      const sizeStr = exeAsset ? formatMegabytes(exeAsset.size) : null;
-      sub.textContent = [
-        formatReleaseDate(rel.published_at),
-        sizeStr ? `.exe ${sizeStr}` : null,
-        `${downloads} unduhan`,
-      ]
-        .filter(Boolean)
-        .join(' · ');
+      sub.textContent = `${formatReleaseDate(rel.published_at)} · ${relDownloads.toLocaleString('id-ID')} unduhan`;
 
-      meta.append(title, sub);
+      meta.appendChild(title);
+      meta.appendChild(sub);
 
       const link = document.createElement('a');
-      const targetUrl =
-        exeAsset && isSafeGitHubUrl(exeAsset.browser_download_url)
-          ? exeAsset.browser_download_url
-          : isSafeGitHubUrl(rel.html_url)
-          ? rel.html_url
-          : RELEASES_PAGE_URL;
-
-      link.href = targetUrl;
+      link.href = isSafeGitHubUrl(rel.html_url) ? rel.html_url : RELEASES_PAGE_URL;
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
       link.className = 'archive-link';
-      link.textContent = exeAsset ? 'Unduh .exe ↗' : 'Lihat ↗';
+      link.textContent = 'Unduh ↗';
 
-      item.append(meta, link);
-      el.archiveList.appendChild(item);
+      li.appendChild(meta);
+      li.appendChild(link);
+      el.archiveList.appendChild(li);
     });
   }
 
-  /**
-   * Smart Release Hub: fetches https://api.github.com/repos/Farhanpratama09/casa-app/releases
-   */
   async function initSmartReleaseHub() {
     try {
       const response = await fetch(RELEASES_API_URL, {
         headers: { Accept: 'application/vnd.github+json' },
       });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`GitHub API ${response.status}`);
+
       const releases = await response.json();
-      if (!Array.isArray(releases)) {
-        throw new Error('Unexpected releases payload');
-      }
+      if (!Array.isArray(releases)) throw new Error('Invalid GitHub API shape');
 
       let totalDownloads = 0;
       releases.forEach((rel) => {
         if (Array.isArray(rel.assets)) {
           rel.assets.forEach((asset) => {
-            if (typeof asset.download_count === 'number') {
-              totalDownloads += asset.download_count;
-            }
+            totalDownloads += Number(asset.download_count) || 0;
           });
         }
       });
 
       if (el.statTotalDownloads) {
         el.statTotalDownloads.textContent = totalDownloads.toLocaleString('id-ID');
-      }
-      if (el.heroDownloadsSummary) {
-        el.heroDownloadsSummary.textContent = `• Total Unduhan: ${totalDownloads.toLocaleString('id-ID')}+`;
       }
 
       const v2Release = releases.find(
@@ -1076,11 +1211,11 @@
         );
 
         if (exeAsset && isSafeGitHubUrl(exeAsset.browser_download_url)) {
-          const sizeLabel = formatMegabytes(exeAsset.size) || '4.43 MB';
+          const sizeLabel = formatMegabytes(exeAsset.size) || '4.44 MB';
           if (el.statExeSize) el.statExeSize.textContent = sizeLabel;
           if (el.primaryDownloadBtn) {
             el.primaryDownloadBtn.href = exeAsset.browser_download_url;
-            el.primaryDownloadBtn.textContent = `Download CASA ${v2Release.tag_name} for Windows (64-bit .exe • ${sizeLabel})`;
+            el.primaryDownloadBtn.textContent = `Download CASA ${v2Release.tag_name} for Windows (.exe · ${sizeLabel})`;
           }
           if (el.heroDownloadBtn) {
             el.heroDownloadBtn.href = exeAsset.browser_download_url;
@@ -1088,7 +1223,7 @@
         }
 
         if (msiAsset && isSafeGitHubUrl(msiAsset.browser_download_url)) {
-          const msiSizeLabel = formatMegabytes(msiAsset.size) || '6.41 MB';
+          const msiSizeLabel = formatMegabytes(msiAsset.size) || '6.42 MB';
           if (el.statMsiSize) el.statMsiSize.textContent = msiSizeLabel;
           if (el.msiDownloadBtn) {
             el.msiDownloadBtn.href = msiAsset.browser_download_url;
@@ -1106,13 +1241,12 @@
           el.releaseStatusNote.textContent = `Terhubung langsung ke GitHub Release ${v2Release.tag_name} resmi.`;
         }
       } else {
-        // v2.0.0 tag exists in repo; binary upload to Releases page may still be pending
         if (el.primaryDownloadBtn) el.primaryDownloadBtn.href = RELEASES_PAGE_URL;
         if (el.msiDownloadBtn) el.msiDownloadBtn.href = RELEASES_PAGE_URL;
         if (el.releaseStatusNote) {
-          const latestTag = latestRelease && latestRelease.tag_name ? latestRelease.tag_name : 'v1.0.0';
+          const latestTag = latestRelease && latestRelease.tag_name ? latestRelease.tag_name : 'v2.0.0';
           el.releaseStatusNote.textContent =
-            `Tag v2.0.0 aktif di repositori. Menunggu unggahan biner v2.0.0 di GitHub Releases (rilis publik terbaru di API: ${latestTag}).`;
+            `Tag v2.0.0 aktif di repositori (rilis terbaru di API: ${latestTag}).`;
         }
       }
 
@@ -1122,7 +1256,6 @@
       renderArchiveReleases(archiveItems);
     } catch (_err) {
       if (el.statTotalDownloads) el.statTotalDownloads.textContent = 'GitHub';
-      if (el.heroDownloadsSummary) el.heroDownloadsSummary.textContent = '• Open-Source MIT';
       if (el.releaseStatusNote) {
         el.releaseStatusNote.textContent =
           'Tidak dapat memuat metadata live dari GitHub API saat ini. Gunakan tombol untuk membuka halaman Releases resmi.';
@@ -1150,16 +1283,15 @@
     });
   }
 
-  /**
-   * Dual-Path Feedback & Feature Requests Form
-   */
   function isAllowedFeedbackEndpoint(urlStr) {
     if (!urlStr) return false;
     try {
       const parsed = new URL(urlStr);
       return (
         parsed.protocol === 'https:' &&
-        ALLOWED_FEEDBACK_HOSTS.some((host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`))
+        ALLOWED_FEEDBACK_HOSTS.some(
+          (host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`)
+        )
       );
     } catch (_err) {
       return false;
@@ -1177,13 +1309,10 @@
       message,
       '',
       '---',
-      '_Dikirim melalui CASA v2.0.0 Showcase Web_',
+      '_Dikirim melalui CASA Showcase Web_',
     ].join('\n');
 
-    const params = new URLSearchParams({
-      title,
-      body,
-    });
+    const params = new URLSearchParams({ title, body });
     return `${NEW_ISSUE_URL}?${params.toString()}`;
   }
 
@@ -1219,7 +1348,7 @@
               name: name || 'Anonim',
               category,
               message,
-              source: 'casa-v2-showcase',
+              source: 'casa-showcase',
             }),
           });
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -1253,8 +1382,7 @@
   }
 
   // Boot
-  initInteractiveSimulator();
-  initHeroMascotTilt();
+  initVirtualMonitorControls();
   initCopyHash();
   initFeedbackForm();
   syncUI();

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://farhanpratama09.github.io/casa-app/sitemap.xml

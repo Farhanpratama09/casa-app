@@ -1,18 +1,38 @@
 <!DOCTYPE html>
-<html lang="id" data-theme="default">
+<html lang="id">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta
     http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://avatars.githubusercontent.com; connect-src 'self' https://api.github.com https://api.web3forms.com https://formspree.io; base-uri 'self'; object-src 'none'; form-action 'self' https://github.com https://api.web3forms.com https://formspree.io;"
+    content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://api.github.com https://api.web3forms.com https://formspree.io; base-uri 'self'; object-src 'none'; form-action 'self' https://github.com https://api.web3forms.com https://formspree.io;"
   />
   <meta name="theme-color" content="#000000" />
+  <title>CASA — Dynamic Rabbit Island for Windows</title>
   <meta
     name="description"
-    content="CASA v2.0.0 — Pure OLED Windows 11 Dynamic Notch Companion. Ringan 4.43 MB berbasis Tauri 2 & Rust dengan kontrol musik Spotify SMTC, lirik LRCLIB, Focus Pomodoro, Bluetooth battery telemetry, dan 4px smart-tuck."
+    content="CASA — Dynamic Rabbit Island for Windows. Ambient desktop notch &amp; companion for Windows 10/11 featuring synchronized lyrics, Focus Pomodoro, To-Do ring, Bluetooth HUD, dan Drop Zone di kapsul OLED hitam murni."
   />
-  <title>CASA v2.0.0 — Pure OLED Dynamic Notch for Windows</title>
+  <link rel="canonical" href="https://farhanpratama09.github.io/casa-app/" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="CASA" />
+  <meta property="og:title" content="CASA — Dynamic Rabbit Island for Windows" />
+  <meta
+    property="og:description"
+    content="Ambient desktop notch &amp; companion for Windows: kapsul interaktif monokrom di bibir atas monitor untuk musik, lirik, fokus Pomodoro, HUD perangkat keras, dan rak Drop Zone."
+  />
+  <meta property="og:url" content="https://farhanpratama09.github.io/casa-app/" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="CASA — Dynamic Rabbit Island for Windows" />
+  <meta
+    name="twitter:description"
+    content="Ambient desktop notch &amp; companion for Windows dengan kontrol musik, lirik sinkron, Focus To-Do, HUD perangkat keras, dan Drag &amp; Drop."
+  />
+
   <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -21,146 +41,40 @@
     rel="stylesheet"
   />
   <link rel="stylesheet" href="./styles.css" />
+
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "CASA",
+      "alternateName": "CASA — Dynamic Rabbit Island for Windows",
+      "operatingSystem": "Windows 10, Windows 11",
+      "applicationCategory": "UtilitiesApplication",
+      "description": "Ambient desktop notch & companion for Windows featuring monochrome OLED capsule interactions, synchronized lyrics, focus timer, Bluetooth telemetry, and drag-and-drop shelf.",
+      "url": "https://farhanpratama09.github.io/casa-app/",
+      "downloadUrl": "https://github.com/Farhanpratama09/casa-app/releases/latest",
+      "softwareVersion": "2.0.0",
+      "license": "https://opensource.org/licenses/MIT",
+      "author": {
+        "@type": "Person",
+        "name": "Farhan Pratama"
+      }
+    }
+  </script>
 </head>
 <body>
   <!-- ======================================================================
-       LIVE PINNED TOP-LIP CASA NOTCH SIMULATOR
-       ====================================================================== -->
-  <div
-    id="live-notch-mount"
-    class="live-notch-mount"
-    data-placement="docked"
-    data-tucked="false"
-    aria-label="Simulasi Interaktif CASA Notch"
-  >
-    <div
-      id="casa-notch-shell"
-      class="casa-notch-shell"
-      data-state="idle"
-      role="region"
-      aria-label="Kapsul CASA Interaktif"
-    >
-      <!-- Idle / HUD / Alarm Pill Row -->
-      <div class="notch-idle-row" id="notch-idle-row">
-        <div class="notch-left-cluster">
-          <svg
-            id="notch-eyes-svg"
-            class="notch-eyes-svg"
-            viewBox="0 0 34 16"
-            aria-hidden="true"
-          ></svg>
-          <span class="notch-divider" aria-hidden="true"></span>
-          <span id="notch-primary-text" class="notch-title">19:13</span>
-          <span id="notch-secondary-text" class="notch-sub">Sab, 14 Nov</span>
-        </div>
-
-        <div class="notch-right-cluster" id="notch-right-cluster">
-          <span id="notch-hud-chip" class="notch-hud-chip" hidden></span>
-          <div id="notch-alarm-actions" class="notch-alarm-actions" hidden>
-            <button type="button" id="notch-snooze-btn" class="notch-alarm-btn">+5m</button>
-            <button type="button" id="notch-dismiss-btn" class="notch-alarm-btn primary">Dismiss</button>
-          </div>
-          <span id="notch-battery-label" class="notch-battery-text tabular">88%</span>
-        </div>
-      </div>
-
-      <!-- Expanded Mode 6 Panel (500 x 186 proportions) -->
-      <div class="notch-expanded-panel" id="notch-expanded-panel">
-        <div class="notch-exp-topnav">
-          <div class="notch-exp-tabs" role="tablist" aria-label="Mode kapsul">
-            <button type="button" class="notch-tab-btn" role="tab" data-notch-tab="control" aria-selected="true">Control</button>
-            <button type="button" class="notch-tab-btn" role="tab" data-notch-tab="music" aria-selected="false">Music</button>
-          </div>
-          <div class="notch-exp-tabs">
-            <span class="notch-battery-text tabular" id="notch-exp-clock">19:13 · Alt+Space</span>
-            <button type="button" id="notch-collapse-btn" class="notch-close-btn">Tutup</button>
-          </div>
-        </div>
-
-        <div class="notch-exp-body" id="notch-exp-body-control">
-          <div class="notch-exp-col">
-            <span class="notch-exp-label">Focus Pomodoro</span>
-            <div class="notch-timer-readout">
-              <span class="notch-timer-digits tabular" id="notch-timer-display">25:00</span>
-              <span class="notch-sub" id="notch-timer-status">Ready</span>
-            </div>
-            <div class="notch-mini-actions">
-              <button type="button" id="notch-focus-toggle" class="notch-mini-btn">Start Focus</button>
-              <button type="button" id="notch-awake-toggle" class="notch-mini-btn" aria-pressed="false">Keep Awake</button>
-            </div>
-          </div>
-
-          <span class="notch-exp-divider" aria-hidden="true"></span>
-
-          <div class="notch-exp-col">
-            <span class="notch-exp-label">Hardware &amp; Chime</span>
-            <div class="notch-music-card">
-              <div class="notch-album-tile" aria-hidden="true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M9 18V5l12-2v13" />
-                  <circle cx="6" cy="18" r="3" />
-                  <circle cx="18" cy="16" r="3" />
-                </svg>
-              </div>
-              <div class="notch-track-meta">
-                <div class="notch-track-name" id="notch-exp-track">Moonlit Workspace</div>
-                <div class="notch-track-artist" id="notch-exp-artist">CASA Obsidian Mix</div>
-              </div>
-            </div>
-            <div class="notch-mini-actions">
-              <button type="button" id="notch-music-toggle" class="notch-mini-btn" aria-pressed="false">Play Track</button>
-              <button type="button" id="notch-chime-mini" class="notch-mini-btn">Test Chime</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="notch-exp-body" id="notch-exp-body-music" hidden>
-          <div class="notch-exp-col">
-            <span class="notch-exp-label">Now Playing · LRCLIB</span>
-            <div class="notch-music-card">
-              <div class="notch-album-tile" aria-hidden="true">♪</div>
-              <div class="notch-track-meta">
-                <div class="notch-track-name" id="notch-music-title">Midnight Coding</div>
-                <div class="notch-track-artist" id="notch-music-artist">Lo-Fi Bunny · Spotify SMTC</div>
-                <div class="notch-lyric-line" id="notch-music-lyric">Pure OLED black, zero distractions.</div>
-              </div>
-            </div>
-            <div class="notch-mini-actions">
-              <button type="button" id="notch-prev-track" class="notch-mini-btn">Prev</button>
-              <button type="button" id="notch-play-pause-btn" class="notch-mini-btn">Play / Pause</button>
-              <button type="button" id="notch-next-track" class="notch-mini-btn">Next</button>
-            </div>
-          </div>
-
-          <span class="notch-exp-divider" aria-hidden="true"></span>
-
-          <div class="notch-exp-col">
-            <span class="notch-exp-label">Output &amp; Bluetooth</span>
-            <div class="notch-track-name" id="notch-output-label">Speakers (Realtek Audio)</div>
-            <div class="notch-track-artist" id="notch-bt-label">BT Earphone • 85% Connected</div>
-            <div class="notch-mini-actions">
-              <button type="button" id="notch-hud-bt-mini" class="notch-mini-btn">Sim BT HUD</button>
-              <button type="button" id="notch-hud-out-mini" class="notch-mini-btn">Switch Output</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ======================================================================
-       HEADER NAV
+       HEADER NAV (Minimal Monochrome, No Fixed Notch Collision, No Version Pill)
        ====================================================================== -->
   <header class="site-header">
     <div class="container header-inner">
       <a href="#top" class="brand-link">
-        <img src="./favicon.svg" alt="" class="brand-logo" width="24" height="24" />
+        <img src="./favicon.svg" alt="" class="brand-logo" width="22" height="22" />
         <span>CASA</span>
-        <span class="brand-version">v2.0.0</span>
       </a>
 
       <nav class="header-nav" aria-label="Navigasi Utama">
-        <a href="#simulator">Simulator</a>
+        <a href="#playground">Playground</a>
         <a href="#architecture">Arsitektur</a>
         <a href="#download">Unduh</a>
         <a href="#feedback">Feedback</a>
@@ -180,339 +94,399 @@
 
   <main id="top">
     <!-- ====================================================================
-         HERO + TRANSPARENT OBSIDIAN BUNNY CENTERPIECE
+         HERO COPYWRITING + VIRTUAL MONITOR PLAYGROUND
          ==================================================================== -->
-    <section class="hero-section">
-      <div class="hero-glow" aria-hidden="true"></div>
-      <div class="container hero-grid">
-        <div>
-          <div class="hero-pill">
-            <span class="hero-pill-dot" aria-hidden="true"></span>
-            <span>Windows 11 · Tauri 2 + Rust · 4px Smart-Tuck</span>
-          </div>
-
-          <h1 class="hero-title">
-            Pure OLED Notch Companion.<br />
-            <span class="hero-title-accent">Zero Desktop Bloat.</span>
-          </h1>
-
+    <section id="playground" class="hero-showcase">
+      <div class="container">
+        <div class="hero-intro">
+          <h1 class="hero-title">CASA — Dynamic Rabbit Island for Windows</h1>
           <p class="hero-lead">
-            CASA mengubah bibir atas monitor Windows menjadi kapsul OLED interaktif yang hidup.
-            Kontrol musik Spotify SMTC &amp; lirik LRCLIB, Focus Pomodoro dengan alarm Web Audio,
-            telemetri baterai Bluetooth, dan auto smart-tuck 4px saat layar penuh — semua dalam installer 4.43 MB.
+            Sebuah pulau ambient monokrom di bibir atas layar Windows. Menghadirkan ekspresi kelinci reaktif,
+            lirik berjalan, cincin fokus To-Do, HUD perangkat keras, serta rak Drop Zone tanpa memenuhi desktop.
           </p>
-
-          <div class="hero-actions">
+          <div class="hero-quick-links">
             <a href="#download" id="hero-download-btn" class="btn-primary">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                 <polyline points="7 10 12 15 17 10" />
                 <line x1="12" y1="15" x2="12" y2="3" />
               </svg>
-              <span>Download CASA v2.0.0 (.exe)</span>
+              <span>Unduh Installer Windows</span>
             </a>
-
-            <button type="button" id="hero-toggle-notch-btn" class="btn-secondary">
-              <span>Toggle Notch Preview</span>
-              <span class="hero-hotkey">Alt + Space</span>
+            <button type="button" id="replay-intro-btn" class="btn-secondary">
+              <span>Replay Intro</span>
             </button>
           </div>
+        </div>
 
-          <div class="hero-meta-strip">
-            <span class="hero-meta-item">• 64-bit Windows 10/11</span>
-            <span class="hero-meta-item">• &lt; 50 MB RAM Idle</span>
-            <span class="hero-meta-item" id="hero-downloads-summary">• Total Unduhan: memuat...</span>
+        <!-- VIRTUAL MONITOR FRAME (16:10 Desktop Ratio) -->
+        <div class="monitor-stage">
+          <div
+            id="virtual-monitor"
+            class="virtual-monitor"
+            data-intro-phase="ready"
+            data-mode="resting"
+            aria-label="Monitor Virtual Simulasi CASA"
+          >
+            <!-- Subtle Monitor Chrome Frame -->
+            <div class="monitor-screen" id="monitor-screen">
+              <!-- Intro Boot Sequence Layer ("Hi." -> Obsidian Bunny shrinks to Notch Resting -> Wake) -->
+              <div class="intro-overlay" id="intro-overlay" hidden>
+                <div class="intro-bunny-wrap" id="intro-bunny-wrap">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 240 240"
+                    class="intro-bunny-svg"
+                    role="img"
+                    aria-label="Obsidian Bunny CASA"
+                  >
+                    <defs>
+                      <radialGradient id="vmObsidianHead" cx="38%" cy="22%" r="78%">
+                        <stop offset="0%" stop-color="#3E3E48" />
+                        <stop offset="45%" stop-color="#18181E" />
+                        <stop offset="85%" stop-color="#09090C" />
+                        <stop offset="100%" stop-color="#030305" />
+                      </radialGradient>
+                      <linearGradient id="vmObsidianEar" x1="15%" y1="0%" x2="85%" y2="100%">
+                        <stop offset="0%" stop-color="#363640" />
+                        <stop offset="55%" stop-color="#141419" />
+                        <stop offset="100%" stop-color="#060608" />
+                      </linearGradient>
+                      <linearGradient id="vmObsidianFlap" x1="20%" y1="0%" x2="85%" y2="100%">
+                        <stop offset="0%" stop-color="#444450" />
+                        <stop offset="50%" stop-color="#1B1B22" />
+                        <stop offset="100%" stop-color="#08080B" />
+                      </linearGradient>
+                      <linearGradient id="vmInnerEarWhite" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stop-color="#FFFFFF" />
+                        <stop offset="100%" stop-color="#D4D4D8" />
+                      </linearGradient>
+                    </defs>
+                    <g transform="translate(-5, 6)">
+                      <path d="M 86 116 C 72 86, 56 46, 68 25 C 76 13, 95 25, 105 60 C 110 78, 112 96, 112 114 Z" fill="url(#vmObsidianEar)" />
+                      <path d="M 90 104 C 81 82, 71 52, 77 38 C 81 31, 90 39, 97 62 C 101 77, 103 91, 103 103 Z" fill="url(#vmInnerEarWhite)" />
+                      <path d="M 125 114 C 129 82, 140 48, 158 48 C 172 48, 173 66, 160 106 L 155 116 Z" fill="url(#vmObsidianEar)" />
+                      <path d="M 134 106 C 137 91, 141 78, 145 68 L 161 80 C 157 91, 154 101, 151 110 Z" fill="url(#vmInnerEarWhite)" />
+                      <path d="M 145 67 L 165 83 L 162 89 L 143 73 Z" fill="#000000" fill-opacity="0.72" />
+                      <path d="M 132 74 C 138 56, 147 48, 158 48 C 179 48, 195 70, 200 94 C 201 100, 194 103, 186 98 C 174 91, 160 79, 146 66 Z" fill="url(#vmObsidianFlap)" />
+                      <ellipse cx="120" cy="112" rx="46" ry="8" fill="#000000" fill-opacity="0.45" />
+                      <path d="M 120 106 C 157 106, 185 124, 185 155 C 185 184, 158 200, 120 200 C 82 200, 55 184, 55 155 C 55 124, 83 106, 120 106 Z" fill="url(#vmObsidianHead)" />
+                      <path fill="none" d="M 83 146 L 101 164 M 101 146 L 83 164" stroke="#FFFFFF" stroke-width="6.8" stroke-linecap="round" />
+                      <path d="M 148 167 C 148 167, 133.5 157, 133.5 148.5 C 133.5 143.2, 137.7 139.5, 142 139.5 C 144.7 139.5, 146.9 141.2, 148 143.3 C 149.1 141.2, 151.3 139.5, 154 139.5 C 158.3 139.5, 162.5 143.2, 162.5 148.5 C 162.5 157, 148 167, 148 167 Z" fill="#FFFFFF" />
+                    </g>
+                  </svg>
+                </div>
+                <div class="intro-greeting" id="intro-greeting">Hi.</div>
+              </div>
+
+              <!-- MONITOR TOP-LIP CASA NOTCH CAPSULE -->
+              <div class="vm-notch-mount" id="vm-notch-mount">
+                <div
+                  id="vm-notch-capsule"
+                  class="vm-notch-capsule"
+                  data-state="idle"
+                  role="region"
+                  aria-label="Kapsul CASA di Bezel Atas Monitor"
+                >
+                  <!-- Compact / Resting / Idle / Lyric Mini Row -->
+                  <div class="vm-notch-pill-row" id="vm-notch-pill-row">
+                    <div class="vm-notch-left">
+                      <svg
+                        id="vm-notch-eyes"
+                        class="vm-notch-eyes"
+                        viewBox="0 0 34 16"
+                        aria-hidden="true"
+                      ></svg>
+                      <span class="vm-notch-sep" aria-hidden="true"></span>
+                      <span id="vm-notch-title" class="vm-notch-title tabular">09:41</span>
+                      <span id="vm-notch-subtitle" class="vm-notch-subtitle">Resting</span>
+                    </div>
+
+                    <div class="vm-notch-right">
+                      <!-- Mini Lyric Strip when Idle Lyric Minimize is Active -->
+                      <span id="vm-mini-lyric-pill" class="vm-mini-lyric-pill" hidden></span>
+                      <!-- Hardware HUD Pill -->
+                      <span id="vm-hud-chip" class="vm-hud-chip" hidden></span>
+                      <!-- Focus Progress Mini Ring + Countdown -->
+                      <span id="vm-focus-ring-wrap" class="vm-focus-ring-wrap" hidden>
+                        <svg viewBox="0 0 20 20" class="vm-focus-ring-svg" aria-hidden="true">
+                          <circle cx="10" cy="10" r="7.5" class="vm-ring-track" />
+                          <circle cx="10" cy="10" r="7.5" id="vm-focus-ring-arc" class="vm-ring-arc" />
+                        </svg>
+                        <span id="vm-focus-mini-pct" class="tabular">1/3</span>
+                      </span>
+                      <span id="vm-battery-badge" class="vm-battery-badge tabular">88%</span>
+                    </div>
+                  </div>
+
+                  <!-- Expanded Mode 6 Capsule Panel (Control / Music / Focus / Drop Zone) -->
+                  <div class="vm-notch-expanded" id="vm-notch-expanded" hidden>
+                    <div class="vm-exp-header">
+                      <span id="vm-exp-mode-title" class="vm-exp-heading">CASA Capsule</span>
+                      <div class="vm-exp-actions">
+                        <span class="vm-exp-meta tabular" id="vm-exp-clock">09:41</span>
+                        <button type="button" id="vm-notch-collapse-btn" class="vm-chip-btn">Tutup</button>
+                      </div>
+                    </div>
+
+                    <!-- Expanded Subview: Control & Wake -->
+                    <div class="vm-exp-body" id="vm-exp-control">
+                      <div class="vm-exp-row">
+                        <div>
+                          <div class="vm-exp-item-title">Obsidian Companion</div>
+                          <div class="vm-exp-item-sub">Status aktif • Pintasan Alt + Space</div>
+                        </div>
+                        <button type="button" id="vm-exp-rest-btn" class="vm-chip-btn">Masuk Resting</button>
+                      </div>
+                    </div>
+
+                    <!-- Expanded Subview: Music + Idle Lyric Minimize -->
+                    <div class="vm-exp-body" id="vm-exp-music" hidden>
+                      <div class="vm-exp-music-row">
+                        <div class="vm-exp-music-meta">
+                          <div class="vm-exp-item-title" id="vm-exp-track-title">Midnight Coding</div>
+                          <div class="vm-exp-item-sub" id="vm-exp-track-artist">Lo-Fi Bunny</div>
+                          <div class="vm-exp-lyric-preview" id="vm-exp-lyric-line">Pure monochrome focus on Windows.</div>
+                        </div>
+                        <div class="vm-exp-btn-stack">
+                          <button type="button" id="vm-idle-lyric-btn" class="vm-chip-btn">Idle Lyric Minimize</button>
+                          <button type="button" id="vm-exp-play-btn" class="vm-chip-btn">Pause</button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Expanded Subview: Focus Progress -->
+                    <div class="vm-exp-body" id="vm-exp-focus" hidden>
+                      <div class="vm-exp-row">
+                        <div>
+                          <div class="vm-exp-item-title" id="vm-exp-focus-label">Sesi Fokus • 25:00</div>
+                          <div class="vm-exp-item-sub" id="vm-exp-focus-sub">1 / 3 To-Do selesai</div>
+                        </div>
+                        <button type="button" id="vm-exp-timer-btn" class="vm-chip-btn">Jeda Timer</button>
+                      </div>
+                    </div>
+
+                    <!-- Expanded Subview: Drop Zone Shelf -->
+                    <div class="vm-exp-body" id="vm-exp-dropzone" hidden>
+                      <div class="vm-dropzone-shelf" id="vm-dropzone-shelf">
+                        <div class="vm-dropzone-prompt" id="vm-dropzone-prompt">
+                          Lepaskan file di sini untuk menyimpan sementara
+                        </div>
+                        <div class="vm-dropped-items" id="vm-dropped-items"></div>
+                        <div class="vm-dropzone-footer">
+                          <span id="vm-dropzone-count" class="vm-exp-item-sub tabular">0 file di rak</span>
+                          <button type="button" id="vm-copy-back-btn" class="vm-chip-btn primary" hidden>
+                            Copy Back to Desktop
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- DESKTOP STAGE INSIDE VIRTUAL MONITOR (Changes Dynamically per Selected Mode) -->
+              <div class="monitor-desktop" id="monitor-desktop">
+                <!-- Wallpaper Ambient Subtle Grid -->
+                <div class="monitor-grid-bg" aria-hidden="true"></div>
+
+                <!-- Scenario 1: Resting & Wake -->
+                <section class="vm-scene" id="scene-resting" aria-label="Skenario Resting dan Wake">
+                  <div class="vm-desktop-clock">
+                    <div class="vm-clock-digits tabular" id="vm-desktop-time">09:41</div>
+                    <div class="vm-clock-sub" id="vm-clock-status">Kapsul Resting di bezel atas — hover, klik, atau tekan Alt + Space</div>
+                  </div>
+                  <div class="vm-inline-controls">
+                    <button type="button" id="scene-toggle-rest-btn" class="vm-action-btn">Bangunkan / Tidurkan</button>
+                    <button type="button" id="scene-toggle-expand-btn" class="vm-action-btn">Expand Kapsul (Alt+Space)</button>
+                  </div>
+                </section>
+
+                <!-- Scenario 2: Lyrics & Queue -->
+                <section class="vm-scene" id="scene-lyrics" hidden aria-label="Skenario Lyrics dan Queue">
+                  <div class="vm-split-panel">
+                    <div class="vm-panel-box">
+                      <div class="vm-panel-head">
+                        <span class="vm-panel-eyebrow">Synchronized Lyrics</span>
+                        <button type="button" id="scene-lyric-minimize-btn" class="vm-mini-action">
+                          Idle Lyric Minimize
+                        </button>
+                      </div>
+                      <div class="vm-lyric-stage" id="vm-lyric-stage"></div>
+                    </div>
+
+                    <div class="vm-panel-box">
+                      <div class="vm-panel-head">
+                        <span class="vm-panel-eyebrow">Queue Antrian</span>
+                        <span class="vm-panel-tag" id="vm-queue-count-tag">4 lagu</span>
+                      </div>
+                      <ul class="vm-queue-list" id="vm-queue-list"></ul>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- Scenario 3: To-Do & Focus -->
+                <section class="vm-scene" id="scene-todo" hidden aria-label="Skenario To-Do dan Focus">
+                  <div class="vm-split-panel">
+                    <div class="vm-panel-box">
+                      <div class="vm-panel-head">
+                        <span class="vm-panel-eyebrow">Workspace To-Do</span>
+                        <span class="vm-panel-tag tabular" id="vm-todo-progress-text">1 / 3 selesai</span>
+                      </div>
+                      <ul class="vm-todo-list" id="vm-todo-list"></ul>
+                      <form id="vm-todo-form" class="vm-todo-form">
+                        <input
+                          type="text"
+                          id="vm-todo-input"
+                          class="vm-todo-input"
+                          maxlength="48"
+                          placeholder="+ Tambah tugas fokus baru..."
+                        />
+                        <button type="submit" class="vm-mini-action">Tambah</button>
+                      </form>
+                    </div>
+
+                    <div class="vm-panel-box vm-focus-summary-box">
+                      <div class="vm-panel-head">
+                        <span class="vm-panel-eyebrow">Notch Focus Ring &amp; Eyes</span>
+                        <span class="vm-panel-tag" id="vm-focus-eye-badge">•̀ ♥ Focus</span>
+                      </div>
+                      <p class="vm-focus-hint">
+                        Mencentang tugas langsung memperbarui cincin fokus di kapsul atas. Gabungkan musik &amp; timer untuk mode Dual-Idle (•̀ ♪).
+                      </p>
+                      <div class="vm-inline-controls">
+                        <button type="button" id="vm-todo-dual-btn" class="vm-mini-action">Toggle Dual-Idle (•̀ ♪)</button>
+                        <button type="button" id="vm-todo-timer-btn" class="vm-mini-action">Pause / Resume Focus</button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- Scenario 4: Volume & BT HUD -->
+                <section class="vm-scene" id="scene-hud" hidden aria-label="Skenario Volume dan Bluetooth HUD">
+                  <div class="vm-panel-box vm-hud-box">
+                    <div class="vm-panel-head">
+                      <span class="vm-panel-eyebrow">Hardware &amp; Audio HUD</span>
+                      <span class="vm-panel-tag tabular" id="vm-hud-readout">Volume 68% · Speakers</span>
+                    </div>
+
+                    <div class="vm-slider-row">
+                      <label for="vm-volume-slider" class="vm-slider-label">Master Volume</label>
+                      <input
+                        id="vm-volume-slider"
+                        type="range"
+                        min="0"
+                        max="100"
+                        value="68"
+                        class="vm-volume-slider"
+                      />
+                      <span id="vm-volume-pct" class="vm-volume-val tabular">68%</span>
+                    </div>
+
+                    <div class="vm-inline-controls">
+                      <button type="button" id="vm-sim-bt-btn" class="vm-action-btn">
+                        Connect BT Earphone · 85%
+                      </button>
+                      <button type="button" id="vm-sim-wired-btn" class="vm-action-btn">
+                        Switch Wired Earphone
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- Scenario 5: Drag & Drop (Drop Zone) -->
+                <section class="vm-scene" id="scene-dropzone" hidden aria-label="Skenario Drag and Drop Drop Zone">
+                  <div class="vm-drop-header">
+                    <span class="vm-panel-eyebrow">Seret kartu ke bibir atas monitor atau gunakan Simulate Drop</span>
+                    <button type="button" id="vm-sim-drop-all-btn" class="vm-mini-action">
+                      Simulate Drop
+                    </button>
+                  </div>
+                  <div class="vm-desktop-files" id="vm-desktop-files"></div>
+                </section>
+              </div>
+            </div>
+          </div>
+
+          <!-- Monitor Neck & Base Stand (Minimal OLED Silhouette) -->
+          <div class="monitor-stand" aria-hidden="true">
+            <div class="monitor-neck"></div>
+            <div class="monitor-foot"></div>
           </div>
         </div>
 
-        <!-- Obsidian Bunny Mascot Centerpiece (Transparent SVG, Floating + 3D Parallax Tilt + Reactive Eyes) -->
-        <div class="mascot-stage">
-          <div class="mascot-card" id="mascot-card">
-            <div class="bunny-float-wrap">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 240 240"
-                class="bunny-hero-svg"
-                role="img"
-                aria-label="Maskot Obsidian Bunny CASA v2.0.0"
-              >
-                <defs>
-                  <radialGradient id="heroObsidianHeadGrad" cx="38%" cy="22%" r="78%">
-                    <stop offset="0%" stop-color="#3E3E48" />
-                    <stop offset="45%" stop-color="#18181E" />
-                    <stop offset="85%" stop-color="#09090C" />
-                    <stop offset="100%" stop-color="#030305" />
-                  </radialGradient>
-                  <radialGradient id="heroForeheadLight" cx="50%" cy="50%" r="50%">
-                    <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.14" />
-                    <stop offset="65%" stop-color="#FFFFFF" stop-opacity="0.04" />
-                    <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
-                  </radialGradient>
-                  <linearGradient id="heroObsidianEarGrad" x1="15%" y1="0%" x2="85%" y2="100%">
-                    <stop offset="0%" stop-color="#363640" />
-                    <stop offset="55%" stop-color="#141419" />
-                    <stop offset="100%" stop-color="#060608" />
-                  </linearGradient>
-                  <linearGradient id="heroObsidianFlapGrad" x1="20%" y1="0%" x2="85%" y2="100%">
-                    <stop offset="0%" stop-color="#444450" />
-                    <stop offset="50%" stop-color="#1B1B22" />
-                    <stop offset="100%" stop-color="#08080B" />
-                  </linearGradient>
-                  <linearGradient id="heroInnerEarWhite" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stop-color="#FFFFFF" />
-                    <stop offset="100%" stop-color="#D4D4D8" />
-                  </linearGradient>
-                  <filter id="heroBunnyDepthShadow" x="-20%" y="-20%" width="140%" height="140%">
-                    <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000000" flood-opacity="0.85" />
-                  </filter>
-                  <filter id="heroWhiteEyeGlow" x="-35%" y="-35%" width="170%" height="170%">
-                    <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#FFFFFF" flood-opacity="0.5" />
-                  </filter>
-                </defs>
-
-                <g transform="translate(-5, 6)">
-                  <g filter="url(#heroBunnyDepthShadow)">
-                    <path d="M 86 116 C 72 86, 56 46, 68 25 C 76 13, 95 25, 105 60 C 110 78, 112 96, 112 114 Z" fill="url(#heroObsidianEarGrad)" />
-                    <path d="M 90 104 C 81 82, 71 52, 77 38 C 81 31, 90 39, 97 62 C 101 77, 103 91, 103 103 Z" fill="url(#heroInnerEarWhite)" />
-                    <path d="M 125 114 C 129 82, 140 48, 158 48 C 172 48, 173 66, 160 106 L 155 116 Z" fill="url(#heroObsidianEarGrad)" />
-                    <path d="M 134 106 C 137 91, 141 78, 145 68 L 161 80 C 157 91, 154 101, 151 110 Z" fill="url(#heroInnerEarWhite)" />
-                    <path d="M 145 67 L 165 83 L 162 89 L 143 73 Z" fill="#000000" fill-opacity="0.72" />
-                    <path d="M 132 74 C 138 56, 147 48, 158 48 C 179 48, 195 70, 200 94 C 201 100, 194 103, 186 98 C 174 91, 160 79, 146 66 Z" fill="url(#heroObsidianFlapGrad)" />
-                    <ellipse cx="120" cy="112" rx="46" ry="8" fill="#000000" fill-opacity="0.45" />
-                    <path d="M 120 106 C 157 106, 185 124, 185 155 C 185 184, 158 200, 120 200 C 82 200, 55 184, 55 155 C 55 124, 83 106, 120 106 Z" fill="url(#heroObsidianHeadGrad)" />
-                    <ellipse cx="116" cy="121" rx="46" ry="13" fill="url(#heroForeheadLight)" />
-                  </g>
-
-                  <g id="hero-eye-left" class="hero-eye-group" filter="url(#heroWhiteEyeGlow)"></g>
-                  <g id="hero-eye-right" class="hero-eye-group" filter="url(#heroWhiteEyeGlow)"></g>
-                </g>
-              </svg>
-            </div>
-
-            <div class="mascot-status-badge">
-              <span>Ekspresi:</span>
-              <span id="mascot-expression-label" class="mascot-status-accent">× ♥ Idle</span>
-              <span>·</span>
-              <span id="mascot-placement-label">Docked 0px</span>
-            </div>
-          </div>
+        <!-- 5 INTERACTIVE MODE CONTROLS DIRECTLY UNDER MONITOR -->
+        <div class="mode-dock" role="toolbar" aria-label="Pilih skenario simulasi monitor">
+          <button type="button" class="mode-dock-btn" data-vm-mode="resting" aria-pressed="true">
+            Resting &amp; Wake
+          </button>
+          <button type="button" class="mode-dock-btn" data-vm-mode="lyrics" aria-pressed="false">
+            Lyrics &amp; Queue
+          </button>
+          <button type="button" class="mode-dock-btn" data-vm-mode="todo" aria-pressed="false">
+            To-Do &amp; Focus
+          </button>
+          <button type="button" class="mode-dock-btn" data-vm-mode="hud" aria-pressed="false">
+            Volume &amp; BT HUD
+          </button>
+          <button type="button" class="mode-dock-btn" data-vm-mode="dropzone" aria-pressed="false">
+            Drag &amp; Drop
+          </button>
         </div>
       </div>
     </section>
 
     <!-- ====================================================================
-         LIVE INTERACTIVE NOTCH SIMULATOR PLAYGROUND
-         ==================================================================== -->
-    <section id="simulator" class="section-block">
-      <div class="container">
-        <div class="section-header">
-          <span class="section-eyebrow">Interactive Playground</span>
-          <h2 class="section-title">Coba Kapsul CASA Langsung di Browser</h2>
-          <p class="section-desc">
-            Arahkan kursor ke kapsul di tepi atas layar atau tekan <strong class="font-mono">Alt + Space</strong>.
-            Ubah tema, mode posisi, ekspresi mata Obsidian Bunny, simulasi audio chime, hingga notifikasi perangkat keras secara real-time.
-          </p>
-        </div>
-
-        <div class="playground-grid">
-          <!-- Theme Switcher -->
-          <div class="oled-card span-6">
-            <h3 class="control-card-title">
-              <span>Dynamic Theme Switcher</span>
-              <span class="release-pill" id="theme-status-pill">Warm Amber</span>
-            </h3>
-            <p class="control-card-hint">
-              Selaras dengan Settings Hub v2.0.0: mengubah palet timer, indikator Notch, dan aksen seluruh halaman secara instan.
-            </p>
-            <div class="segmented-group" role="group" aria-label="Pilih tema warna">
-              <button type="button" class="sim-btn" data-theme-btn="default" aria-pressed="true">
-                <span class="swatch-dot swatch-amber" aria-hidden="true"></span>
-                <span>Default Amber</span>
-              </button>
-              <button type="button" class="sim-btn" data-theme-btn="monochrome" aria-pressed="false">
-                <span class="swatch-dot swatch-mono" aria-hidden="true"></span>
-                <span>Monochrome</span>
-              </button>
-              <button type="button" class="sim-btn" data-theme-btn="colorblind" aria-pressed="false">
-                <span class="swatch-dot swatch-cyan" aria-hidden="true"></span>
-                <span>Colorblind Safe</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Placement & Fullscreen Smart-Tuck -->
-          <div class="oled-card span-6">
-            <h3 class="control-card-title">
-              <span>Placement &amp; 4px Smart-Tuck</span>
-              <span class="release-pill" id="placement-status-pill">Docked 0px</span>
-            </h3>
-            <p class="control-card-hint">
-              Uji mode menempel di bibir atas (Docked dengan lekuk notch), melayang (Floating 12px), atau garis 4px Fullscreen Smart-Tuck.
-            </p>
-            <div class="segmented-group" role="group" aria-label="Pilih posisi kapsul">
-              <button type="button" class="sim-btn" data-placement-btn="docked" aria-pressed="true">
-                <span>Docked (0px)</span>
-              </button>
-              <button type="button" class="sim-btn" data-placement-btn="floating" aria-pressed="false">
-                <span>Floating (12px)</span>
-              </button>
-              <button type="button" id="sim-tuck-btn" class="sim-btn" aria-pressed="false">
-                <span>Preview 4px Smart-Tuck</span>
-              </button>
-              <button type="button" id="sim-expand-btn" class="sim-btn" aria-pressed="false">
-                <span>Expand Mode 6</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Reactive Eye Expressions -->
-          <div class="oled-card span-6">
-            <h3 class="control-card-title">
-              <span>Ekspresi Mata Reaktif</span>
-              <span class="release-pill accent" id="expr-code-pill">× ♥ Idle</span>
-            </h3>
-            <p class="control-card-hint">
-              Geometri SVG murni yang Sinkron otomatis antara Notch di atas layar dan maskot Obsidian Bunny.
-            </p>
-            <div class="segmented-group" role="group" aria-label="Pilih ekspresi mata">
-              <button type="button" class="sim-btn" data-expr-btn="idle" aria-pressed="true">× ♥ Idle</button>
-              <button type="button" class="sim-btn" data-expr-btn="dual_active" aria-pressed="false">•̀ ♪ Focus+Musik</button>
-              <button type="button" class="sim-btn" data-expr-btn="focus" aria-pressed="false">•̀ ♥ Focus</button>
-              <button type="button" class="sim-btn" data-expr-btn="music" aria-pressed="false">♪ ♥ Musik</button>
-              <button type="button" class="sim-btn" data-expr-btn="awake_lock" aria-pressed="false">✦ ♥ Keep Awake</button>
-              <button type="button" class="sim-btn" data-expr-btn="alarm" aria-pressed="false">&gt; &lt; Alarm</button>
-            </div>
-          </div>
-
-          <!-- Synthesized Chime + Hardware HUD Simulation -->
-          <div class="oled-card span-6">
-            <h3 class="control-card-title">
-              <span>Web Audio Chime &amp; Hardware HUD</span>
-              <span class="release-pill">Zero External Audio</span>
-            </h3>
-            <p class="control-card-hint">
-              Arpeggio harmonik C5→E5→G5→B5 disintesis via Web Audio API, plus simulasi deteksi Bluetooth Battery &amp; Audio Output.
-            </p>
-            <div class="segmented-group" role="group" aria-label="Simulasi alarm dan hardware">
-              <button type="button" id="sim-chime-btn" class="sim-btn">Test Alarm Chime</button>
-              <button type="button" id="sim-bt-btn" class="sim-btn">BT Connected (85%)</button>
-              <button type="button" id="sim-output-btn" class="sim-btn">Audio Output: Wired / Speaker</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ====================================================================
-         ARCHITECTURE & FEATURES SHOWCASE
+         COMPACT ENGINEERING HIGHLIGHTS (PURE MONOCHROME)
          ==================================================================== -->
     <section id="architecture" class="section-block">
       <div class="container">
         <div class="section-header">
-          <span class="section-eyebrow">v2.0.0 Engineering</span>
-          <h2 class="section-title">Presisi Win32 Native di Atas Fondasi Tauri 2</h2>
+          <span class="section-eyebrow">Native Engineering</span>
+          <h2 class="section-title">Presisi Win32 di Atas Fondasi Tauri 2 &amp; Rust</h2>
           <p class="section-desc">
-            Setiap piksel dan polling telemetri dirancang hemat daya agar aman menyala terus-menerus selama sesi kerja maupun gaming.
+            Dirancang agar menyatu alami di tepi atas layar tanpa mengorbankan performa maupun kenyamanan layar penuh.
           </p>
         </div>
 
         <div class="feature-grid">
           <article class="oled-card">
-            <div class="feature-icon-box" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="2" y="4" width="20" height="16" rx="2" />
-                <path d="M8 4v3a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V4" />
-              </svg>
-            </div>
             <h3 class="feature-title">4px Fullscreen Smart-Tuck</h3>
             <p class="feature-copy">
-              Saat video atau game layar penuh aktif, kapsul menciut presisi menjadi garis OLED 4px di y=0 tanpa clipping lintas monitor &amp; DPI.
+              Otomatis menciut menjadi bilah OLED 4px di y=0 saat aplikasi atau video fullscreen aktif, lalu pulih deterministik saat keluar.
             </p>
             <span class="feature-tag">Win32 · SetWindowRgn + DWM</span>
           </article>
 
           <article class="oled-card">
-            <div class="feature-icon-box" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="m7 7 10 10-5 5V2l5 5L7 17" />
-              </svg>
-            </div>
-            <h3 class="feature-title">BT Battery &amp; Audio Output</h3>
+            <h3 class="feature-title">Media Sync &amp; Custom Playlist</h3>
             <p class="feature-copy">
-              Deteksi otomatis status koneksi perangkat Bluetooth lengkap dengan persentase baterai dan perpindahan output audio WASAPI.
+              Integrasi GSMTC Windows &amp; CASA Player lengkap dengan lirik tersinkronisasi LRCLIB, antrean pintar, dan penyimpanan playlist instan.
             </p>
-            <span class="feature-tag">Rust Telemetry · Zero Polling Spike</span>
+            <span class="feature-tag">GSMTC · Local &amp; Streaming</span>
           </article>
 
           <article class="oled-card">
-            <div class="feature-icon-box" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="9" />
-                <polyline points="12 7 12 12 15 14" />
-              </svg>
-            </div>
-            <h3 class="feature-title">Focus Timer &amp; Custom Alarm</h3>
+            <h3 class="feature-title">Signed Auto-Updater &amp; Telemetry</h3>
             <p class="feature-copy">
-              Pomodoro interaktif dengan banner takeover Time's Up (+5m/Dismiss), Web Audio chime bawaan, serta upload audio kustom 15 detik.
+              Pembaruan OTA terverifikasi tanda tangan digital, status Bluetooth baterai real-time, deteksi audio WASAPI, dan shortcut Alt + Space.
             </p>
-            <span class="feature-tag">Web Audio API · IndexedDB WAV</span>
-          </article>
-
-          <article class="oled-card">
-            <div class="feature-icon-box" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M9 18V5l12-2v13" />
-                <circle cx="6" cy="18" r="3" />
-                <circle cx="18" cy="16" r="3" />
-              </svg>
-            </div>
-            <h3 class="feature-title">Spotify SMTC &amp; Lirik LRCLIB</h3>
-            <p class="feature-copy">
-              Baca sesi pemutaran Windows secara native, tampilkan lirik tersinkronisasi di idle pill, kelola antrean, dan susun custom playlist.
-            </p>
-            <span class="feature-tag">GSMTC · Shared Pub-Sub Store</span>
-          </article>
-
-          <article class="oled-card">
-            <div class="feature-icon-box" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="4" width="18" height="16" rx="2" />
-                <line x1="9" y1="4" x2="9" y2="20" />
-              </svg>
-            </div>
-            <h3 class="feature-title">Two-Column Settings &amp; Hotkey</h3>
-            <p class="feature-copy">
-              Jendela pengaturan desktop terpisah 760×520 dengan live preview serta pintasan global Alt + Space untuk membuka atau menutup kapsul.
-            </p>
-            <span class="feature-tag">Multi-Window · Global Shortcut</span>
-          </article>
-
-          <article class="oled-card">
-            <div class="feature-icon-box" aria-hidden="true">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-              </svg>
-            </div>
-            <h3 class="feature-title">CSP Ketat &amp; Zero Telemetry</h3>
-            <p class="feature-copy">
-              Seluruh kode sumber terbuka untuk diaudit. Tanpa pelacak eksternal, tanpa kebocoran token, dan diverifikasi SHA-256 checksum.
-            </p>
-            <span class="feature-tag">Strict CSP · MIT Open Source</span>
+            <span class="feature-tag">Minisign · Pure OLED Security</span>
           </article>
         </div>
       </div>
     </section>
 
     <!-- ====================================================================
-         SMART RELEASE HUB & VERIFICATION
+         DOWNLOAD & VERIFICATION HUB (MOVED TO BOTTOM)
          ==================================================================== -->
     <section id="download" class="section-block">
       <div class="container">
         <div class="section-header">
-          <span class="section-eyebrow">Smart Release Hub</span>
+          <span class="section-eyebrow">Windows Release</span>
           <h2 class="section-title">Unduh CASA untuk Windows 64-bit</h2>
           <p class="section-desc">
-            Otomatis membaca aset rilis terbaru dari GitHub API lengkap dengan statistik unduhan dan arsip versi sebelumnya.
+            Installer ringkas dengan verifikasi checksum SHA-256 dan panduan Windows SmartScreen.
           </p>
         </div>
 
@@ -532,7 +506,7 @@
                 id="primary-download-btn"
                 class="btn-primary"
               >
-                <span>Download CASA v2.0.0 for Windows (64-bit .exe • 4.43 MB)</span>
+                <span>Download CASA v2.0.0 for Windows (64-bit .exe)</span>
               </a>
 
               <a
@@ -542,7 +516,7 @@
                 id="msi-download-btn"
                 class="btn-secondary"
               >
-                <span>Unduh .msi (6.41 MB)</span>
+                <span>Unduh .msi Installer</span>
               </a>
             </div>
 
@@ -552,16 +526,16 @@
 
             <div class="release-stats">
               <div class="stat-tile">
-                <div class="stat-value tabular" id="stat-exe-size">4.43 MB</div>
+                <div class="stat-value tabular" id="stat-exe-size">4.44 MB</div>
                 <div class="stat-label">NSIS Setup (.exe)</div>
               </div>
               <div class="stat-tile">
-                <div class="stat-value tabular" id="stat-msi-size">6.41 MB</div>
+                <div class="stat-value tabular" id="stat-msi-size">6.42 MB</div>
                 <div class="stat-label">MSI Package (.msi)</div>
               </div>
               <div class="stat-tile">
                 <div class="stat-value tabular" id="stat-total-downloads">—</div>
-                <div class="stat-label">Total Unduhan GitHub</div>
+                <div class="stat-label">Total Unduhan</div>
               </div>
             </div>
 
@@ -571,7 +545,7 @@
                 <button type="button" id="copy-sha-btn" class="copy-mini-btn">Salin Hash</button>
               </div>
               <p class="checksum-code" id="sha-value-exe">
-                B91FC087DD243A3F4A1C627CFCAB0BFB5B004FB31E2C5F1B8BC4F3C8A2C74018
+                0D54BE3021396C7FFDCCB09D81DEA12F9460BFFE053F0125B555990A70671BFA
               </p>
             </div>
           </div>
@@ -580,17 +554,17 @@
             <div class="smartscreen-guide">
               <strong>Panduan Windows SmartScreen</strong>
               <span>
-                Karena CASA merupakan proyek open-source independen tanpa sertifikat EV korporat Microsoft,
-                saat dialog biru SmartScreen muncul cukup klik <strong>"More info"</strong> lalu pilih <strong>"Run anyway"</strong>.
+                Karena CASA merupakan proyek open-source independen tanpa sertifikat EV korporat,
+                saat dialog SmartScreen muncul pilih <strong>"More info"</strong> lalu <strong>"Run anyway"</strong>.
               </span>
             </div>
 
             <h3 class="control-card-title">
               <span>Arsip Rilis Sebelumnya</span>
-              <span class="release-pill">v1.x History</span>
+              <span class="release-pill">GitHub Releases</span>
             </h3>
             <p class="control-card-hint">
-              Daftar rilis historis dipopulasi langsung dari GitHub Releases.
+              Daftar rilis historis dimuat otomatis dari repositori resmi.
             </p>
 
             <ul id="archive-release-list" class="archive-list">
@@ -615,7 +589,7 @@
     </section>
 
     <!-- ====================================================================
-         DUAL-PATH FEEDBACK & FEATURE REQUESTS
+         FEEDBACK & FEATURE REQUESTS (AT PAGE BOTTOM ABOVE FOOTER)
          ==================================================================== -->
     <section id="feedback" class="section-block">
       <div class="container">
@@ -624,8 +598,8 @@
             <span class="section-eyebrow">Community &amp; Triage</span>
             <h2 class="section-title">Feedback &amp; Feature Requests</h2>
             <p class="section-desc">
-              Temukan bug monitor multi-DPI, ingin mengusulkan integrasi skill baru, atau punya masukan antarmuka?
-              Kirim langsung — jika form langsung belum dikonfigurasi, browser akan otomatis membuka template GitHub Issue siap kirim.
+              Temukan bug multi-monitor DPI atau ingin mengusulkan integrasi baru?
+              Kirim masukan langsung atau buka template GitHub Issue otomatis.
             </p>
           </div>
 
@@ -684,7 +658,10 @@
 
   <footer class="site-footer">
     <div class="container footer-inner">
-      <p>&copy; 2026 Farhan Pratama · CASA v2.0.0 · Obsidian Edition</p>
+      <div class="footer-brand-stack">
+        <p class="footer-sig">Crafted by Crimson</p>
+        <p class="footer-copy">&copy; 2026 Farhan Pratama · CASA</p>
+      </div>
       <div class="footer-links">
         <a href="https://github.com/Farhanpratama09/casa-app" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
         <a href="https://github.com/Farhanpratama09/casa-app/releases" target="_blank" rel="noopener noreferrer">Releases</a>

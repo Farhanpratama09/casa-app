@@ -16,9 +16,15 @@ import {
   Sparkles,
   Keyboard,
   ExternalLink,
+  Target,
+  Moon,
+  Cpu,
+  MemoryStick,
+  Radio,
 } from 'lucide-react';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { listen } from '@tauri-apps/api/event';
+import { check, type Update } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
 import {
   CASA_THEME_PALETTES,
   CasaFullscreenBehavior,
@@ -43,10 +49,8 @@ import {
 import { useMusicAffinityStore } from '../../hooks/useMusicAffinity';
 import {
   AppUpdateCheckResult,
-  checkAppUpdate,
   getAutostartEnabled,
   getGlobalShortcutStatus,
-  installAppUpdate,
   openExternalUrl,
   playChimeCue,
   setAutostartEnabled,
@@ -81,7 +85,7 @@ const SIDEBAR_ITEMS: Array<{
   {
     id: 'system',
     label: 'System & Updates',
-    subtitle: 'Startup, hotkey & auto-updater',
+    subtitle: 'Startup, hotkey, updater & About',
     icon: ShieldCheck,
   },
 ];
@@ -147,12 +151,12 @@ const FULLSCREEN_OPTIONS: Array<{ value: CasaFullscreenBehavior; label: string }
 const isTauriRuntime = () =>
   typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-const SettingRowCard: React.FC<{
+const SettingFlatRow: React.FC<{
   title: string;
   description: string;
   children: React.ReactNode;
 }> = ({ title, description, children }) => (
-  <div className="bg-[#0B0B0B] border border-white/[0.08] rounded-xl px-4 py-3 flex items-center justify-between gap-4">
+  <div className="py-3.5 flex items-center justify-between gap-4">
     <div className="min-w-0">
       <div className="text-[12.5px] font-semibold text-white/95 leading-snug">{title}</div>
       <div className="text-[11px] text-white/45 leading-snug mt-0.5">{description}</div>
@@ -177,13 +181,15 @@ const PillToggleSwitch: React.FC<{
       playChimeCue('tap');
       onChange(!checked);
     }}
-    className={`relative w-10 h-[22px] rounded-full transition-colors cursor-pointer disabled:opacity-45 ${
-      checked ? 'bg-white' : 'bg-white/[0.14]'
+    className={`relative w-10 h-[22px] rounded-full border transition-colors cursor-pointer disabled:opacity-45 ${
+      checked
+        ? 'bg-white border-white'
+        : 'bg-white/[0.08] border-white/[0.15] hover:border-white/30'
     }`}
   >
     <span
-      className={`absolute top-[3px] w-4 h-4 rounded-full transition-all shadow-sm ${
-        checked ? 'left-[21px] bg-black' : 'left-[3px] bg-white/80'
+      className={`absolute top-[2px] w-4 h-4 rounded-full transition-all shadow-sm ${
+        checked ? 'left-[20px] bg-black' : 'left-[2px] bg-white/80'
       }`}
     />
   </button>
@@ -199,7 +205,7 @@ function SegmentedControl<T extends string | number>({
   onChange: (next: T) => void;
 }) {
   return (
-    <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-[#040405] border border-white/[0.08]">
+    <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-[#070709] border border-white/[0.09]">
       {options.map((opt) => {
         const active = value === opt.value;
         return (
@@ -210,7 +216,7 @@ function SegmentedControl<T extends string | number>({
               playChimeCue('tap');
               onChange(opt.value);
             }}
-            className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer whitespace-nowrap ${
+            className={`px-2.5 py-1 rounded-[5px] text-[11px] font-medium transition-all cursor-pointer whitespace-nowrap ${
               active
                 ? 'bg-white text-black font-semibold shadow-sm'
                 : 'text-white/55 hover:text-white hover:bg-white/[0.06]'
@@ -267,15 +273,14 @@ const LiveNotchPreviewCard: React.FC<{
       : 'Tengah';
 
   return (
-    <div className="bg-[#0B0B0B] border border-white/[0.08] rounded-xl overflow-hidden">
+    <div className="border border-white/[0.08] rounded-lg overflow-hidden bg-[#050506]">
       {/* Simulated Desktop Screen Top Bezel Stage */}
       <div
-        className="relative h-[86px] w-full overflow-hidden border-b border-white/[0.06]"
+        className="relative h-[82px] w-full overflow-hidden border-b border-white/[0.07]"
         style={{
           background: `radial-gradient(ellipse 65% 85% at 50% 0%, ${palette.timerGlow}, rgba(14,14,18,0.85) 55%, #040406 100%)`,
         }}
       >
-        {/* Subtle desktop wallpaper grid hint */}
         <div
           aria-hidden="true"
           className="absolute inset-0 opacity-20"
@@ -292,7 +297,6 @@ const LiveNotchPreviewCard: React.FC<{
             className="relative inline-flex items-start justify-center transition-all duration-200"
             style={{ marginTop: isFloating ? 12 : 0 }}
           >
-            {/* Left & Right Concave Shoulders (Docked Notch only) */}
             {!isFloating && (
               <>
                 <svg
@@ -318,7 +322,6 @@ const LiveNotchPreviewCard: React.FC<{
               </>
             )}
 
-            {/* Simulated Pure Black CASA Capsule */}
             <div
               className={`relative bg-[#000000] flex items-center justify-between px-3.5 transition-all duration-200 ${
                 isFloating ? 'rounded-full' : 'rounded-b-[16px]'
@@ -329,7 +332,6 @@ const LiveNotchPreviewCard: React.FC<{
                 boxShadow: `0 0 16px ${palette.timerGlow}, 0 6px 18px rgba(0,0,0,0.7)`,
               }}
             >
-              {/* Open U-Shape (Docked) vs Closed Pill (Floating) Progress Border */}
               <svg
                 viewBox={`0 0 ${previewW} ${previewH}`}
                 className="pointer-events-none absolute inset-0 w-full h-full"
@@ -348,7 +350,7 @@ const LiveNotchPreviewCard: React.FC<{
                 />
               </svg>
 
-              {/* Left Pill Identity: Eyes vs Digital Clock */}
+              {/* Left Pill Identity */}
               <div className="relative z-10 flex items-center gap-2 min-w-0">
                 {settings.idlePillStyle === 'clock' ? (
                   <span className="text-[11px] font-semibold tracking-tight text-white tabular-nums">
@@ -370,14 +372,13 @@ const LiveNotchPreviewCard: React.FC<{
                   </svg>
                 )}
 
-                {/* Hardware Telemetry Dots */}
                 <span className="inline-flex items-center gap-1">
                   <span
-                    className="w-1.5 h-1.5 rounded-full"
+                    className="w-1.5 h-1.5 rounded-[2px]"
                     style={{ backgroundColor: palette.cpu }}
                   />
                   <span
-                    className="w-1.5 h-1.5 rounded-full"
+                    className="w-1.5 h-1.5 rounded-[2px]"
                     style={{ backgroundColor: palette.ram }}
                   />
                 </span>
@@ -386,7 +387,7 @@ const LiveNotchPreviewCard: React.FC<{
               {/* Right Simulated Focus Readout */}
               <div className="relative z-10 flex items-center gap-1.5">
                 <span
-                  className="w-1.5 h-1.5 rounded-full animate-pulse"
+                  className="w-1.5 h-1.5 rounded-[2px] animate-pulse"
                   style={{ backgroundColor: palette.timer }}
                 />
                 <span
@@ -402,19 +403,19 @@ const LiveNotchPreviewCard: React.FC<{
       </div>
 
       {/* Preview Metadata Footer */}
-      <div className="px-4 py-2 flex items-center justify-between text-[11px]">
+      <div className="px-3.5 py-2 flex items-center justify-between text-[11px]">
         <div className="flex items-center gap-2 text-white/75 font-medium">
           <span>Pratinjau Langsung</span>
-          <span className="text-white/25">•</span>
+          <span className="text-white/20">/</span>
           <span className="text-white/55">
             {isFloating ? 'Floating Pill (y=12)' : 'Docked Notch (y=0)'}
           </span>
         </div>
-        <div className="flex items-center gap-1.5 text-[10.5px] text-white/50">
-          <span className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/[0.07]">
+        <div className="flex items-center gap-1.5 text-[10.5px] font-mono text-white/55">
+          <span className="px-2 py-0.5 rounded bg-white/[0.04] border border-white/[0.08]">
             {alignLabel}
           </span>
-          <span className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/[0.07]">
+          <span className="px-2 py-0.5 rounded bg-white/[0.04] border border-white/[0.08]">
             {themeLabel}
           </span>
         </div>
@@ -437,7 +438,7 @@ export const DesktopSettingsWindow: React.FC = () => {
     text: string;
   } | null>(null);
 
-  // System & Update states
+  // System & Signed Updater states
   const [shortcutRegistered, setShortcutRegistered] = useState<boolean | null>(null);
   const [autostartBusy, setAutostartBusy] = useState(false);
   const [autostartError, setAutostartError] = useState<string | null>(null);
@@ -445,7 +446,16 @@ export const DesktopSettingsWindow: React.FC = () => {
   const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
   const [installProgressText, setInstallProgressText] = useState<string | null>(null);
   const [updateResult, setUpdateResult] = useState<AppUpdateCheckResult | null>(null);
+  const pendingUpdateRef = useRef<Update | null>(null);
   const [dataNotice, setDataNotice] = useState<string | null>(null);
+
+  const releasePendingUpdate = () => {
+    const prev = pendingUpdateRef.current;
+    pendingUpdateRef.current = null;
+    if (prev) {
+      void prev.close().catch(() => {});
+    }
+  };
 
   const handleCloseWindow = async () => {
     playChimeCue('tap');
@@ -453,6 +463,7 @@ export const DesktopSettingsWindow: React.FC = () => {
       isTestingSoundRef.current = false;
       stopAlarmChime();
     }
+    releasePendingUpdate();
     if (!isTauriRuntime()) return;
     try {
       await getCurrentWebviewWindow().close();
@@ -484,6 +495,7 @@ export const DesktopSettingsWindow: React.FC = () => {
         isTestingSoundRef.current = false;
         stopAlarmChime();
       }
+      releasePendingUpdate();
     };
   }, []);
 
@@ -501,25 +513,8 @@ export const DesktopSettingsWindow: React.FC = () => {
       }
     });
 
-    let unlistenProgress: (() => void) | undefined;
-    if (isTauriRuntime()) {
-      void listen<{ chunkLength?: number; contentLength?: number | null }>(
-        'casa://updater-progress',
-        (event) => {
-          if (!active) return;
-          const len = event.payload?.contentLength;
-          if (len && len > 0) {
-            setInstallProgressText('Mengunduh paket pembaruan...');
-          }
-        }
-      ).then((fn) => {
-        unlistenProgress = fn;
-      });
-    }
-
     return () => {
       active = false;
-      unlistenProgress?.();
     };
   }, [activeSection]);
 
@@ -590,20 +585,73 @@ export const DesktopSettingsWindow: React.FC = () => {
 
   const handleCheckUpdates = async () => {
     playChimeCue('tap');
-    setIsCheckingUpdate(true);
-    setUpdateResult(null);
-    try {
-      const res = await checkAppUpdate();
-      setUpdateResult(res);
-    } catch (err) {
+    if (!isTauriRuntime()) {
       setUpdateResult({
         currentVersion: '2.0.0',
         available: false,
         version: null,
         body: null,
         date: null,
-        statusKind: 'error',
-        message: err instanceof Error ? err.message : 'Gagal memeriksa pembaruan.',
+        statusKind: 'offline',
+        message: 'Pemeriksaan pembaruan hanya tersedia di aplikasi desktop CASA.',
+      });
+      return;
+    }
+
+    setIsCheckingUpdate(true);
+    setUpdateResult(null);
+    setInstallProgressText(null);
+    releasePendingUpdate();
+
+    try {
+      const update = await check();
+      if (update) {
+        pendingUpdateRef.current = update;
+        setUpdateResult({
+          currentVersion: update.currentVersion,
+          available: true,
+          version: update.version,
+          body: update.body ?? null,
+          date: update.date ?? null,
+          statusKind: 'available',
+          message: `Pembaruan v${update.version} tersedia dan terverifikasi tanda tangan digital.`,
+        });
+      } else {
+        setUpdateResult({
+          currentVersion: '2.0.0',
+          available: false,
+          version: null,
+          body: null,
+          date: null,
+          statusKind: 'up-to-date',
+          message: 'CASA sudah menggunakan versi terbaru (v2.0.0).',
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const lower = msg.toLowerCase();
+      const isOfflineOrNoManifest =
+        lower.includes('404') ||
+        lower.includes('not found') ||
+        lower.includes('release') ||
+        lower.includes('dns') ||
+        lower.includes('timeout') ||
+        lower.includes('connect') ||
+        lower.includes('network');
+
+      setUpdateResult({
+        currentVersion: '2.0.0',
+        available: false,
+        version: null,
+        body: msg,
+        date: null,
+        statusKind: isOfflineOrNoManifest ? 'offline' : 'error',
+        message:
+          lower.includes('404') || lower.includes('not found') || lower.includes('release')
+            ? 'Belum ada manifest rilis baru (latest.json) di GitHub Releases.'
+            : isOfflineOrNoManifest
+            ? 'Offline: tidak dapat menjangkau GitHub Releases saat ini.'
+            : 'Gagal memeriksa pembaruan dari GitHub.',
       });
     } finally {
       setIsCheckingUpdate(false);
@@ -611,12 +659,62 @@ export const DesktopSettingsWindow: React.FC = () => {
   };
 
   const handleInstallUpdate = async () => {
+    if (!isTauriRuntime()) return;
     playChimeCue('tap');
     setIsInstallingUpdate(true);
     setInstallProgressText('Menyiapkan pengunduhan...');
+
     try {
-      await installAppUpdate();
-      setInstallProgressText('Pemasangan dimulai...');
+      let update = pendingUpdateRef.current;
+      if (!update) {
+        update = await check();
+        if (update) {
+          pendingUpdateRef.current = update;
+        }
+      }
+
+      if (!update) {
+        setUpdateResult({
+          currentVersion: '2.0.0',
+          available: false,
+          version: null,
+          body: null,
+          date: null,
+          statusKind: 'up-to-date',
+          message: 'CASA sudah menggunakan versi terbaru.',
+        });
+        setInstallProgressText(null);
+        return;
+      }
+
+      let downloaded = 0;
+      let totalLength = 0;
+
+      await update.downloadAndInstall((event) => {
+        if (event.event === 'Started') {
+          totalLength = event.data.contentLength ?? 0;
+          downloaded = 0;
+          setInstallProgressText(
+            totalLength > 0
+              ? `Mengunduh v${update.version} (0%)...`
+              : `Mengunduh v${update.version}...`
+          );
+        } else if (event.event === 'Progress') {
+          downloaded += event.data.chunkLength;
+          if (totalLength > 0) {
+            const pct = Math.min(100, Math.round((downloaded / totalLength) * 100));
+            setInstallProgressText(`Mengunduh v${update.version} (${pct}%)...`);
+          } else {
+            const mb = (downloaded / (1024 * 1024)).toFixed(1);
+            setInstallProgressText(`Mengunduh v${update.version} (${mb} MB)...`);
+          }
+        } else if (event.event === 'Finished') {
+          setInstallProgressText('Paket terverifikasi & terpasang. Memulai ulang CASA...');
+        }
+      });
+
+      releasePendingUpdate();
+      await relaunch();
     } catch (err) {
       setUpdateResult((prev) => ({
         currentVersion: prev?.currentVersion ?? '2.0.0',
@@ -709,25 +807,25 @@ export const DesktopSettingsWindow: React.FC = () => {
       {/* Two-Column Body: 196px Left Sidebar + Flex Right Content Pane */}
       <div className="flex-1 min-h-0 flex overflow-hidden">
         {/* Left Sidebar (196px) */}
-        <aside className="w-[196px] shrink-0 bg-[#070707] border-r border-white/10 flex flex-col justify-between p-3.5">
+        <aside className="w-[196px] shrink-0 bg-[#070707] border-r border-white/[0.08] flex flex-col justify-between p-3.5">
           <div>
-            {/* Sidebar Identity Header */}
-            <div className="px-2 py-2.5 rounded-xl bg-[#0B0B0B] border border-white/[0.07]">
+            {/* Flat Sidebar Identity Header */}
+            <div className="px-1 pb-3 border-b border-white/[0.07]">
               <div className="flex items-center justify-between">
                 <span className="text-[13.5px] font-bold tracking-tight text-white">
                   CASA
                 </span>
-                <span className="px-1.5 py-0.5 rounded-md bg-white/[0.08] border border-white/10 text-[10px] font-mono text-white/75">
-                  v2.0
+                <span className="px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.10] text-[10px] font-mono text-white/75">
+                  v2.0.0
                 </span>
               </div>
-              <div className="text-[10.5px] text-white/40 mt-0.5">
-                OLED Companion Studio
+              <div className="text-[10px] font-mono text-white/40 mt-0.5 truncate">
+                Dynamic Rabbit Island
               </div>
             </div>
 
             {/* Vertical Section Nav */}
-            <nav className="mt-4 space-y-1" aria-label="Kategori Pengaturan">
+            <nav className="mt-3.5 space-y-1" aria-label="Kategori Pengaturan">
               {SIDEBAR_ITEMS.map((item) => {
                 const Icon = item.icon;
                 const active = activeSection === item.id;
@@ -741,14 +839,14 @@ export const DesktopSettingsWindow: React.FC = () => {
                     }}
                     className={`relative w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[12px] font-medium transition-all cursor-pointer text-left border ${
                       active
-                        ? 'bg-white/[0.10] text-white border-white/[0.12] shadow-sm'
+                        ? 'bg-white/[0.09] text-white border-white/[0.12]'
                         : 'text-white/55 hover:text-white/90 hover:bg-white/[0.04] border-transparent'
                     }`}
                   >
                     {active && (
                       <span
                         aria-hidden="true"
-                        className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full bg-white"
+                        className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r bg-white"
                       />
                     )}
                     <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-white' : 'text-white/45'}`} />
@@ -759,21 +857,25 @@ export const DesktopSettingsWindow: React.FC = () => {
             </nav>
           </div>
 
-          {/* Sidebar Bottom Status */}
+          {/* Sidebar Bottom Status (Monochrome Sync Icon instead of green dot) */}
           <div className="pt-3 border-t border-white/[0.07] space-y-1.5 px-1">
-            <div className="flex items-center gap-2 text-[10.5px] text-white/55">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            <div className="flex items-center gap-2 text-[10.5px] font-mono text-white/60">
+              <Radio className="w-[13px] h-[13px] text-white/65 shrink-0" />
               <span>Sinkronisasi real-time</span>
             </div>
-            <div className="text-[10px] text-white/35">
-              Tekan <kbd className="px-1 py-0.5 rounded bg-white/[0.08] text-white/60">Esc</kbd> untuk menutup
+            <div className="text-[10px] text-white/35 flex items-center gap-1.5">
+              <span>Tekan</span>
+              <kbd className="px-1.5 py-0.5 rounded-[4px] bg-[#121215] border border-white/20 border-b-2 text-[9.5px] font-mono text-white/75">
+                Esc
+              </kbd>
+              <span>tutup</span>
             </div>
           </div>
         </aside>
 
         {/* Right Scrollable Content Pane */}
         <main className="flex-1 min-w-0 bg-black overflow-y-auto oled-thin-scrollbar p-6">
-          <div className="max-w-[510px] space-y-5">
+          <div className="max-w-[512px] space-y-5">
             {/* Section Title */}
             <div>
               <h1 className="text-[16px] font-semibold tracking-tight text-white">
@@ -782,19 +884,19 @@ export const DesktopSettingsWindow: React.FC = () => {
               <p className="text-[11.5px] text-white/45 mt-0.5">{activeMeta.subtitle}</p>
             </div>
 
-            {/* Live Island Preview Card on Appearance & Island Behavior tabs */}
+            {/* Live Island Preview Stage on Appearance & Island Behavior tabs */}
             {(activeSection === 'appearance' || activeSection === 'behavior') && (
               <LiveNotchPreviewCard settings={settings} palette={palette} />
             )}
 
             {/* TAB 1: APPEARANCE */}
             {activeSection === 'appearance' && (
-              <div className="space-y-4">
+              <div className="space-y-5">
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-wider text-white/45 mb-2.5">
                     Pilih Tema Warna
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-3 gap-2.5">
                     {THEME_CARDS.map((card) => {
                       const selected = settings.theme === card.id;
                       const cardPalette = CASA_THEME_PALETTES[card.id];
@@ -806,31 +908,31 @@ export const DesktopSettingsWindow: React.FC = () => {
                             playChimeCue('tap');
                             updateSettings({ theme: card.id });
                           }}
-                          className={`group relative text-left p-3 rounded-xl bg-[#0B0B0B] border transition-all cursor-pointer flex flex-col justify-between ${
+                          className={`group relative text-left p-3 rounded-lg border transition-all cursor-pointer flex flex-col justify-between ${
                             selected
-                              ? 'border-white/75 bg-[#121215] shadow-[0_0_20px_rgba(255,255,255,0.06)]'
-                              : 'border-white/[0.08] hover:border-white/25 hover:bg-[#0F0F12]'
+                              ? 'border-white/75 bg-white/[0.04]'
+                              : 'bg-[#050506] border-white/[0.08] hover:border-white/25 hover:bg-white/[0.02]'
                           }`}
                         >
                           <div>
                             {/* Mini visual swatch capsule */}
-                            <div className="h-9 w-full rounded-lg bg-[#040405] border border-white/[0.06] flex items-center justify-between px-2.5 mb-2.5">
+                            <div className="h-8 w-full rounded bg-[#000000] border border-white/[0.07] flex items-center justify-between px-2.5 mb-2.5">
                               <div className="flex items-center gap-1">
                                 <span
-                                  className="w-3 h-1.5 rounded-full"
+                                  className="w-3 h-1.5 rounded-[2px]"
                                   style={{ backgroundColor: cardPalette.timer }}
                                 />
                                 <span
-                                  className="w-1.5 h-1.5 rounded-full"
+                                  className="w-1.5 h-1.5 rounded-[2px]"
                                   style={{ backgroundColor: cardPalette.cpu }}
                                 />
                                 <span
-                                  className="w-1.5 h-1.5 rounded-full"
+                                  className="w-1.5 h-1.5 rounded-[2px]"
                                   style={{ backgroundColor: cardPalette.ram }}
                                 />
                               </div>
                               <span
-                                className="text-[9px] font-mono font-semibold"
+                                className="text-[9px] font-mono font-semibold tabular-nums"
                                 style={{ color: cardPalette.timer }}
                               >
                                 25:00
@@ -842,7 +944,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                                 {card.title}
                               </span>
                               {selected && (
-                                <span className="w-4 h-4 rounded-full bg-white text-black flex items-center justify-center shrink-0">
+                                <span className="w-4 h-4 rounded-[4px] bg-white text-black flex items-center justify-center shrink-0">
                                   <Check className="w-2.5 h-2.5 stroke-[3]" />
                                 </span>
                               )}
@@ -859,7 +961,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                             {card.swatches.map((hex) => (
                               <span
                                 key={hex}
-                                className="w-3 h-3 rounded-full border border-white/15"
+                                className="w-[10px] h-[10px] rounded-[3px] border border-white/15 shrink-0"
                                 style={{ backgroundColor: hex }}
                               />
                             ))}
@@ -870,30 +972,36 @@ export const DesktopSettingsWindow: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Active Accent Breakdown */}
-                <div className="bg-[#0B0B0B] border border-white/[0.08] rounded-xl p-3.5">
-                  <div className="text-[11px] font-semibold text-white/80 mb-2.5">
+                {/* Active Accent Breakdown — Flat Swatch Bar with Precision Squares & Lucide Icons */}
+                <div className="pt-3 border-t border-white/[0.07]">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-white/45 mb-2">
                     Spektrum Aksen Aktif
                   </div>
-                  <div className="grid grid-cols-5 gap-2">
+                  <div className="grid grid-cols-5 border border-white/[0.08] rounded-lg divide-x divide-white/[0.07] bg-[#060607] overflow-hidden">
                     {[
-                      { label: 'Focus', color: palette.timer },
-                      { label: 'Rest', color: palette.rest },
-                      { label: 'CPU', color: palette.cpu },
-                      { label: 'RAM', color: palette.ram },
-                      { label: 'Volume', color: palette.volume },
-                    ].map((token) => (
-                      <div
-                        key={token.label}
-                        className="px-2 py-1.5 rounded-lg bg-[#050506] border border-white/[0.06] flex items-center gap-1.5"
-                      >
-                        <span
-                          className="w-2 h-2 rounded-full shrink-0"
-                          style={{ backgroundColor: token.color }}
-                        />
-                        <span className="text-[10px] text-white/70 truncate">{token.label}</span>
-                      </div>
-                    ))}
+                      { label: 'Focus', color: palette.timer, icon: Target },
+                      { label: 'Rest', color: palette.rest, icon: Moon },
+                      { label: 'CPU', color: palette.cpu, icon: Cpu },
+                      { label: 'RAM', color: palette.ram, icon: MemoryStick },
+                      { label: 'Volume', color: palette.volume, icon: Volume2 },
+                    ].map((token) => {
+                      const TokenIcon = token.icon;
+                      return (
+                        <div
+                          key={token.label}
+                          className="px-2 py-2 flex items-center justify-center gap-1.5 min-w-0"
+                        >
+                          <TokenIcon className="w-3 h-3 text-white/50 shrink-0" />
+                          <span
+                            className="w-[10px] h-[10px] rounded-[3px] border border-white/15 shrink-0"
+                            style={{ backgroundColor: token.color }}
+                          />
+                          <span className="text-[10px] font-medium text-white/80 truncate">
+                            {token.label}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -901,8 +1009,8 @@ export const DesktopSettingsWindow: React.FC = () => {
 
             {/* TAB 2: ISLAND & BEHAVIOR */}
             {activeSection === 'behavior' && (
-              <div className="space-y-2.5">
-                <SettingRowCard
+              <div className="divide-y divide-white/[0.07] border-t border-b border-white/[0.07]">
+                <SettingFlatRow
                   title="Mode Penempatan"
                   description="Tempel rapat di bibir atas layar atau melayang bebas y=12px."
                 >
@@ -911,9 +1019,9 @@ export const DesktopSettingsWindow: React.FC = () => {
                     options={PLACEMENT_OPTIONS}
                     onChange={(next) => updateSettings({ placementMode: next })}
                   />
-                </SettingRowCard>
+                </SettingFlatRow>
 
-                <SettingRowCard
+                <SettingFlatRow
                   title="Posisi Horizontal"
                   description="Geser posisi notch ke kiri, tengah, atau kanan monitor."
                 >
@@ -922,9 +1030,9 @@ export const DesktopSettingsWindow: React.FC = () => {
                     options={ALIGN_OPTIONS}
                     onChange={(next) => updateSettings({ horizontalAlign: next })}
                   />
-                </SettingRowCard>
+                </SettingFlatRow>
 
-                <SettingRowCard
+                <SettingFlatRow
                   title="Gaya Pil Idle"
                   description="Tampilkan mata ekspresif × ♥ atau jam digital ringkas HH:MM."
                 >
@@ -933,9 +1041,9 @@ export const DesktopSettingsWindow: React.FC = () => {
                     options={PILL_STYLE_OPTIONS}
                     onChange={(next) => updateSettings({ idlePillStyle: next })}
                   />
-                </SettingRowCard>
+                </SettingFlatRow>
 
-                <SettingRowCard
+                <SettingFlatRow
                   title="Delay Hover-to-Peek"
                   description="Atur sensitivitas kursor saat menyentuh kapsul di atas layar."
                 >
@@ -944,9 +1052,9 @@ export const DesktopSettingsWindow: React.FC = () => {
                     options={HOVER_DELAY_OPTIONS}
                     onChange={(next) => updateSettings({ hoverDelayMs: next })}
                   />
-                </SettingRowCard>
+                </SettingFlatRow>
 
-                <SettingRowCard
+                <SettingFlatRow
                   title="Auto-Tuck Saat Idle"
                   description="Lipat tipis otomatis ketika hening tanpa musik atau timer."
                 >
@@ -955,9 +1063,9 @@ export const DesktopSettingsWindow: React.FC = () => {
                     checked={settings.autoTuckIdle}
                     onChange={(next) => updateSettings({ autoTuckIdle: next })}
                   />
-                </SettingRowCard>
+                </SettingFlatRow>
 
-                <SettingRowCard
+                <SettingFlatRow
                   title="Perilaku Fullscreen"
                   description="Atur reaksi CASA saat game atau video fullscreen aktif."
                 >
@@ -966,14 +1074,14 @@ export const DesktopSettingsWindow: React.FC = () => {
                     options={FULLSCREEN_OPTIONS}
                     onChange={(next) => updateSettings({ fullscreenBehavior: next })}
                   />
-                </SettingRowCard>
+                </SettingFlatRow>
               </div>
             )}
 
             {/* TAB 3: TIMER & AUDIO */}
             {activeSection === 'audio' && (
-              <div className="space-y-3">
-                <div className="bg-[#0B0B0B] border border-white/[0.08] rounded-xl p-4 space-y-3">
+              <div className="divide-y divide-white/[0.07] border-t border-b border-white/[0.07]">
+                <div className="py-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-[12.5px] font-semibold text-white/95">
@@ -984,7 +1092,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                       </div>
                     </div>
                     <span
-                      className="text-[13px] font-mono font-semibold tabular-nums px-2.5 py-0.5 rounded-md bg-white/[0.06] border border-white/[0.08]"
+                      className="text-[13px] font-mono font-semibold tabular-nums px-2 py-0.5 rounded bg-white/[0.04] border border-white/[0.08]"
                       style={{ color: palette.timer }}
                     >
                       {settings.alarmVolume}%
@@ -1000,18 +1108,18 @@ export const DesktopSettingsWindow: React.FC = () => {
                       updateSettings({ alarmVolume: val });
                       syncActiveAlarmVolume(val);
                     }}
-                    className="w-full h-1.5 rounded-full cursor-pointer"
+                    className="w-full h-1.5 rounded cursor-pointer"
                     style={{ accentColor: palette.timer }}
                     aria-label="Volume Alarm Focus"
                   />
                 </div>
 
-                <div className="bg-[#0B0B0B] border border-white/[0.08] rounded-xl p-4 space-y-3">
+                <div className="py-4 space-y-3">
                   <div>
                     <div className="text-[12.5px] font-semibold text-white/95">
                       Nada Dering Kustom (Maks 15 Detik)
                     </div>
-                    <div className="text-[11px] text-white/50 mt-0.5 truncate">
+                    <div className="text-[11px] text-white/50 mt-0.5 truncate font-mono">
                       {settings.customAlarmMeta
                         ? `Aktif: ${settings.customAlarmMeta.fileName} (${settings.customAlarmMeta.durationSeconds.toFixed(1)}d)`
                         : 'Bawaan: Harmonic Chime (C5–E5–G5–B5)'}
@@ -1042,7 +1150,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                     <button
                       type="button"
                       onClick={handleToggleTestSound}
-                      className="px-3 py-1.5 rounded-lg bg-white/[0.08] hover:bg-white/[0.15] border border-white/15 text-[11.5px] font-medium text-white flex items-center gap-1.5 cursor-pointer"
+                      className="px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.12] text-[11.5px] font-medium text-white flex items-center gap-1.5 cursor-pointer"
                     >
                       {isTestingSound ? (
                         <>
@@ -1061,7 +1169,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => void handleResetCustomAlarm()}
-                        className="px-3 py-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.11] border border-white/10 text-[11.5px] text-white/75 hover:text-white flex items-center gap-1.5 cursor-pointer"
+                        className="px-3 py-1.5 rounded-lg bg-transparent hover:bg-white/[0.08] border border-white/[0.10] text-[11.5px] text-white/75 hover:text-white flex items-center gap-1.5 cursor-pointer"
                       >
                         <RotateCcw className="w-3 h-3" />
                         Kembalikan Default
@@ -1086,7 +1194,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                   )}
                 </div>
 
-                <SettingRowCard
+                <SettingFlatRow
                   title="Auto-Start Siklus Rest / Focus"
                   description="Langsung berlanjut antara sesi Focus dan Rest dengan 1x chime singkat."
                 >
@@ -1095,128 +1203,159 @@ export const DesktopSettingsWindow: React.FC = () => {
                     checked={settings.autoStartNextCycle}
                     onChange={(next) => updateSettings({ autoStartNextCycle: next })}
                   />
-                </SettingRowCard>
+                </SettingFlatRow>
               </div>
             )}
 
-            {/* TAB 4: SYSTEM & UPDATES */}
+            {/* TAB 4: SYSTEM, UPDATES & ABOUT */}
             {activeSection === 'system' && (
-              <div className="space-y-3">
-                <SettingRowCard
-                  title="Jalankan Saat Windows Menyala"
-                  description="Buka CASA otomatis secara senyap ketika Anda masuk Windows."
-                >
-                  <PillToggleSwitch
-                    label="Jalankan Saat Windows Menyala"
-                    checked={settings.launchAtStartup}
-                    disabled={autostartBusy}
-                    onChange={(next) => void handleToggleAutostart(next)}
-                  />
-                </SettingRowCard>
-
-                {autostartError && (
-                  <div className="text-[11px] text-rose-400 px-1">{autostartError}</div>
-                )}
-
-                <div className="bg-[#0B0B0B] border border-white/[0.08] rounded-xl px-4 py-3 flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-lg bg-white/[0.05] border border-white/[0.08] flex items-center justify-center shrink-0">
-                      <Keyboard className="w-4 h-4 text-white/70" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-[12.5px] font-semibold text-white/95">
-                        Shortcut Global{' '}
-                        <kbd className="ml-1 px-1.5 py-0.5 rounded bg-white/10 text-[10.5px] font-mono">
-                          Alt + Space
-                        </kbd>
-                      </div>
-                      <div className="text-[11px] text-white/45 mt-0.5">
-                        Buka atau tutup Control Center dari aplikasi apa pun.
-                      </div>
-                    </div>
-                  </div>
-                  <span
-                    className={`text-[10.5px] font-semibold px-2.5 py-1 rounded-full border shrink-0 ${
-                      shortcutRegistered === null
-                        ? 'text-white/50 border-white/10 bg-white/5'
-                        : shortcutRegistered
-                        ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10'
-                        : 'text-amber-300 border-amber-500/30 bg-amber-500/10'
-                    }`}
+              <div className="space-y-4">
+                <div className="divide-y divide-white/[0.07] border-t border-b border-white/[0.07]">
+                  <SettingFlatRow
+                    title="Jalankan Saat Windows Menyala"
+                    description="Buka CASA otomatis secara senyap ketika Anda masuk Windows."
                   >
-                    {shortcutRegistered === null
-                      ? 'Memeriksa...'
-                      : shortcutRegistered
-                      ? 'Terdaftar & Aktif'
-                      : 'Konflik Hotkey'}
-                  </span>
-                </div>
+                    <PillToggleSwitch
+                      label="Jalankan Saat Windows Menyala"
+                      checked={settings.launchAtStartup}
+                      disabled={autostartBusy}
+                      onChange={(next) => void handleToggleAutostart(next)}
+                    />
+                  </SettingFlatRow>
 
-                <div className="bg-[#0B0B0B] border border-white/[0.08] rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="text-[12.5px] font-semibold text-white">
-                        CASA v{updateResult?.currentVersion ?? '2.0.0'}
+                  {autostartError && (
+                    <div className="py-2 text-[11px] text-rose-400">{autostartError}</div>
+                  )}
+
+                  {/* Global Hotkey Row with Physical Keycaps */}
+                  <div className="py-3.5 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-[#08080A] border border-white/[0.09] flex items-center justify-center shrink-0">
+                        <Keyboard className="w-4 h-4 text-white/75" />
                       </div>
-                      <div className="text-[11px] text-white/45 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                        <span>GitHub Auto-Updater •</span>
-                        <button
-                          type="button"
-                          onClick={() => void openExternalUrl('https://github.com/Farhanpratama09/casa-app/releases')}
-                          className="inline-flex items-center gap-1 text-white/70 hover:text-white underline underline-offset-2 cursor-pointer transition-colors"
-                          title="Buka halaman rilis https://github.com/Farhanpratama09/casa-app/releases"
-                        >
-                          <span>Farhanpratama09/casa-app</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </button>
+                      <div className="min-w-0">
+                        <div className="text-[12.5px] font-semibold text-white/95 flex items-center gap-1.5 flex-wrap">
+                          <span>Shortcut Global</span>
+                          <span className="inline-flex items-center gap-1">
+                            <kbd className="inline-flex items-center px-1.5 py-0.5 rounded-[5px] bg-[#121215] border border-white/25 border-b-2 text-[10px] font-mono text-white/90">
+                              Alt
+                            </kbd>
+                            <span className="text-white/35 text-[10px] font-mono">+</span>
+                            <kbd className="inline-flex items-center px-1.5 py-0.5 rounded-[5px] bg-[#121215] border border-white/25 border-b-2 text-[10px] font-mono text-white/90">
+                              Space
+                            </kbd>
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-white/45 mt-0.5">
+                          Buka atau tutup Control Center dari aplikasi apa pun.
+                        </div>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      disabled={isCheckingUpdate || isInstallingUpdate}
-                      onClick={() => void handleCheckUpdates()}
-                      className="px-3 py-1.5 rounded-lg bg-white/[0.10] hover:bg-white/[0.18] border border-white/15 text-[11.5px] font-medium text-white flex items-center gap-1.5 cursor-pointer disabled:opacity-45 shrink-0"
+                    <span
+                      className={`text-[10.5px] font-mono font-semibold px-2 py-0.5 rounded border shrink-0 ${
+                        shortcutRegistered === null
+                          ? 'text-white/50 border-white/10 bg-white/[0.04]'
+                          : shortcutRegistered
+                          ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10'
+                          : 'text-amber-300 border-amber-500/30 bg-amber-500/10'
+                      }`}
                     >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isCheckingUpdate ? 'animate-spin' : ''}`} />
-                      {isCheckingUpdate ? 'Memeriksa...' : 'Check Updates'}
-                    </button>
+                      {shortcutRegistered === null
+                        ? 'Memeriksa...'
+                        : shortcutRegistered
+                        ? 'Aktif'
+                        : 'Konflik'}
+                    </span>
                   </div>
 
-                  {updateResult && (
-                    <div className="pt-2.5 border-t border-white/[0.07] flex items-center justify-between gap-3">
-                      <span
-                        className={`text-[11px] ${
-                          updateResult.statusKind === 'available'
-                            ? 'text-emerald-300 font-medium'
-                            : updateResult.statusKind === 'up-to-date'
-                            ? 'text-white/75'
-                            : updateResult.statusKind === 'offline'
-                            ? 'text-amber-300'
-                            : 'text-rose-300'
-                        }`}
+                  {/* About & Signed Auto-Updater Row */}
+                  <div className="py-4 space-y-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[13px] font-semibold text-white">
+                            CASA v{updateResult?.currentVersion ?? '2.0.0'}
+                          </span>
+                          <span className="text-[10px] font-mono text-white/45 px-1.5 py-0.5 rounded border border-white/[0.08] bg-[#08080A]">
+                            Signed Updater
+                          </span>
+                        </div>
+                        <div className="text-[11.5px] text-white/75 font-medium mt-1">
+                          Companion &amp; Ambient System Assistant
+                        </div>
+                        <div className="text-[10px] font-mono text-white/40 mt-0.5">
+                          Crimson · Asa · Sasha · Assistant
+                        </div>
+                        <div className="text-[10.5px] text-white/45 mt-1.5 flex items-center gap-1.5 flex-wrap">
+                          <span>Endpoint rilis</span>
+                          <span className="text-white/25">/</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void openExternalUrl(
+                                'https://github.com/Farhanpratama09/casa-app/releases'
+                              )
+                            }
+                            className="inline-flex items-center gap-1 text-white/70 hover:text-white underline underline-offset-2 cursor-pointer transition-colors"
+                            title="Buka https://github.com/Farhanpratama09/casa-app/releases"
+                          >
+                            <span>Farhanpratama09/casa-app</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isCheckingUpdate || isInstallingUpdate}
+                        onClick={() => void handleCheckUpdates()}
+                        className="px-3 py-1.5 rounded-lg bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.14] text-[11.5px] font-medium text-white flex items-center gap-1.5 cursor-pointer disabled:opacity-45 shrink-0"
                       >
-                        {installProgressText || updateResult.message}
-                      </span>
-                      {updateResult.available && (
-                        <button
-                          type="button"
-                          disabled={isInstallingUpdate}
-                          onClick={() => void handleInstallUpdate()}
-                          className="px-3 py-1 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-black text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          {isInstallingUpdate ? 'Menginstal...' : `Install v${updateResult.version}`}
-                        </button>
-                      )}
+                        <RefreshCw
+                          className={`w-3.5 h-3.5 ${isCheckingUpdate ? 'animate-spin' : ''}`}
+                        />
+                        {isCheckingUpdate ? 'Memeriksa...' : 'Check Updates'}
+                      </button>
                     </div>
-                  )}
+
+                    {updateResult && (
+                      <div className="pt-2.5 border-t border-white/[0.06] flex items-center justify-between gap-3">
+                        <span
+                          className={`text-[11px] ${
+                            updateResult.statusKind === 'available'
+                              ? 'text-emerald-300 font-medium'
+                              : updateResult.statusKind === 'up-to-date'
+                              ? 'text-white/75'
+                              : updateResult.statusKind === 'offline'
+                              ? 'text-amber-300'
+                              : 'text-rose-300'
+                          }`}
+                        >
+                          {installProgressText || updateResult.message}
+                        </span>
+                        {updateResult.available && (
+                          <button
+                            type="button"
+                            disabled={isInstallingUpdate}
+                            onClick={() => void handleInstallUpdate()}
+                            className="px-3 py-1 rounded-lg bg-white hover:bg-white/90 text-black text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            {isInstallingUpdate
+                              ? 'Menginstal...'
+                              : `Install & Restart v${updateResult.version}`}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-2.5 pt-1">
                   <button
                     type="button"
                     onClick={handleResetMusicAffinity}
-                    className="px-3.5 py-2.5 rounded-xl bg-[#0B0B0B] hover:bg-white/[0.08] border border-white/[0.08] text-[11.5px] font-medium text-white/85 hover:text-white flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                    className="px-3 py-2 rounded-lg bg-[#060607] hover:bg-white/[0.06] border border-white/[0.08] text-[11.5px] font-medium text-white/85 hover:text-white flex items-center justify-center gap-2 cursor-pointer transition-colors"
                     title="Hanya menghapus riwayat pencarian dan skor rekomendasi; Custom Playlist aman"
                   >
                     <Sparkles className="w-3.5 h-3.5 shrink-0" />
@@ -1226,7 +1365,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => void handleResetAllDefaults()}
-                    className="px-3.5 py-2.5 rounded-xl bg-[#0B0B0B] hover:bg-rose-500/15 border border-white/[0.08] hover:border-rose-500/35 text-[11.5px] font-medium text-white/75 hover:text-rose-300 flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                    className="px-3 py-2 rounded-lg bg-[#060607] hover:bg-rose-500/12 border border-white/[0.08] hover:border-rose-500/35 text-[11.5px] font-medium text-white/75 hover:text-rose-300 flex items-center justify-center gap-2 cursor-pointer transition-colors"
                   >
                     <RotateCcw className="w-3.5 h-3.5 shrink-0" />
                     <span>Reset Pengaturan Default</span>
@@ -1234,7 +1373,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                 </div>
 
                 {dataNotice && (
-                  <div className="text-[11px] px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-300">
+                  <div className="text-[11px] px-3 py-2 rounded-lg bg-white/[0.05] border border-white/[0.12] text-white/85">
                     {dataNotice}
                   </div>
                 )}
