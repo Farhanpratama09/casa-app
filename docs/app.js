@@ -106,8 +106,9 @@
     focusSeconds: 18 * 60 + 45,
     dualIdleActive: false,
     volume: 68,
+    brightness: 85,
     audioOutputLabel: 'Speakers',
-    hudKind: '', // '' | 'volume' | 'bluetooth' | 'wired'
+    hudKind: '', // '' | 'volume' | 'brightness' | 'bluetooth' | 'wired'
     hudLabel: '',
     hudDetail: '',
     hudTimerId: null,
@@ -117,13 +118,16 @@
     clockIntervalId: null,
     focusTickId: null,
     pointerDrag: null,
+    programmaticScrollUntil: 0,
   };
 
   const $ = (id) => document.getElementById(id);
   const el = {
     monitor: $('virtual-monitor'),
     monitorScreen: $('monitor-screen'),
+    monitorDesktop: $('monitor-desktop'),
     introOverlay: $('intro-overlay'),
+    headerNavLinks: Array.from(document.querySelectorAll('.header-nav a[data-route]')),
     capsule: $('vm-notch-capsule'),
     perimeterSvg: $('vm-perimeter-svg'),
     perimeterPath: $('vm-perimeter-path'),
@@ -199,8 +203,10 @@
     ccBtSub: $('vm-cc-bt-sub'),
     ccWiredBtn: $('vm-cc-wired-btn'),
     expRestBtn: $('vm-exp-rest-btn'),
-    ccVolFill: $('vm-cc-vol-fill'),
+    ccVolSlider: $('vm-cc-vol-slider'),
     ccVolVal: $('vm-cc-vol-val'),
+    ccBrightSlider: $('vm-cc-bright-slider'),
+    ccBrightVal: $('vm-cc-bright-val'),
 
     dropzonePrompt: $('vm-dropzone-prompt'),
     droppedItems: $('vm-dropped-items'),
@@ -230,6 +236,8 @@
     todoDualBtn: $('vm-todo-dual-btn'),
     todoTimerBtn: $('vm-todo-timer-btn'),
     hudReadout: $('vm-hud-readout'),
+    brightnessSlider: $('vm-brightness-slider'),
+    brightnessPct: $('vm-brightness-pct'),
     volumeSlider: $('vm-volume-slider'),
     volumePct: $('vm-volume-pct'),
     simBtBtn: $('vm-sim-bt-btn'),
@@ -396,6 +404,13 @@
     } else if (kind === 'wired') {
       svg.appendChild(createSvgNode('path', { d: 'M3 18v-6a9 9 0 0 1 18 0v6' }));
       svg.appendChild(createSvgNode('path', { d: 'M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z' }));
+    } else if (kind === 'brightness') {
+      svg.appendChild(createSvgNode('circle', { cx: 12, cy: 12, r: 4 }));
+      svg.appendChild(
+        createSvgNode('path', {
+          d: 'M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41',
+        })
+      );
     } else {
       svg.appendChild(createSvgNode('polygon', { points: '11 5 6 9 2 9 2 15 6 15 11 19 11 5' }));
       svg.appendChild(createSvgNode('path', { d: 'M15.54 8.46a5 5 0 0 1 0 7.07' }));
@@ -439,7 +454,7 @@
 
     state.mode = 'resting';
     state.capsuleState = 'idle';
-    state.isRestingSleep = true;
+    state.isRestingSleep = false;
     state.idleLyricMinimized = false;
     state.hudKind = '';
 
@@ -452,21 +467,15 @@
     }, 1500);
 
     const t2 = window.setTimeout(() => {
-      el.monitor.setAttribute('data-intro-phase', 'resting');
-      el.introOverlay.hidden = true;
-      state.isRestingSleep = true;
-      syncCapsuleUI();
-    }, 2180);
-
-    const t3 = window.setTimeout(() => {
       el.monitor.setAttribute('data-intro-phase', 'ready');
+      el.introOverlay.hidden = true;
       state.isRestingSleep = false;
       state.expression = 'idle';
       syncCapsuleUI();
       syncDesktopScenes();
-    }, 2750);
+    }, 2200);
 
-    state.introTimers.push(t1, t2, t3);
+    state.introTimers.push(t1, t2);
   }
 
   function renderLyricsAndQueue() {
@@ -843,24 +852,30 @@
       el.perimeterPath.style.strokeDashoffset = String(Math.max(5, 100 - pct));
     }
 
-    // Idle Layers (RestingPill vs HUD vs Standby/Music/Timer Pill)
-    const showRestingOnly =
+    // Idle Layers (Compact × ♥ in Resting & Wake mode vs HUD vs Wide Feature Idle Bar)
+    const showCompactEyesOnly =
       !isExpanded &&
       !state.hudKind &&
-      state.mode === 'resting' &&
-      state.isRestingSleep;
+      state.mode === 'resting';
     const showHud = !isExpanded && Boolean(state.hudKind);
-    const showActivePill = !isExpanded && !showRestingOnly && !showHud;
+    const showActivePill = !isExpanded && !showCompactEyesOnly && !showHud;
 
-    if (el.restingPill) el.restingPill.hidden = !showRestingOnly;
+    if (el.restingPill) {
+      el.restingPill.hidden = !showCompactEyesOnly;
+      el.restingPill.setAttribute('data-sleep', state.isRestingSleep ? 'true' : 'false');
+    }
     if (el.hudPill) el.hudPill.hidden = !showHud;
     if (el.activePill) el.activePill.hidden = !showActivePill;
 
     if (showHud) {
       if (el.hudLabel) el.hudLabel.textContent = state.hudLabel;
       if (el.hudDetail) el.hudDetail.textContent = state.hudDetail;
-      if (el.hudBarFill && state.hudKind === 'volume') {
-        el.hudBarFill.style.width = `${state.volume}%`;
+      if (el.hudBarFill) {
+        if (state.hudKind === 'volume') {
+          el.hudBarFill.style.width = `${state.volume}%`;
+        } else if (state.hudKind === 'brightness') {
+          el.hudBarFill.style.width = `${state.brightness}%`;
+        }
       }
     }
 
@@ -959,8 +974,23 @@
     if (el.expTimerBtn) {
       el.expTimerBtn.textContent = state.focusTimerRunning ? 'Pause' : 'Start';
     }
-    if (el.ccVolFill) el.ccVolFill.style.width = `${state.volume}%`;
+    if (el.ccVolSlider) el.ccVolSlider.value = String(state.volume);
     if (el.ccVolVal) el.ccVolVal.textContent = `${state.volume}%`;
+    if (el.ccBrightSlider) el.ccBrightSlider.value = String(state.brightness);
+    if (el.ccBrightVal) el.ccBrightVal.textContent = `${state.brightness}%`;
+  }
+
+  function applyMonitorBrightness() {
+    const clamped = Math.max(15, Math.min(100, Number(state.brightness) || 85));
+    state.brightness = clamped;
+    const factor = (0.20 + 0.80 * (clamped / 100)).toFixed(3);
+    if (el.monitorDesktop) {
+      el.monitorDesktop.style.filter = `brightness(${factor})`;
+    }
+    if (el.brightnessSlider) el.brightnessSlider.value = String(clamped);
+    if (el.brightnessPct) el.brightnessPct.textContent = `${clamped}%`;
+    if (el.ccBrightSlider) el.ccBrightSlider.value = String(clamped);
+    if (el.ccBrightVal) el.ccBrightVal.textContent = `${clamped}%`;
   }
 
   function syncDesktopScenes() {
@@ -984,17 +1014,19 @@
     if (el.desktopTime) el.desktopTime.textContent = formatClockHHMM();
     if (el.clockStatus) {
       el.clockStatus.textContent = state.isRestingSleep
-        ? 'RestingPill (126×39px) terpejam di bezel atas — hover, klik, atau Alt + Space untuk bangun'
+        ? 'Kapsul kompak × ♥ tertidur redup di bezel atas — hover, klik, atau Alt + Space untuk membangunkan'
         : state.capsuleState === 'expanded'
-        ? 'Mode 6 Expanded terbuka — klik ikon Chevron atas atau tekan Alt + Space untuk menutup'
-        : 'Idle Standby (× ♥) aktif — klik kapsul di atas untuk memekarkan Mode 6';
+        ? 'Mode 6 Expanded terbuka — klik ikon Chevron atas atau tekan Alt + Space untuk kembali ke kompak × ♥'
+        : 'Kapsul kompak × ♥ aktif — tidurkan, bangunkan, atau klik kapsul untuk memekarkan Mode 6';
     }
     if (el.hudReadout) {
-      el.hudReadout.textContent = `Volume ${state.volume}% · ${state.audioOutputLabel}`;
+      el.hudReadout.textContent = `Bright ${state.brightness}% · Vol ${state.volume}% · ${state.audioOutputLabel}`;
     }
+    if (el.volumeSlider) el.volumeSlider.value = String(state.volume);
     if (el.volumePct) {
       el.volumePct.textContent = `${state.volume}%`;
     }
+    applyMonitorBrightness();
   }
 
   function syncUI() {
@@ -1031,47 +1063,193 @@
   }
 
   /**
-   * Clean URL Navigation Without Hash (`#`)
+   * Clean Path Routing Without Hash (`#`)
+   * Supports pushState on nav click, logo reset to /casa-app/, popstate, ScrollSpy replaceState, and 404.html restoration.
    */
   function initCleanNavigation() {
-    if (window.location.hash) {
-      const initialId = window.location.hash.replace(/^#/, '');
-      const target = document.getElementById(initialId);
-      if (target) {
-        window.requestAnimationFrame(() => {
-          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        });
+    const ROUTE_BASE = '/casa-app/';
+    const ROUTE_MAP = {
+      top: { elementId: 'top', slug: '' },
+      playground: { elementId: 'playground', slug: 'playground' },
+      architecture: { elementId: 'architecture', slug: 'arsitektur' },
+      arsitektur: { elementId: 'architecture', slug: 'arsitektur' },
+      download: { elementId: 'download', slug: 'unduh' },
+      unduh: { elementId: 'download', slug: 'unduh' },
+      feedback: { elementId: 'feedback', slug: 'feedback' },
+    };
+
+    const buildRouteUrl = (slug) => (slug ? `${ROUTE_BASE}${slug}` : ROUTE_BASE);
+
+    const setActiveNavRoute = (slug) => {
+      el.headerNavLinks.forEach((link) => {
+        const target = link.getAttribute('data-route') || '';
+        if (slug && target === slug) {
+          link.setAttribute('aria-current', 'page');
+        } else {
+          link.removeAttribute('aria-current');
+        }
+      });
+    };
+
+    const scrollToTargetId = (elementId, smooth = true) => {
+      state.programmaticScrollUntil = Date.now() + 950;
+      const behavior = smooth ? 'smooth' : 'auto';
+      if (elementId === 'top') {
+        window.scrollTo({ top: 0, behavior });
+        return;
       }
-      window.history.replaceState(
-        null,
-        '',
-        window.location.pathname + window.location.search
-      );
+      const targetEl = document.getElementById(elementId);
+      if (targetEl) {
+        targetEl.scrollIntoView({ behavior, block: 'start' });
+      }
+    };
+
+    const resolveFromPath = (pathname) => {
+      const normalized = String(pathname || '')
+        .replace(/^\/casa-app\/?/i, '/')
+        .replace(/^\/+|\/+$/g, '')
+        .toLowerCase();
+      if (!normalized || normalized === 'index.html') return ROUTE_MAP.top;
+      return ROUTE_MAP[normalized] || null;
+    };
+
+    // 1. Check 404.html sessionStorage handoff or legacy hash URL on initial load
+    let initialRoute = null;
+    try {
+      const pending = window.sessionStorage.getItem('casa_pending_route');
+      if (pending) {
+        window.sessionStorage.removeItem('casa_pending_route');
+        initialRoute = ROUTE_MAP[pending.toLowerCase()] || null;
+      }
+    } catch (_err) {}
+
+    if (!initialRoute && window.location.hash) {
+      const hashKey = window.location.hash.replace(/^#/, '').toLowerCase();
+      initialRoute = ROUTE_MAP[hashKey] || ROUTE_MAP.top;
     }
 
+    if (!initialRoute) {
+      initialRoute = resolveFromPath(window.location.pathname);
+    }
+
+    if (initialRoute && initialRoute.slug) {
+      const cleanUrl = buildRouteUrl(initialRoute.slug);
+      window.history.replaceState({ route: initialRoute.slug }, '', cleanUrl);
+      setActiveNavRoute(initialRoute.slug);
+      window.requestAnimationFrame(() => {
+        scrollToTargetId(initialRoute.elementId, true);
+      });
+    } else if (window.location.hash) {
+      window.history.replaceState({ route: '' }, '', buildRouteUrl(''));
+      setActiveNavRoute('');
+    }
+
+    // 2. Smooth Scroll + pushState on Nav & Brand Clicks
     const navLinks = Array.from(document.querySelectorAll('a[data-scroll-target], a[href^="#"]'));
     navLinks.forEach((link) => {
       link.addEventListener('click', (ev) => {
         const href = link.getAttribute('href') || '';
-        const targetId = link.getAttribute('data-scroll-target') || href.replace(/^#/, '');
-        if (!targetId) return;
+        const attrRoute = link.getAttribute('data-route');
+        const targetId =
+          link.getAttribute('data-scroll-target') || href.replace(/^#/, '');
+        const key = (attrRoute !== null && attrRoute !== '' ? attrRoute : targetId).toLowerCase();
+        const mapped = ROUTE_MAP[key] || ROUTE_MAP[targetId] || ROUTE_MAP.top;
 
         ev.preventDefault();
-        if (targetId === 'top') {
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        } else {
-          const targetEl = document.getElementById(targetId);
-          if (targetEl) {
-            targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }
+        scrollToTargetId(mapped.elementId, true);
+
+        const nextUrl = buildRouteUrl(mapped.slug);
+        if (window.location.pathname !== nextUrl || window.location.hash) {
+          window.history.pushState({ route: mapped.slug }, '', nextUrl);
         }
-        window.history.replaceState(
-          null,
-          '',
-          window.location.pathname + window.location.search
-        );
+        setActiveNavRoute(mapped.slug);
       });
     });
+
+    // 3. Browser Back / Forward (`popstate`)
+    window.addEventListener('popstate', (ev) => {
+      const stateRoute =
+        ev.state && typeof ev.state.route === 'string'
+          ? ROUTE_MAP[ev.state.route || 'top']
+          : null;
+      const mapped = stateRoute || resolveFromPath(window.location.pathname) || ROUTE_MAP.top;
+      setActiveNavRoute(mapped.slug);
+      scrollToTargetId(mapped.elementId, true);
+    });
+
+    // 4. Scroll-Sync (`replaceState`, respects programmatic scroll lock)
+    const sectionOrder = [
+      { id: 'playground', slug: 'playground' },
+      { id: 'architecture', slug: 'arsitektur' },
+      { id: 'download', slug: 'unduh' },
+      { id: 'feedback', slug: 'feedback' },
+    ];
+    let lastObservedSlug = initialRoute ? initialRoute.slug : '';
+
+    if ('IntersectionObserver' in window) {
+      const sectionEls = sectionOrder
+        .map((item) => ({ ...item, node: document.getElementById(item.id) }))
+        .filter((item) => Boolean(item.node));
+
+      const ratios = new Map();
+      const spy = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            ratios.set(entry.target.id, entry.isIntersecting ? entry.intersectionRatio : 0);
+          });
+          if (Date.now() < state.programmaticScrollUntil) return;
+
+          if (window.scrollY < 100 && lastObservedSlug !== '') {
+            lastObservedSlug = '';
+            setActiveNavRoute('');
+            if (window.location.pathname.startsWith(ROUTE_BASE)) {
+              window.history.replaceState({ route: '' }, '', buildRouteUrl(''));
+            }
+            return;
+          }
+
+          let best = null;
+          sectionEls.forEach((sec) => {
+            const ratio = ratios.get(sec.id) || 0;
+            if (ratio >= 0.35 && (!best || ratio > best.ratio)) {
+              best = { ...sec, ratio };
+            }
+          });
+          if (best && best.slug !== lastObservedSlug) {
+            lastObservedSlug = best.slug;
+            setActiveNavRoute(best.slug);
+            window.history.replaceState(
+              { route: best.slug },
+              '',
+              buildRouteUrl(best.slug)
+            );
+          }
+        },
+        { threshold: [0.35, 0.55, 0.75] }
+      );
+      sectionEls.forEach((sec) => spy.observe(sec.node));
+    }
+
+    let scrollTickPending = false;
+    window.addEventListener(
+      'scroll',
+      () => {
+        if (scrollTickPending) return;
+        scrollTickPending = true;
+        window.requestAnimationFrame(() => {
+          scrollTickPending = false;
+          if (Date.now() < state.programmaticScrollUntil) return;
+          if (window.scrollY < 80 && window.location.pathname.startsWith(ROUTE_BASE)) {
+            if (window.location.pathname !== ROUTE_BASE) {
+              lastObservedSlug = '';
+              setActiveNavRoute('');
+              window.history.replaceState({ route: '' }, '', buildRouteUrl(''));
+            }
+          }
+        });
+      },
+      { passive: true }
+    );
   }
 
   function initVirtualMonitorControls() {
@@ -1313,10 +1491,53 @@
       });
     });
 
-    // Volume & BT HUD Controls
+    // Volume, Brightness & BT HUD Controls
+    if (el.brightnessSlider) {
+      el.brightnessSlider.addEventListener('input', () => {
+        state.brightness = Number(el.brightnessSlider.value);
+        state.capsuleState = 'idle';
+        syncDesktopScenes();
+        showHudChip('brightness', 'Brightness', `${state.brightness}%`, true);
+      });
+    }
+
     if (el.volumeSlider) {
       el.volumeSlider.addEventListener('input', () => {
         state.volume = Number(el.volumeSlider.value);
+        state.capsuleState = 'idle';
+        syncDesktopScenes();
+        showHudChip('volume', 'Volume', `${state.volume}%`, true);
+      });
+    }
+
+    if (el.ccBrightSlider) {
+      el.ccBrightSlider.addEventListener('click', (ev) => ev.stopPropagation());
+      el.ccBrightSlider.addEventListener('input', (ev) => {
+        ev.stopPropagation();
+        state.brightness = Number(el.ccBrightSlider.value);
+        syncDesktopScenes();
+        syncCapsuleUI();
+      });
+      el.ccBrightSlider.addEventListener('change', (ev) => {
+        ev.stopPropagation();
+        state.brightness = Number(el.ccBrightSlider.value);
+        state.capsuleState = 'idle';
+        syncDesktopScenes();
+        showHudChip('brightness', 'Brightness', `${state.brightness}%`, true);
+      });
+    }
+
+    if (el.ccVolSlider) {
+      el.ccVolSlider.addEventListener('click', (ev) => ev.stopPropagation());
+      el.ccVolSlider.addEventListener('input', (ev) => {
+        ev.stopPropagation();
+        state.volume = Number(el.ccVolSlider.value);
+        syncDesktopScenes();
+        syncCapsuleUI();
+      });
+      el.ccVolSlider.addEventListener('change', (ev) => {
+        ev.stopPropagation();
+        state.volume = Number(el.ccVolSlider.value);
         state.capsuleState = 'idle';
         syncDesktopScenes();
         showHudChip('volume', 'Volume', `${state.volume}%`, true);
@@ -1438,9 +1659,14 @@
       const releases = await response.json();
       if (!Array.isArray(releases)) return;
 
-      const v2Release = releases.find(
-        (rel) => typeof rel.tag_name === 'string' && rel.tag_name.startsWith('v2.')
-      );
+      const v2Release = releases.find((rel) => {
+        if (typeof rel.tag_name !== 'string') return false;
+        const m = rel.tag_name.match(/^v2\.(\d+)\.(\d+)$/);
+        if (!m) return false;
+        const minor = Number(m[1]);
+        const patch = Number(m[2]);
+        return minor > 0 || patch >= 1;
+      });
       if (v2Release && Array.isArray(v2Release.assets)) {
         const exeAsset = v2Release.assets.find(
           (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
@@ -1454,11 +1680,9 @@
             el.downloadSizeNote.textContent = `NSIS Setup · ${sizeLabel}`;
           }
         }
-      } else if (el.primaryDownloadBtn) {
-        el.primaryDownloadBtn.href = RELEASES_PAGE_URL;
       }
     } catch (_err) {
-      if (el.primaryDownloadBtn) el.primaryDownloadBtn.href = RELEASES_PAGE_URL;
+      // Keep static v2.0.1 fallback link intact when offline or un-published yet
     }
   }
 

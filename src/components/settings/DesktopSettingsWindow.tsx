@@ -587,7 +587,7 @@ export const DesktopSettingsWindow: React.FC = () => {
     playChimeCue('tap');
     if (!isTauriRuntime()) {
       setUpdateResult({
-        currentVersion: '2.0.0',
+        currentVersion: '2.0.1',
         available: false,
         version: null,
         body: null,
@@ -618,13 +618,13 @@ export const DesktopSettingsWindow: React.FC = () => {
         });
       } else {
         setUpdateResult({
-          currentVersion: '2.0.0',
+          currentVersion: '2.0.1',
           available: false,
           version: null,
           body: null,
           date: null,
           statusKind: 'up-to-date',
-          message: 'CASA sudah menggunakan versi terbaru (v2.0.0).',
+          message: 'CASA sudah menggunakan versi terbaru (v2.0.1).',
         });
       }
     } catch (err) {
@@ -640,7 +640,7 @@ export const DesktopSettingsWindow: React.FC = () => {
         lower.includes('network');
 
       setUpdateResult({
-        currentVersion: '2.0.0',
+        currentVersion: '2.0.1',
         available: false,
         version: null,
         body: msg,
@@ -675,7 +675,7 @@ export const DesktopSettingsWindow: React.FC = () => {
 
       if (!update) {
         setUpdateResult({
-          currentVersion: '2.0.0',
+          currentVersion: '2.0.1',
           available: false,
           version: null,
           body: null,
@@ -717,7 +717,7 @@ export const DesktopSettingsWindow: React.FC = () => {
       await relaunch();
     } catch (err) {
       setUpdateResult((prev) => ({
-        currentVersion: prev?.currentVersion ?? '2.0.0',
+        currentVersion: prev?.currentVersion ?? '2.0.1',
         available: prev?.available ?? false,
         version: prev?.version ?? null,
         body: null,
@@ -816,7 +816,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                   CASA
                 </span>
                 <span className="px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.10] text-[10px] font-mono text-white/75">
-                  v2.0.0
+                  v2.0.1
                 </span>
               </div>
               <div className="text-[10px] font-mono text-white/40 mt-0.5 truncate">
@@ -1274,7 +1274,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-[13px] font-semibold text-white">
-                            CASA v{updateResult?.currentVersion ?? '2.0.0'}
+                            CASA v{updateResult?.currentVersion ?? '2.0.1'}
                           </span>
                           <span className="text-[10px] font-mono text-white/45 px-1.5 py-0.5 rounded border border-white/[0.08] bg-[#08080A]">
                             Signed Updater

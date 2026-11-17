@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>CASA — Redirecting...</title>
+  <meta name="robots" content="noindex" />
+  <meta name="theme-color" content="#000000" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #000000;
+      color: #a1a1aa;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-size: 13px;
+    }
+  </style>
+  <script>
+    (function () {
+      var pathname = window.location.pathname || '/';
+      var match = pathname.match(/^(\/casa-app)?\/(playground|arsitektur|architecture|unduh|download|feedback)\/?$/i);
+      var isRepoSubpath = pathname.indexOf('/casa-app') === 0;
+      var homeUrl = isRepoSubpath ? '/casa-app/' : '/';
+      if (match && match[2]) {
+        try {
+          window.sessionStorage.setItem('casa_pending_route', match[2].toLowerCase());
+        } catch (e) {}
+      }
+      window.location.replace(homeUrl);
+    })();
+  </script>
+</head>
+<body>
+  <noscript>Mengalihkan ke beranda CASA...</noscript>
+</body>
+</html>

@@ -230,10 +230,10 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
         </AnimatePresence>
       </div>
 
-      {/* Kanan: Icon Baterai Ringkas (Auto-Hide di Control Center) + Tombol Minimize / Tutup ke Idle */}
-      <div className="flex items-center justify-end gap-1.5 shrink-0 min-w-0">
+      {/* Kanan: Cincin Baterai Lingkaran (Auto-Hide di Control Center) + Settings + Collapse */}
+      <div className="flex items-center justify-end gap-1 shrink-0 min-w-0">
         {showHeaderBattery && (
-          <BatteryPill battery={systemStats.battery} showPercentage={false} />
+          <BatteryPill battery={systemStats.battery} showPercentage={true} size={14} />
         )}
         <button
           type="button"
@@ -246,11 +246,11 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
             playChimeCue('tap');
             void openDesktopSettingsWindow();
           }}
-          className="w-6 h-6 rounded-full bg-white/[0.06] hover:bg-white/[0.16] border border-white/[0.08] text-white/60 hover:text-white flex items-center justify-center transition-all active:scale-90 cursor-pointer shrink-0"
+          className="w-[22px] h-[22px] rounded-full bg-white/[0.06] hover:bg-white/[0.16] border border-white/[0.08] text-white/60 hover:text-white flex items-center justify-center transition-all active:scale-90 cursor-pointer shrink-0"
           title="Buka Pengaturan CASA"
           aria-label="Pengaturan CASA"
         >
-          <Settings className="w-3.5 h-3.5" />
+          <Settings className="w-3 h-3" />
         </button>
         <button
           type="button"
@@ -263,11 +263,11 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
             playChimeCue('tap');
             onCollapse?.();
           }}
-          className="w-6 h-6 rounded-full bg-white/[0.06] hover:bg-white/[0.16] border border-white/[0.08] text-white/60 hover:text-white flex items-center justify-center transition-all active:scale-90 cursor-pointer shrink-0"
+          className="w-[22px] h-[22px] rounded-full bg-white/[0.06] hover:bg-white/[0.16] border border-white/[0.08] text-white/60 hover:text-white flex items-center justify-center transition-all active:scale-90 cursor-pointer shrink-0"
           title="Tutup Mode 6 ke Idle"
           aria-label="Tutup Mode 6"
         >
-          <ChevronUp className="w-3.5 h-3.5" />
+          <ChevronUp className="w-3 h-3" />
         </button>
       </div>
     </header>

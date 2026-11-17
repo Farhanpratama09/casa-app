@@ -115,7 +115,12 @@ textarea {
   color: var(--text-secondary);
 }
 
-.header-nav a:hover {
+.header-nav a {
+  transition: color 0.18s ease;
+}
+
+.header-nav a:hover,
+.header-nav a[aria-current="page"] {
   color: var(--text-primary);
 }
 
@@ -428,7 +433,7 @@ textarea {
   white-space: nowrap;
 }
 
-/* Resting Pill: exact 126x39px, only × ♥ eyes squished scaleY(0.5) breathing */
+/* Compact × ♥ Capsule: exact 126x39px, bold upright × ♥ (no vertical flattening), gentle breathe dim on sleep */
 @keyframes casaSleepBreathe {
   0%, 100% {
     opacity: 0.22;
@@ -438,7 +443,7 @@ textarea {
   }
 }
 
-.casa-resting-pill {
+.casa-compact-eyes-pill {
   min-width: 126px;
   height: 39px;
   padding: 0 32px;
@@ -448,10 +453,14 @@ textarea {
   gap: 20px;
 }
 
-.casa-resting-eye {
+.casa-compact-eye {
   width: 15px;
   height: 15px;
-  transform: scaleY(0.5);
+  opacity: 1;
+  transition: opacity 0.26s ease;
+}
+
+.casa-compact-eyes-pill[data-sleep="true"] .casa-compact-eye {
   animation: casaSleepBreathe 4s ease-in-out infinite;
 }
 
@@ -1403,40 +1412,34 @@ textarea {
 
 .casa-cc-slider-box {
   height: 30px;
-  padding: 0 10px;
+  padding: 0 9px;
   border-radius: 10px;
   background: #0a0a0a;
   border: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.8);
 }
 
-.casa-cc-slider-name {
-  font-size: 9.5px;
-  color: rgba(255, 255, 255, 0.7);
+.casa-cc-slider-box svg {
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.72);
 }
 
-.casa-cc-slider-bar {
+.casa-cc-range {
   flex: 1;
-  height: 6px;
-  border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.1);
-  overflow: hidden;
-}
-
-.casa-cc-slider-fill {
-  height: 100%;
-  width: 68%;
-  background: #ffffff;
-  border-radius: 9999px;
-}
-
-.casa-cc-slider-fill-bright {
-  width: 80%;
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+  accent-color: #ffffff;
+  cursor: pointer;
 }
 
 .casa-cc-slider-val {
+  min-width: 28px;
+  text-align: right;
   font-size: 10px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.85);
@@ -1585,7 +1588,7 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: padding-top 0.28s var(--ease-oled);
+  transition: padding-top 0.28s var(--ease-oled), filter 0.16s ease;
 }
 
 .virtual-monitor[data-capsule-open="false"] .monitor-desktop {
@@ -1840,10 +1843,18 @@ textarea {
   font-size: 12px;
   font-weight: 600;
   color: #ffffff;
+  min-width: 90px;
+}
+
+.vm-label-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .vm-volume-slider {
   flex: 1;
+  min-width: 0;
   accent-color: #ffffff;
   cursor: pointer;
 }
@@ -1852,6 +1863,8 @@ textarea {
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 700;
+  min-width: 34px;
+  text-align: right;
 }
 
 .vm-drop-header {
