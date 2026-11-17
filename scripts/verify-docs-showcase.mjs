@@ -13,7 +13,7 @@ import puppeteer from 'puppeteer-core';
 
 const DOCS_DIR = path.resolve('docs');
 const EXE_BUNDLE_PATH = path.resolve(
-  'src-tauri/target/release/bundle/nsis/CASA_2.0.1_x64-setup.exe'
+  'src-tauri/target/release/bundle/nsis/CASA_2.0.2_x64-setup.exe'
 );
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -110,16 +110,50 @@ async function main() {
     });
 
     await page.setRequestInterception(true);
+    let githubReleasesCalls = 0;
     page.on('request', (req) => {
       if (req.url().startsWith('https://api.github.com/')) {
-        req.respond({ status: 200, contentType: 'application/json', body: '[]' });
+        githubReleasesCalls++;
+        req.respond({
+          status: 200,
+          headers: { 'Access-Control-Allow-Origin': '*' },
+          contentType: 'application/json',
+          body: JSON.stringify([
+            {
+              tag_name: 'v2.0.2',
+              assets: [
+                {
+                  name: 'CASA_2.0.2_x64-setup.exe',
+                  size: 4652960,
+                  download_count: 8,
+                  browser_download_url:
+                    'https://github.com/Farhanpratama09/casa-app/releases/download/v2.0.2/CASA_2.0.2_x64-setup.exe',
+                },
+                { name: 'CASA_2.0.2_x64-setup.exe.sig', size: 432, download_count: 90 },
+                { name: 'CASA_2.0.2_x64_en-US.msi', size: 6729728, download_count: 3 },
+                { name: 'CASA_2.0.2_x64_en-US.msi.sig', size: 432, download_count: 45 },
+                { name: 'latest.json', size: 795, download_count: 500 },
+              ],
+            },
+            {
+              tag_name: 'v2.0.1',
+              assets: [
+                { name: 'CASA_2.0.1_x64-setup.exe', size: 4652960, download_count: 2 },
+                { name: 'CASA_2.0.1_x64_en-US.msi', size: 6729728, download_count: 1 },
+              ],
+            },
+          ]),
+        });
         return;
       }
       req.continue();
     });
 
     await page.goto('http://127.0.0.1:5212/casa-app/', { waitUntil: 'domcontentloaded' });
-    await new Promise((r) => setTimeout(r, 300));
+    await page.waitForFunction(
+      () => document.getElementById('download-count-text')?.hidden === false,
+      { timeout: 3000 }
+    );
 
     const layoutAudit = await page.evaluate(() => {
       const heroIntro = document.querySelector('.hero-intro');
@@ -137,6 +171,11 @@ async function main() {
       const primaryBtn = document.getElementById('primary-download-btn');
       const hasPrimaryExe = Boolean(primaryBtn);
       const primaryHref = primaryBtn?.getAttribute('href') || '';
+      const dlCountEl = document.getElementById('download-count-text');
+      const dlCountText = dlCountEl?.textContent?.trim() || '';
+      const dlCountHidden = dlCountEl?.hidden === true;
+      const dlCacheRaw = window.localStorage.getItem('casa_dl_count_cache');
+      const dlCachedCount = dlCacheRaw ? JSON.parse(dlCacheRaw).count : null;
       const shaDetails = downloadSection?.querySelector('details.sha-accordion');
       const shaSummaryText = shaDetails?.querySelector('summary')?.textContent?.trim();
       const shaText = document.getElementById('sha-value-exe')?.textContent?.trim() || '';
@@ -149,6 +188,9 @@ async function main() {
         capsuleHeight,
         hasPrimaryExe,
         primaryHref,
+        dlCountText,
+        dlCountHidden,
+        dlCachedCount,
         shaClosedInitially: shaDetails?.hasAttribute('open') === false,
         shaSummaryText,
         shaText,
@@ -170,12 +212,52 @@ async function main() {
     );
     check(
       layoutAudit.hasPrimaryExe &&
-        layoutAudit.primaryHref.includes('CASA_2.0.1_x64-setup.exe') &&
+        layoutAudit.primaryHref.includes('CASA_2.0.2_x64-setup.exe') &&
         layoutAudit.shaClosedInitially &&
         layoutAudit.shaSummaryText === 'Verify SHA-256 checksum' &&
         /^[0-9A-F]{64}$/.test(layoutAudit.shaText) &&
         (!expectedExeSha || layoutAudit.shaText === expectedExeSha),
-      `Download section links CASA_2.0.1_x64-setup.exe + collapsed SHA-256 valid (${layoutAudit.shaText.slice(0, 12)}...)`
+      `Download section links CASA_2.0.2_x64-setup.exe + collapsed SHA-256 valid (${layoutAudit.shaText.slice(0, 12)}...)`
+    );
+    check(
+      !layoutAudit.dlCountHidden &&
+        layoutAudit.dlCountText.includes('14 downloads') &&
+        layoutAudit.dlCachedCount === 14 &&
+        githubReleasesCalls === 1,
+      `Live download counter summed .exe+.msi only (${layoutAudit.dlCountText}) & cached in localStorage`
+    );
+
+    const cooldownAudit = await page.evaluate(() => {
+      const btn = document.getElementById('primary-download-btn');
+      const label = document.getElementById('primary-download-label');
+      let firstWasAllowed = false;
+      btn.addEventListener(
+        'click',
+        (ev) => {
+          firstWasAllowed = !ev.defaultPrevented;
+          ev.preventDefault();
+        },
+        { once: true }
+      );
+      btn.dispatchEvent(new MouseEvent('click', { cancelable: true, bubbles: true }));
+      const disabledAfterFirst = btn.getAttribute('aria-disabled');
+      const labelAfterFirst = label?.textContent?.trim();
+      const secondNotCanceled = btn.dispatchEvent(
+        new MouseEvent('click', { cancelable: true, bubbles: true })
+      );
+      return {
+        firstWasAllowed,
+        disabledAfterFirst,
+        labelAfterFirst,
+        secondBlocked: secondNotCanceled === false,
+      };
+    });
+    check(
+      cooldownAudit.firstWasAllowed &&
+        cooldownAudit.disabledAfterFirst === 'true' &&
+        cooldownAudit.labelAfterFirst === 'Memulai unduhan...' &&
+        cooldownAudit.secondBlocked,
+      `Download button activates 6s cooldown (${cooldownAudit.labelAfterFirst}) and blocks repeat clicks`
     );
     check(
       layoutAudit.introPhase === 'hi',
@@ -432,8 +514,9 @@ async function main() {
     check(
       subRouteRestore.pathname === '/casa-app/unduh' &&
         subRouteRestore.hash === '' &&
-        subRouteRestore.downloadTop < 700,
-      `404.html direct reload /casa-app/unduh restored path & scrolled to #download (top=${subRouteRestore.downloadTop}px)`
+        subRouteRestore.downloadTop < 700 &&
+        githubReleasesCalls === 1,
+      `404.html reload restored /casa-app/unduh & reused cached download count (apiCalls=${githubReleasesCalls})`
     );
 
     const overflowDesktop = await page.evaluate(
@@ -446,10 +529,11 @@ async function main() {
     );
 
     // =========================================================================
-    // MOBILE 390x844 SUITE
+    // MOBILE 390x844 SUITE (Isolated Incognito Context -> empty localStorage & failed/empty API)
     // =========================================================================
     console.log('\n[Mobile 390x844] Responsive Native Parity Verification\n');
-    const mobilePage = await browser.newPage();
+    const mobileCtx = await browser.createBrowserContext();
+    const mobilePage = await mobileCtx.newPage();
     await mobilePage.setViewport({ width: 390, height: 844 });
     const mobileCspErrors = [];
     mobilePage.on('console', (msg) => {
@@ -460,7 +544,12 @@ async function main() {
     await mobilePage.setRequestInterception(true);
     mobilePage.on('request', (req) => {
       if (req.url().startsWith('https://api.github.com/')) {
-        req.respond({ status: 200, contentType: 'application/json', body: '[]' });
+        req.respond({
+          status: 200,
+          headers: { 'Access-Control-Allow-Origin': '*' },
+          contentType: 'application/json',
+          body: '[]',
+        });
         return;
       }
       req.continue();
@@ -480,12 +569,16 @@ async function main() {
         innerW: window.innerWidth,
         monitorW: Math.round(mRect?.width ?? 0),
         dropCards: document.querySelectorAll('#vm-dropped-items .casa-drop-card').length,
+        dlCountFallbackHidden: document.getElementById('download-count-text')?.hidden === true,
       };
     });
 
     check(
-      !mobileMetrics.overflowX && mobileMetrics.monitorW <= 390 && mobileMetrics.dropCards === 1,
-      `Mobile 390x844 zero horizontal overflow (${mobileMetrics.scrollW}/${mobileMetrics.innerW}, dropCards=${mobileMetrics.dropCards})`
+      !mobileMetrics.overflowX &&
+        mobileMetrics.monitorW <= 390 &&
+        mobileMetrics.dropCards === 1 &&
+        mobileMetrics.dlCountFallbackHidden,
+      `Mobile 390x844 zero overflow & graceful counter fallback (${mobileMetrics.scrollW}/${mobileMetrics.innerW}, dropCards=${mobileMetrics.dropCards})`
     );
     check(mobileCspErrors.length === 0, `Mobile zero CSP errors (${mobileCspErrors.length})`);
   } finally {

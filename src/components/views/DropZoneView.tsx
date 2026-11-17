@@ -35,37 +35,38 @@ import {
 import { useCasaAudio } from '../../context/CasaAudioContext';
 import { NativeTrack, parseTrackTitleAndArtist } from '../../services/nativeAudioService';
 import { playChimeCue, focusIslandWindow } from '../../utils/tauriBridge';
+import { useSettingsStore } from '../../stores/useSettingsStore';
 
 export interface DropZoneViewProps {
   isLockedExpanded?: boolean;
   onOpenMusic?: () => void;
 }
 
-const renderCategoryIcon = (item: DropItem) => {
+const renderCategoryIcon = (item: DropItem, isMonochrome = false) => {
   if (item.isDir) {
-    return <Folder className="w-4 h-4 text-sky-400/85" />;
+    return <Folder className={`w-4 h-4 ${isMonochrome ? 'text-white/80' : 'text-sky-400/85'}`} />;
   }
   if (item.type === 'url') {
-    return <Globe className="w-4 h-4 text-sky-400" />;
+    return <Globe className={`w-4 h-4 ${isMonochrome ? 'text-white/85' : 'text-sky-400'}`} />;
   }
   if (item.type === 'text') {
-    return <AlignLeft className="w-4 h-4 text-sky-400/85" />;
+    return <AlignLeft className={`w-4 h-4 ${isMonochrome ? 'text-white/80' : 'text-sky-400/85'}`} />;
   }
 
   const ext = (item.extension || '').toLowerCase();
   if (AUDIO_EXTENSIONS.has(ext)) {
-    return <Music className="w-4 h-4 text-emerald-400" />;
+    return <Music className={`w-4 h-4 ${isMonochrome ? 'text-white/85' : 'text-emerald-400'}`} />;
   }
   if (VIDEO_EXTENSIONS.has(ext)) {
-    return <Film className="w-4 h-4 text-purple-400/90" />;
+    return <Film className={`w-4 h-4 ${isMonochrome ? 'text-white/80' : 'text-purple-400/90'}`} />;
   }
   if (ARCHIVE_EXTENSIONS.has(ext)) {
-    return <FileArchive className="w-4 h-4 text-amber-400" />;
+    return <FileArchive className={`w-4 h-4 ${isMonochrome ? 'text-white/80' : 'text-amber-400'}`} />;
   }
   if (IMAGE_EXTENSIONS.has(ext) || item.type === 'image') {
-    return <ImageIcon className="w-4 h-4 text-purple-400" />;
+    return <ImageIcon className={`w-4 h-4 ${isMonochrome ? 'text-white/85' : 'text-purple-400'}`} />;
   }
-  return <FileText className="w-4 h-4 text-sky-400/85" />;
+  return <FileText className={`w-4 h-4 ${isMonochrome ? 'text-white/80' : 'text-sky-400/85'}`} />;
 };
 
 const getItemMetaLabel = (item: DropItem): string => {
@@ -106,6 +107,8 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
   onOpenMusic,
 }) => {
   const { setPlaybackSource, playTrack } = useCasaAudio();
+  const { settings, palette: themePalette } = useSettingsStore();
+  const isMonochrome = settings.theme === 'monochrome';
   const [imgError, setImgError] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isOpeningAudio, setIsOpeningAudio] = useState(false);
@@ -312,7 +315,7 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
         >
           <div className="flex items-center justify-between gap-1.5 min-w-0">
             <div className="w-5 h-5 rounded-md bg-[#141417] border border-white/[0.06] flex items-center justify-center shrink-0">
-              <AlignLeft className="w-3 h-3 text-sky-400/85" />
+              <AlignLeft className={`w-3 h-3 ${isMonochrome ? 'text-white/80' : 'text-sky-400/85'}`} />
             </div>
             <span className="text-[9px] font-mono text-white/45 truncate tabular-nums">
               {getItemMetaLabel(item)}
@@ -341,7 +344,7 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
                 className="w-full h-full object-cover"
               />
             ) : (
-              renderCategoryIcon(item)
+              renderCategoryIcon(item, isMonochrome)
             )}
           </div>
 
@@ -404,9 +407,18 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
                 ? 'Salin tautan'
                 : 'Salin snippet teks'
             }
+            style={
+              copied
+                ? {
+                    backgroundColor: `${themePalette.rest}24`,
+                    color: themePalette.rest,
+                    borderColor: `${themePalette.rest}66`,
+                  }
+                : undefined
+            }
             className={`w-[22px] h-[22px] rounded-md border flex items-center justify-center transition-colors cursor-pointer ${
               copied
-                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40'
+                ? ''
                 : 'bg-white/[0.05] text-white/70 border-white/[0.08] hover:bg-white/[0.12] hover:text-white'
             }`}
           >
@@ -448,6 +460,8 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
     removeItem,
     clearAll,
   } = useDropZoneStore();
+  const { settings } = useSettingsStore();
+  const isMonochrome = settings.theme === 'monochrome';
 
   const [isPicking, setIsPicking] = useState(false);
   const [isPasting, setIsPasting] = useState(false);
@@ -801,14 +815,20 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
             onClick={handlePickFiles}
             className={`w-full h-full rounded-xl border border-dashed transition-colors flex flex-col items-center justify-center gap-2 cursor-pointer px-4 ${
               showDragTargetHighlight
-                ? 'border-indigo-500/60 bg-indigo-500/[0.08]'
+                ? isMonochrome
+                  ? 'border-white/55 bg-white/[0.06]'
+                  : 'border-indigo-500/60 bg-indigo-500/[0.08]'
                 : 'border-white/[0.12] hover:border-white/25 bg-[#0a0a0a]'
             }`}
           >
             <div className="flex items-center gap-2">
               <Inbox
                 className={`w-4 h-4 transition-colors ${
-                  showDragTargetHighlight ? 'text-indigo-400' : 'text-white/50'
+                  showDragTargetHighlight
+                    ? isMonochrome
+                      ? 'text-white'
+                      : 'text-indigo-400'
+                    : 'text-white/50'
                 }`}
               />
               <span className="text-[11.5px] font-medium text-white/85">
@@ -868,9 +888,13 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.12 }}
-              className="pointer-events-none absolute inset-0 rounded-xl border-2 border-dashed border-indigo-500/60 bg-indigo-500/[0.08] backdrop-blur-sm flex items-center justify-center gap-2"
+              className={`pointer-events-none absolute inset-0 rounded-xl border-2 border-dashed backdrop-blur-sm flex items-center justify-center gap-2 ${
+                isMonochrome
+                  ? 'border-white/55 bg-white/[0.06]'
+                  : 'border-indigo-500/60 bg-indigo-500/[0.08]'
+              }`}
             >
-              <Inbox className="w-4 h-4 text-indigo-400" />
+              <Inbox className={`w-4 h-4 ${isMonochrome ? 'text-white' : 'text-indigo-400'}`} />
               <span className="text-[11.5px] font-medium text-white/90">
                 Lepaskan berkas untuk ditambahkan ke Drop Zone
               </span>

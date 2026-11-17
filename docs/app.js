@@ -250,7 +250,10 @@
 
     // Download + Feedback
     primaryDownloadBtn: $('primary-download-btn'),
+    primaryDownloadLabel: $('primary-download-label'),
     downloadSizeNote: $('download-size-note'),
+    downloadSizeText: $('download-size-text'),
+    downloadCountText: $('download-count-text'),
     copyShaBtn: $('copy-sha-btn'),
     shaValueExe: $('sha-value-exe'),
     feedbackForm: $('feedback-form'),
@@ -1650,14 +1653,97 @@
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   }
 
+  const DL_CACHE_KEY = 'casa_dl_count_cache';
+  const DL_CACHE_TTL_MS = 15 * 60 * 1000;
+  const DL_COOLDOWN_MS = 6000;
+
+  function applyReleaseMetadata(count, exeUrl, exeSize) {
+    if (exeUrl && isSafeGitHubUrl(exeUrl) && el.primaryDownloadBtn) {
+      el.primaryDownloadBtn.href = exeUrl;
+    }
+    if (exeSize && el.downloadSizeText) {
+      el.downloadSizeText.textContent = `NSIS Setup · ${exeSize}`;
+    }
+    if (el.downloadCountText) {
+      if (Number.isFinite(count) && count >= 0) {
+        el.downloadCountText.textContent = `· ${count.toLocaleString('en-US')} downloads`;
+        el.downloadCountText.hidden = false;
+      } else {
+        el.downloadCountText.textContent = '';
+        el.downloadCountText.hidden = true;
+      }
+    }
+  }
+
+  function initDownloadButtonCooldown() {
+    const btn = el.primaryDownloadBtn;
+    if (!btn) return;
+    let isCooldown = false;
+    let timerId = null;
+
+    btn.addEventListener('click', (ev) => {
+      if (isCooldown) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+      isCooldown = true;
+      const labelNode = el.primaryDownloadLabel || btn.querySelector('span') || btn;
+      const originalText = labelNode.textContent || 'Download CASA v2.0.2 for Windows (.exe)';
+      btn.setAttribute('aria-disabled', 'true');
+      btn.classList.add('is-cooldown');
+      labelNode.textContent = 'Memulai unduhan...';
+
+      if (timerId) window.clearTimeout(timerId);
+      timerId = window.setTimeout(() => {
+        isCooldown = false;
+        timerId = null;
+        btn.removeAttribute('aria-disabled');
+        btn.classList.remove('is-cooldown');
+        labelNode.textContent = originalText;
+      }, DL_COOLDOWN_MS);
+    });
+  }
+
   async function initSmartReleaseHub() {
+    try {
+      const rawCache = window.localStorage.getItem(DL_CACHE_KEY);
+      if (rawCache) {
+        const cached = JSON.parse(rawCache);
+        if (
+          cached &&
+          typeof cached.cachedAt === 'number' &&
+          Date.now() - cached.cachedAt < DL_CACHE_TTL_MS &&
+          typeof cached.count === 'number'
+        ) {
+          applyReleaseMetadata(cached.count, cached.exeUrl || null, cached.exeSize || null);
+          return;
+        }
+      }
+    } catch (_err) {}
+
     try {
       const response = await fetch(RELEASES_API_URL, {
         headers: { Accept: 'application/vnd.github+json' },
       });
       if (!response.ok) return;
       const releases = await response.json();
-      if (!Array.isArray(releases)) return;
+      if (!Array.isArray(releases) || releases.length === 0) return;
+
+      // Sum download_count strictly for installer binaries (.exe and .msi), excluding .sig & latest.json
+      let totalInstallerDownloads = 0;
+      releases.forEach((rel) => {
+        if (!rel || !Array.isArray(rel.assets)) return;
+        rel.assets.forEach((asset) => {
+          const name = typeof asset?.name === 'string' ? asset.name.toLowerCase() : '';
+          if (name.endsWith('.exe') || name.endsWith('.msi')) {
+            const c = Number(asset.download_count);
+            if (Number.isFinite(c) && c > 0) {
+              totalInstallerDownloads += c;
+            }
+          }
+        });
+      });
 
       const v2Release = releases.find((rel) => {
         if (typeof rel.tag_name !== 'string') return false;
@@ -1665,24 +1751,36 @@
         if (!m) return false;
         const minor = Number(m[1]);
         const patch = Number(m[2]);
-        return minor > 0 || patch >= 1;
+        return minor > 0 || patch >= 2;
       });
+
+      let exeUrl = null;
+      let exeSize = null;
       if (v2Release && Array.isArray(v2Release.assets)) {
         const exeAsset = v2Release.assets.find(
           (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
         );
         if (exeAsset && isSafeGitHubUrl(exeAsset.browser_download_url)) {
-          const sizeLabel = formatMegabytes(exeAsset.size) || '4.44 MB';
-          if (el.primaryDownloadBtn) {
-            el.primaryDownloadBtn.href = exeAsset.browser_download_url;
-          }
-          if (el.downloadSizeNote) {
-            el.downloadSizeNote.textContent = `NSIS Setup · ${sizeLabel}`;
-          }
+          exeUrl = exeAsset.browser_download_url;
+          exeSize = formatMegabytes(exeAsset.size) || '4.44 MB';
         }
       }
+
+      applyReleaseMetadata(totalInstallerDownloads, exeUrl, exeSize);
+
+      try {
+        window.localStorage.setItem(
+          DL_CACHE_KEY,
+          JSON.stringify({
+            count: totalInstallerDownloads,
+            exeUrl,
+            exeSize,
+            cachedAt: Date.now(),
+          })
+        );
+      } catch (_err) {}
     } catch (_err) {
-      // Keep static v2.0.1 fallback link intact when offline or un-published yet
+      // Keep static v2.0.2 fallback link & hide download count gracefully when offline/rate-limited
     }
   }
 
@@ -1805,6 +1903,7 @@
   initCleanNavigation();
   initVirtualMonitorControls();
   initCopyHash();
+  initDownloadButtonCooldown();
   initFeedbackForm();
   syncUI();
   void initSmartReleaseHub();

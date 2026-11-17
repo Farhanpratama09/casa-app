@@ -198,6 +198,15 @@ textarea {
   transform: translateY(-1px);
 }
 
+.btn-primary[aria-disabled="true"],
+.btn-primary.is-cooldown {
+  opacity: 0.65;
+  cursor: wait;
+  transform: none;
+  background: #d4d4d8;
+  border-color: #d4d4d8;
+}
+
 /* =========================================================================
    VIRTUAL MONITOR BEZEL (16:10 Desktop Ratio)
    ========================================================================= */
@@ -2065,6 +2074,15 @@ textarea {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.download-count-meta {
+  color: var(--text-secondary);
 }
 
 .smartscreen-guide {

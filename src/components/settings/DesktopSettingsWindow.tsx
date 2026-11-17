@@ -587,7 +587,7 @@ export const DesktopSettingsWindow: React.FC = () => {
     playChimeCue('tap');
     if (!isTauriRuntime()) {
       setUpdateResult({
-        currentVersion: '2.0.1',
+        currentVersion: '2.0.2',
         available: false,
         version: null,
         body: null,
@@ -618,13 +618,13 @@ export const DesktopSettingsWindow: React.FC = () => {
         });
       } else {
         setUpdateResult({
-          currentVersion: '2.0.1',
+          currentVersion: '2.0.2',
           available: false,
           version: null,
           body: null,
           date: null,
           statusKind: 'up-to-date',
-          message: 'CASA sudah menggunakan versi terbaru (v2.0.1).',
+          message: 'CASA sudah menggunakan versi terbaru (v2.0.2).',
         });
       }
     } catch (err) {
@@ -640,7 +640,7 @@ export const DesktopSettingsWindow: React.FC = () => {
         lower.includes('network');
 
       setUpdateResult({
-        currentVersion: '2.0.1',
+        currentVersion: '2.0.2',
         available: false,
         version: null,
         body: msg,
@@ -675,7 +675,7 @@ export const DesktopSettingsWindow: React.FC = () => {
 
       if (!update) {
         setUpdateResult({
-          currentVersion: '2.0.1',
+          currentVersion: '2.0.2',
           available: false,
           version: null,
           body: null,
@@ -717,7 +717,7 @@ export const DesktopSettingsWindow: React.FC = () => {
       await relaunch();
     } catch (err) {
       setUpdateResult((prev) => ({
-        currentVersion: prev?.currentVersion ?? '2.0.1',
+        currentVersion: prev?.currentVersion ?? '2.0.2',
         available: prev?.available ?? false,
         version: prev?.version ?? null,
         body: null,
@@ -795,7 +795,7 @@ export const DesktopSettingsWindow: React.FC = () => {
           <button
             type="button"
             onClick={() => void handleCloseWindow()}
-            className="w-6 h-6 rounded-md flex items-center justify-center text-white/60 hover:text-rose-300 hover:bg-rose-500/20 transition-colors cursor-pointer"
+            className="w-6 h-6 rounded-md flex items-center justify-center text-white/60 hover:text-white hover:bg-white/[0.12] transition-colors cursor-pointer"
             title="Tutup Settings (CASA tetap berjalan)"
             aria-label="Tutup Settings"
           >
@@ -816,7 +816,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                   CASA
                 </span>
                 <span className="px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.10] text-[10px] font-mono text-white/75">
-                  v2.0.1
+                  v2.0.2
                 </span>
               </div>
               <div className="text-[10px] font-mono text-white/40 mt-0.5 truncate">
@@ -1183,11 +1183,19 @@ export const DesktopSettingsWindow: React.FC = () => {
 
                   {audioFeedback && (
                     <div
-                      className={`text-[11px] px-3 py-2 rounded-lg border ${
-                        audioFeedback.kind === 'err'
-                          ? 'bg-rose-500/10 border-rose-500/25 text-rose-300'
-                          : 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
-                      }`}
+                      style={{
+                        color:
+                          audioFeedback.kind === 'err' ? palette.danger : palette.rest,
+                        backgroundColor:
+                          audioFeedback.kind === 'err'
+                            ? `${palette.danger}1a`
+                            : `${palette.rest}1a`,
+                        borderColor:
+                          audioFeedback.kind === 'err'
+                            ? `${palette.danger}40`
+                            : `${palette.rest}40`,
+                      }}
+                      className="text-[11px] px-3 py-2 rounded-lg border"
                     >
                       {audioFeedback.text}
                     </div>
@@ -1224,7 +1232,9 @@ export const DesktopSettingsWindow: React.FC = () => {
                   </SettingFlatRow>
 
                   {autostartError && (
-                    <div className="py-2 text-[11px] text-rose-400">{autostartError}</div>
+                    <div className="py-2 text-[11px]" style={{ color: palette.danger }}>
+                      {autostartError}
+                    </div>
                   )}
 
                   {/* Global Hotkey Row with Physical Keycaps */}
@@ -1252,12 +1262,25 @@ export const DesktopSettingsWindow: React.FC = () => {
                       </div>
                     </div>
                     <span
+                      style={
+                        shortcutRegistered === null
+                          ? undefined
+                          : shortcutRegistered
+                          ? {
+                              color: palette.rest,
+                              borderColor: `${palette.rest}4d`,
+                              backgroundColor: `${palette.rest}1a`,
+                            }
+                          : {
+                              color: palette.timer,
+                              borderColor: `${palette.timer}4d`,
+                              backgroundColor: `${palette.timer}1a`,
+                            }
+                      }
                       className={`text-[10.5px] font-mono font-semibold px-2 py-0.5 rounded border shrink-0 ${
                         shortcutRegistered === null
                           ? 'text-white/50 border-white/10 bg-white/[0.04]'
-                          : shortcutRegistered
-                          ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10'
-                          : 'text-amber-300 border-amber-500/30 bg-amber-500/10'
+                          : ''
                       }`}
                     >
                       {shortcutRegistered === null
@@ -1274,7 +1297,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-[13px] font-semibold text-white">
-                            CASA v{updateResult?.currentVersion ?? '2.0.1'}
+                            CASA v{updateResult?.currentVersion ?? '2.0.2'}
                           </span>
                           <span className="text-[10px] font-mono text-white/45 px-1.5 py-0.5 rounded border border-white/[0.08] bg-[#08080A]">
                             Signed Updater
@@ -1321,14 +1344,21 @@ export const DesktopSettingsWindow: React.FC = () => {
                     {updateResult && (
                       <div className="pt-2.5 border-t border-white/[0.06] flex items-center justify-between gap-3">
                         <span
+                          style={
+                            updateResult.statusKind === 'available'
+                              ? { color: palette.rest }
+                              : updateResult.statusKind === 'offline'
+                              ? { color: palette.timer }
+                              : updateResult.statusKind !== 'up-to-date'
+                              ? { color: palette.danger }
+                              : undefined
+                          }
                           className={`text-[11px] ${
                             updateResult.statusKind === 'available'
-                              ? 'text-emerald-300 font-medium'
+                              ? 'font-medium'
                               : updateResult.statusKind === 'up-to-date'
                               ? 'text-white/75'
-                              : updateResult.statusKind === 'offline'
-                              ? 'text-amber-300'
-                              : 'text-rose-300'
+                              : ''
                           }`}
                         >
                           {installProgressText || updateResult.message}
@@ -1365,7 +1395,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => void handleResetAllDefaults()}
-                    className="px-3 py-2 rounded-lg bg-[#060607] hover:bg-rose-500/12 border border-white/[0.08] hover:border-rose-500/35 text-[11.5px] font-medium text-white/75 hover:text-rose-300 flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                    className="px-3 py-2 rounded-lg bg-[#060607] hover:bg-white/[0.08] border border-white/[0.08] hover:border-white/25 text-[11.5px] font-medium text-white/75 hover:text-white flex items-center justify-center gap-2 cursor-pointer transition-colors"
                   >
                     <RotateCcw className="w-3.5 h-3.5 shrink-0" />
                     <span>Reset Pengaturan Default</span>

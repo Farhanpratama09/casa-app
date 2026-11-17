@@ -264,6 +264,8 @@ function applyIncomingTelemetry(rawNext: SystemTelemetry) {
     next.audio_device_name !== prev.audio_device_name;
 
   // Prioritize acute changes cleanly into single transient HUD notification
+  const palette = getActivePalette();
+
   if (newlyConnectedBt) {
     triggerSystemHud({
       kind: 'bluetooth',
@@ -273,7 +275,7 @@ function applyIncomingTelemetry(rawNext: SystemTelemetry) {
           ? `${newlyConnectedBt.battery_percent}%`
           : undefined,
       isActive: true,
-      accentColor: '#38BDF8',
+      accentColor: palette.bluetooth,
     });
   } else if (newlyDisconnectedBt) {
     triggerSystemHud({
@@ -302,10 +304,8 @@ function applyIncomingTelemetry(rawNext: SystemTelemetry) {
       audioOutputKind: next.audio_output_kind,
       accentColor:
         next.audio_output_kind === 'bluetooth'
-          ? '#38BDF8'
-          : next.audio_output_kind === 'wired'
-          ? '#818CF8'
-          : '#34D399',
+          ? palette.bluetooth
+          : palette.volume,
     });
   } else if (next.is_muted !== prev.is_muted) {
     triggerSystemHud({
@@ -314,7 +314,7 @@ function applyIncomingTelemetry(rawNext: SystemTelemetry) {
       detail: next.is_muted ? '0%' : `${next.master_volume}%`,
       percent: next.is_muted ? 0 : next.master_volume,
       isActive: next.is_muted,
-      accentColor: next.is_muted ? getActivePalette().danger : getActivePalette().volume,
+      accentColor: next.is_muted ? palette.danger : palette.volume,
     });
   } else if (next.master_volume !== prev.master_volume) {
     triggerSystemHud({
@@ -323,7 +323,7 @@ function applyIncomingTelemetry(rawNext: SystemTelemetry) {
       detail: `${next.master_volume}%`,
       percent: next.master_volume,
       isActive: !next.is_muted,
-      accentColor: next.is_muted ? getActivePalette().danger : getActivePalette().volume,
+      accentColor: next.is_muted ? palette.danger : palette.volume,
     });
   } else if (next.is_brightness_supported && next.brightness_percent !== prev.brightness_percent) {
     triggerSystemHud({
@@ -332,7 +332,7 @@ function applyIncomingTelemetry(rawNext: SystemTelemetry) {
       detail: `${next.brightness_percent}%`,
       percent: next.brightness_percent,
       isActive: true,
-      accentColor: getActivePalette().brightness,
+      accentColor: palette.brightness,
     });
   } else if (next.has_battery && next.is_charging !== prev.is_charging) {
     triggerSystemHud({
@@ -341,7 +341,7 @@ function applyIncomingTelemetry(rawNext: SystemTelemetry) {
       detail: `${next.battery_percentage}%`,
       percent: next.battery_percentage,
       isActive: next.is_charging,
-      accentColor: next.is_charging ? '#34d399' : '#fbbf24',
+      accentColor: next.is_charging ? palette.rest : palette.timer,
     });
   } else if (
     next.has_battery &&
@@ -355,14 +355,14 @@ function applyIncomingTelemetry(rawNext: SystemTelemetry) {
       detail: `${next.battery_percentage}%`,
       percent: next.battery_percentage,
       isActive: false,
-      accentColor: '#f87171',
+      accentColor: palette.danger,
     });
   } else if (next.is_caps_locked !== prev.is_caps_locked) {
     triggerSystemHud({
       kind: 'caps_lock',
       label: next.is_caps_locked ? 'Caps Lock ON' : 'Caps Lock OFF',
       isActive: next.is_caps_locked,
-      accentColor: next.is_caps_locked ? getActivePalette().volume : 'rgba(255,255,255,0.65)',
+      accentColor: next.is_caps_locked ? palette.volume : 'rgba(255,255,255,0.65)',
     });
   }
 }

@@ -2413,7 +2413,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
               boxShadow: isPureTucked
                 ? 'none'
                 : isExternalDragOver
-                ? '0 0 16px rgba(99, 102, 241, 0.28), 0 8px 28px rgba(0, 0, 0, 0.65)'
+                ? settings.theme === 'monochrome'
+                  ? '0 0 16px rgba(255, 255, 255, 0.22), 0 8px 28px rgba(0, 0, 0, 0.65)'
+                  : '0 0 16px rgba(99, 102, 241, 0.28), 0 8px 28px rgba(0, 0, 0, 0.65)'
                 : isAlarmRinging && !isExpandedView && islandState !== 'tucked'
                 ? '0 0 20px var(--casa-timer-glow, rgba(245, 158, 11, 0.45)), 0 8px 28px rgba(0, 0, 0, 0.75)'
                 : isIdleTimerPerimeterVisible
@@ -2432,7 +2434,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
               isPureTucked
                 ? ''
                 : isExternalDragOver
-                ? 'ring-1 ring-indigo-500/60'
+                ? settings.theme === 'monochrome'
+                  ? 'ring-1 ring-white/55'
+                  : 'ring-1 ring-indigo-500/60'
                 : isAlarmRinging && !isExpandedView && islandState !== 'tucked'
                 ? 'ring-1 ring-[color:var(--casa-timer)]'
                 : ''
@@ -2445,11 +2449,13 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                 : undefined
             }
           >
-            {/* Electric Indigo Magnetic Drag-Over Tint Overlay */}
+            {/* Magnetic Drag-Over Tint Overlay */}
             {isExternalDragOver && (
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-0 bg-indigo-500/[0.08] z-30"
+                className={`pointer-events-none absolute inset-0 z-30 ${
+                  settings.theme === 'monochrome' ? 'bg-white/[0.06]' : 'bg-indigo-500/[0.08]'
+                }`}
               />
             )}
 

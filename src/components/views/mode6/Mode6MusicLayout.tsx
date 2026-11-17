@@ -36,6 +36,7 @@ import { NativeTrack, searchTracks } from '../../../services/nativeAudioService'
 import { playChimeCue, focusIslandWindow } from '../../../utils/tauriBridge';
 import { useMusicAffinity } from '../../../hooks/useMusicAffinity';
 import { useQueueStore } from '../../../stores/useQueueStore';
+import { CASA_THEME_PALETTES, useSettingsStore } from '../../../stores/useSettingsStore';
 import { setSearchDrawerExtraHeight } from '../../../utils/islandLayoutState';
 import {
   normalizeTrackForPlaylist,
@@ -216,6 +217,9 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
   onRemoveSmartQueueTrack,
 }) => {
   // Interactive scrub bar state
+  const { settings } = useSettingsStore();
+  const musicThemePalette = CASA_THEME_PALETTES[settings.theme] || CASA_THEME_PALETTES.default;
+  const isMonochromeTheme = settings.theme === 'monochrome';
   const { telemetry: hardwareTelemetry } = useSystemHardware();
   const musicAudioOutputLabel = formatAudioOutputLabel(
     hardwareTelemetry.audio_output_kind,
@@ -881,7 +885,7 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
                       playChimeCue('tap');
                       onClearNativeQueue(e);
                     }}
-                    className="w-5 h-5 rounded-md text-white/45 hover:text-rose-400 hover:bg-rose-500/15 flex items-center justify-center cursor-pointer"
+                    className="w-5 h-5 rounded-md text-white/45 hover:text-[var(--casa-danger)] hover:bg-white/[0.08] flex items-center justify-center cursor-pointer"
                     title="Kosongkan Antrean"
                     aria-label="Kosongkan Antrean"
                   >
@@ -1032,11 +1036,11 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
                 title={`Audio Output: ${hardwareTelemetry.audio_device_name}`}
               >
                 {hardwareTelemetry.audio_output_kind === 'bluetooth' ? (
-                  <Bluetooth className="w-2.5 h-2.5 text-sky-400 shrink-0" />
+                  <Bluetooth className="w-2.5 h-2.5 shrink-0" style={{ color: musicThemePalette.bluetooth }} />
                 ) : hardwareTelemetry.audio_output_kind === 'wired' ? (
-                  <Headphones className="w-2.5 h-2.5 text-indigo-300 shrink-0" />
+                  <Headphones className="w-2.5 h-2.5 shrink-0" style={{ color: musicThemePalette.volume }} />
                 ) : (
-                  <Volume2 className="w-2.5 h-2.5 text-zinc-400 shrink-0" />
+                  <Volume2 className="w-2.5 h-2.5 shrink-0" style={{ color: musicThemePalette.volume }} />
                 )}
                 <span className="truncate tabular-nums">{musicAudioOutputLabel}</span>
               </span>
@@ -1171,7 +1175,11 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
                         title="Spotify"
                         aria-label="Spotify"
                       >
-                        <SpotifyCornerLogo className="w-[10px] h-[10px] text-[#1DB954]" />
+                        <SpotifyCornerLogo
+                          className={`w-[10px] h-[10px] ${
+                            isMonochromeTheme ? 'text-white/85' : 'text-[#1DB954]'
+                          }`}
+                        />
                       </span>
                     )}
                   </div>

@@ -438,9 +438,10 @@ export const ProductivitySplitView: React.FC<ProductivitySplitViewProps> = ({
                 className="text-left w-fit px-1.5 -mx-1.5 rounded-md hover:bg-white/[0.08] transition-colors cursor-text group"
               >
                 <span
+                  style={isFinished ? { color: 'var(--casa-rest, #10B981)' } : undefined}
                   className={`font-sans leading-none font-bold tracking-tight tabular-nums ${
                     isLongDuration ? 'text-[21px]' : 'text-[24px]'
-                  } ${isFinished ? 'text-emerald-400 animate-pulse' : 'text-white'}`}
+                  } ${isFinished ? 'animate-pulse' : 'text-white'}`}
                 >
                   {formattedRemaining}
                 </span>
@@ -701,7 +702,7 @@ export const ProductivitySplitView: React.FC<ProductivitySplitViewProps> = ({
                           playChimeCue('tap');
                         }}
                         title="Hapus tugas"
-                        className="p-0.5 rounded text-white/40 hover:text-rose-400 hover:bg-white/[0.10] cursor-pointer"
+                        className="p-0.5 rounded text-white/40 hover:text-[var(--casa-danger)] hover:bg-white/[0.10] cursor-pointer"
                       >
                         <X className="w-2.5 h-2.5" />
                       </button>

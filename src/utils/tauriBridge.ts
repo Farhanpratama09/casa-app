@@ -647,7 +647,7 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
 export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   if (!isTauriEnv) {
     return {
-      currentVersion: '2.0.1',
+      currentVersion: '2.0.2',
       available: false,
       version: null,
       body: null,

@@ -349,7 +349,10 @@ export const AddToPlaylistPopover: React.FC<AddToPlaylistPopoverProps> = ({
                 Save to Playlist
               </span>
               {savedLabel ? (
-                <span className="text-[8.5px] font-semibold text-emerald-400 truncate flex items-center gap-0.5">
+                <span
+                  style={{ color: 'var(--casa-rest, #10B981)' }}
+                  className="text-[8.5px] font-semibold truncate flex items-center gap-0.5"
+                >
                   <Check className="w-2.5 h-2.5 shrink-0" />
                   <span className="truncate max-w-[68px]">{savedLabel}</span>
                 </span>

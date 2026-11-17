@@ -393,7 +393,14 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
             </div>
 
             {wifiError && (
-              <div className="text-[9px] text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-lg px-2 py-1 leading-tight shrink-0">
+              <div
+                style={{
+                  color: themePalette.danger,
+                  backgroundColor: `${themePalette.danger}1a`,
+                  borderColor: `${themePalette.danger}40`,
+                }}
+                className="text-[9px] border rounded-lg px-2 py-1 leading-tight shrink-0"
+              >
                 {wifiError}
               </div>
             )}
@@ -416,9 +423,17 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
                   return (
                     <div
                       key={net.ssid}
+                      style={
+                        net.is_connected
+                          ? {
+                              backgroundColor: `${themePalette.wifi}16`,
+                              borderColor: `${themePalette.wifi}40`,
+                            }
+                          : undefined
+                      }
                       className={`rounded-lg border px-2 py-1.5 transition-colors ${
                         net.is_connected
-                          ? 'bg-emerald-500/10 border-emerald-500/25'
+                          ? ''
                           : 'bg-white/[0.03] border-white/[0.07] hover:bg-white/[0.07]'
                       }`}
                     >
@@ -442,7 +457,13 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
                         </span>
 
                         {net.is_connected ? (
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-[2px] rounded-full bg-emerald-500/20 text-emerald-300 text-[8.5px] font-semibold shrink-0">
+                          <span
+                            style={{
+                              backgroundColor: `${themePalette.wifi}26`,
+                              color: themePalette.wifi,
+                            }}
+                            className="inline-flex items-center gap-0.5 px-1.5 py-[2px] rounded-full text-[8.5px] font-semibold shrink-0"
+                          >
                             <Check className="w-2.5 h-2.5" />
                             Active
                           </span>
@@ -567,7 +588,14 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
             </div>
 
             {bluetoothError && (
-              <div className="text-[9px] text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-lg px-2 py-1 leading-tight shrink-0">
+              <div
+                style={{
+                  color: themePalette.danger,
+                  backgroundColor: `${themePalette.danger}1a`,
+                  borderColor: `${themePalette.danger}40`,
+                }}
+                className="text-[9px] border rounded-lg px-2 py-1 leading-tight shrink-0"
+              >
                 {bluetoothError}
               </div>
             )}
@@ -600,9 +628,17 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
                   return (
                     <div
                       key={dev.id}
+                      style={
+                        isConnected
+                          ? {
+                              backgroundColor: `${themePalette.bluetooth}18`,
+                              borderColor: `${themePalette.bluetooth}45`,
+                            }
+                          : undefined
+                      }
                       className={`rounded-lg border px-2 py-1.5 flex items-center justify-between gap-1.5 transition-colors ${
                         isConnected
-                          ? 'bg-emerald-500/10 border-emerald-500/25'
+                          ? ''
                           : 'bg-white/[0.03] border-white/[0.07] hover:bg-white/[0.07]'
                       }`}
                     >
@@ -622,11 +658,18 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
                             </span>
                             {isConnected && typeof batteryPct === 'number' && (
                               <span
-                                className={`px-1 py-[0.5px] rounded-full font-mono font-semibold tabular-nums ${
+                                style={
                                   batteryPct <= 20
-                                    ? 'bg-rose-500/20 text-rose-300'
-                                    : 'bg-emerald-500/20 text-emerald-300'
-                                }`}
+                                    ? {
+                                        backgroundColor: `${themePalette.danger}26`,
+                                        color: themePalette.danger,
+                                      }
+                                    : {
+                                        backgroundColor: `${themePalette.rest}26`,
+                                        color: themePalette.rest,
+                                      }
+                                }
+                                className="px-1 py-[0.5px] rounded-full font-mono font-semibold tabular-nums"
                               >
                                 {batteryPct}%
                               </span>
@@ -645,7 +688,7 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
                         }}
                         className={`px-2 py-[3px] rounded-full text-[8.5px] font-semibold cursor-pointer active:scale-95 shrink-0 disabled:opacity-50 ${
                           isConnected
-                            ? 'bg-white/[0.12] text-white hover:bg-rose-500/25 hover:text-rose-200 border border-white/15'
+                            ? 'bg-white/[0.12] text-white hover:bg-white/[0.22] border border-white/15'
                             : 'bg-white text-black hover:bg-white/90'
                         }`}
                       >
@@ -693,7 +736,7 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
                   .join(', ')}
                 className="inline-flex items-center gap-1 px-1.5 h-[14px] rounded-full bg-[#0a0a0a] border border-white/[0.10] hover:border-white/[0.20] text-[8.5px] font-medium text-white/75 leading-none max-w-[118px] cursor-pointer transition-colors"
               >
-                <Bluetooth className="w-2.5 h-2.5 text-sky-400 shrink-0" />
+                <Bluetooth className="w-2.5 h-2.5 shrink-0" style={{ color: themePalette.bluetooth }} />
                 <span className="truncate">
                   {connectedBtDevices[0].name}
                   {typeof connectedBtDevices[0].battery_percent === 'number'
@@ -709,11 +752,11 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
               title={`Audio Output: ${telemetry.audio_device_name}`}
             >
               {telemetry.audio_output_kind === 'bluetooth' ? (
-                <Bluetooth className="w-2.5 h-2.5 text-sky-400 shrink-0" />
+                <Bluetooth className="w-2.5 h-2.5 shrink-0" style={{ color: themePalette.bluetooth }} />
               ) : telemetry.audio_output_kind === 'wired' ? (
-                <Headphones className="w-2.5 h-2.5 text-indigo-300 shrink-0" />
+                <Headphones className="w-2.5 h-2.5 shrink-0" style={{ color: themePalette.volume }} />
               ) : (
-                <Volume2 className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
+                <Volume2 className="w-2.5 h-2.5 shrink-0" style={{ color: themePalette.volume }} />
               )}
               <span className="truncate tabular-nums">{audioOutputLabel}</span>
             </span>

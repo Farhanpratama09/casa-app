@@ -61,31 +61,33 @@ const renderHudIcon = (alert: SystemHudAlert) => {
       return <Sun className="w-3 h-3 shrink-0" style={{ color: 'var(--casa-brightness, #FACC15)' }} />;
     case 'charging':
       return alert.isActive ? (
-        <BatteryCharging className="w-3 h-3 text-emerald-400 shrink-0" />
+        <BatteryCharging className="w-3 h-3 shrink-0" style={{ color: 'var(--casa-rest, #10B981)' }} />
       ) : (
-        <Zap className="w-3 h-3 text-amber-300 shrink-0" />
+        <Zap className="w-3 h-3 shrink-0" style={{ color: 'var(--casa-timer, #F59E0B)' }} />
       );
     case 'low_battery':
-      return <BatteryWarning className="w-3 h-3 text-red-400 shrink-0" />;
+      return <BatteryWarning className="w-3 h-3 shrink-0" style={{ color: 'var(--casa-danger, #F43F5E)' }} />;
     case 'caps_lock':
       return (
         <ArrowBigUpDash
-          className={`w-3 h-3 shrink-0 ${alert.isActive ? 'text-sky-400' : 'text-white/55'}`}
+          className="w-3 h-3 shrink-0"
+          style={{ color: alert.isActive ? 'var(--casa-volume, #38BDF8)' : 'rgba(255,255,255,0.55)' }}
         />
       );
     case 'bluetooth':
       return (
         <Bluetooth
-          className={`w-3 h-3 shrink-0 ${alert.isActive ? 'text-sky-400' : 'text-zinc-400'}`}
+          className="w-3 h-3 shrink-0"
+          style={{ color: alert.isActive ? 'var(--casa-bluetooth, #6366F1)' : '#a1a1aa' }}
         />
       );
     case 'audio_output':
       return alert.audioOutputKind === 'bluetooth' ? (
-        <Bluetooth className="w-3 h-3 text-sky-400 shrink-0" />
+        <Bluetooth className="w-3 h-3 shrink-0" style={{ color: 'var(--casa-bluetooth, #6366F1)' }} />
       ) : alert.audioOutputKind === 'wired' ? (
-        <Headphones className="w-3 h-3 text-indigo-300 shrink-0" />
+        <Headphones className="w-3 h-3 shrink-0" style={{ color: 'var(--casa-volume, #38BDF8)' }} />
       ) : (
-        <Volume2 className="w-3 h-3 text-emerald-400 shrink-0" />
+        <Volume2 className="w-3 h-3 shrink-0" style={{ color: 'var(--casa-volume, #38BDF8)' }} />
       );
   }
 };

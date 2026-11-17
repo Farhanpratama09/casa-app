@@ -1484,8 +1484,8 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           onClick={() => handleQuickSwap(otherSession.session_id)}
           className={
             compact
-              ? 'px-2 py-0.5 rounded-full flex items-center gap-1 text-[10px] font-medium text-[#98BBD6] bg-[#98BBD6]/15 hover:bg-[#98BBD6]/25 border border-[#98BBD6]/30 transition-all shrink-0'
-              : 'px-2.5 h-[28px] rounded-full flex items-center gap-1.5 text-[11px] font-medium text-[#98BBD6] bg-[#98BBD6]/15 hover:bg-[#98BBD6]/25 border border-[#98BBD6]/30 transition-all shrink-0'
+              ? 'px-2 py-0.5 rounded-full flex items-center gap-1 text-[10px] font-medium text-[var(--casa-volume,#38BDF8)] bg-white/[0.08] hover:bg-white/[0.16] border border-white/15 transition-all shrink-0'
+              : 'px-2.5 h-[28px] rounded-full flex items-center gap-1.5 text-[11px] font-medium text-[var(--casa-volume,#38BDF8)] bg-white/[0.08] hover:bg-white/[0.16] border border-white/15 transition-all shrink-0'
           }
           title={`Kontrol ${otherSession.app_name}: ${otherSession.title}`}
         >
@@ -1508,13 +1508,13 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           compact
             ? `px-2 py-0.5 rounded-full flex items-center gap-1 text-[10px] font-semibold transition-all border shrink-0 ${
                 isSessionPopoverOpen
-                  ? 'text-white bg-[#98BBD6]/30 border-[#98BBD6]/50'
-                  : 'text-[#98BBD6] bg-[#98BBD6]/15 hover:bg-[#98BBD6]/25 border-[#98BBD6]/30'
+                  ? 'text-white bg-white/[0.18] border-white/35'
+                  : 'text-[var(--casa-volume,#38BDF8)] bg-white/[0.08] hover:bg-white/[0.15] border-white/15'
               }`
             : `px-2.5 h-[28px] rounded-full flex items-center gap-1 text-[11px] font-semibold transition-all border shrink-0 ${
                 isSessionPopoverOpen
-                  ? 'text-white bg-[#98BBD6]/30 border-[#98BBD6]/50'
-                  : 'text-[#98BBD6] bg-[#98BBD6]/15 hover:bg-[#98BBD6]/25 border-[#98BBD6]/30'
+                  ? 'text-white bg-white/[0.18] border-white/35'
+                  : 'text-[var(--casa-volume,#38BDF8)] bg-white/[0.08] hover:bg-white/[0.15] border-white/15'
               }`
         }
         title="Kelola Multi-Sesi Media Aktif"
@@ -1564,7 +1564,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
                 key={sess.session_id}
                 className={`flex items-center justify-between py-1 px-2.5 gap-1.5 rounded-lg border text-xs transition-colors ${
                   isCurrent
-                    ? 'bg-[#98BBD6]/15 border-[#98BBD6]/30'
+                    ? 'bg-white/[0.12] border-white/25'
                     : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.07]'
                 }`}
               >
@@ -1578,7 +1578,10 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
                   className="flex items-center gap-1.5 min-w-0 flex-1 text-left"
                   title={`${sess.app_name} — ${sess.title}`}
                 >
-                  <span className="text-[10px] font-semibold text-[#98BBD6] shrink-0">
+                  <span
+                    className="text-[10px] font-semibold shrink-0"
+                    style={{ color: 'var(--casa-volume, #38BDF8)' }}
+                  >
                     {sess.app_name}
                   </span>
                   <span className="text-[11px] font-medium text-white truncate max-w-[170px]">
@@ -1603,7 +1606,12 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
 
         <button
           onClick={handlePauseOtherSessions}
-          className="w-full py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-[10px] font-semibold tracking-wide transition-colors text-center flex-shrink-0"
+          style={{
+            color: 'var(--casa-danger, #F43F5E)',
+            borderColor: 'color-mix(in srgb, var(--casa-danger, #F43F5E) 35%, transparent)',
+            backgroundColor: 'color-mix(in srgb, var(--casa-danger, #F43F5E) 14%, transparent)',
+          }}
+          className="w-full py-1 rounded-lg border text-[10px] font-semibold tracking-wide transition-opacity hover:opacity-90 text-center flex-shrink-0 cursor-pointer"
         >
           Pause Sesi Lainnya
         </button>
