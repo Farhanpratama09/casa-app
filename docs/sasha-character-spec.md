@@ -1,33 +1,34 @@
-# Sasha (CASA) — Visual Identity & Character Specification
+# Obsidian Bunny & Sasha — Visual Identity & Character Specification
 
-## 1. Core Identity & Philosophy
-- **Name / Persona**: Sasha (CASA Moon Rabbit Companion).
-- **Archetype**: Playful, aloof, sharp, expressive (ENTP 4w3).
-- **Theme**: Lunar Astronomy × Cyber Lofi.
+## 1. Core Identity & Dual-Era Lineage
+- **Product Persona:** **Obsidian Bunny / Sasha (CASA Companion)** — ikon kelinci asimetris berkepribadian tenang, fokus, dan ekspresif pada kapsul Dynamic Island CASA.
+- **Default Production Aesthetic (`v2.0.x` Pure Monochrome OLED):** Permukaan **Obsidian Pure Black** (`#000000`–`#09090B`) dengan mata ekspresif putih tegas **`× ♥`** (`#FFFFFF`), dioptimalkan untuk layar OLED agar menyatu tanpa pendar warna berlebih (`docs/favicon.svg`, `src/components/companion/CasaCompanionEyes.tsx`).
 
-## 2. Palette & Styling Tokens
-- **Base Background**: `Cosmic Ink` (`#0D0E12`)
-- **Primary Accent**: `Ice Blue` (`#98BBD6`)
-- **Secondary Tone**: `Deep Void` (`#161922`)
-- **Timer Accent**: `Amber Glow` (`#FBBF24` / `text-amber-300`)
-- **Text Primary**: `White 95%` (`text-white/95`)
-- **Text Dim**: `White 40%` (`text-white/40`)
+---
 
-## 3. Anatomical Features
-- **Mata (Signature Eyes)**:
-  - Bentuk: Crescent moon / tareme downward curve (`☽`).
-  - Mata Kiri: Pupil silang (**✖**) Ice Blue.
-  - Mata Kanan: Pupil hati (**♥**) Ice Blue.
-  - Perilaku: Kedip alami acak (3.5–5.5 detik), gaze tracking kursor, resting decay saat kursor menjauh.
-- **Telinga Kelinci Bulan (Asymmetric Ears)**:
-  - Telinga Kiri: Tegak lurus, ramping, bernuansa aerodinamis cyber dengan aksen strip neon Ice Blue.
-  - Telinga Kanan: Menekuk santai (*floppy lop-ear*) dengan cincin cyber perak.
-- **Tubuh & Pose**:
-  - Siluet: Chibi cyber rabbit, bodi bundar proporsional.
-  - Varian Outfit: Cosmic Hoodie dengan emblem sabit, Chassis Robot Keramik dengan lampu dada Ice Blue, atau Peeker Paws di tepi kapsul.
+## 2. Adaptive Palette & Styling Tokens (`useSettingsStore.ts`)
+- **Canvas Surface:** `OLED Black` (`#000000`) & `Elevated Zinc` (`#09090B`), border hairline `rgba(255, 255, 255, 0.08–0.12)`.
+- **Stealth Monochrome (`monochrome`):** 100% putih (`#FFFFFF`) dan abu-abu zinc (`#E4E4E7` / `#A1A1AA` / `#71717A`) — nol aksen hijau/oranye statis.
+- **Default Theme (`default`):** `Amber Focus` (`#F59E0B`), `Emerald Rest` (`#10B981`), `Cyan Volume` (`#38BDF8`), `Fuchsia CPU` (`#E879F9`), `Indigo BT` (`#6366F1`).
+- **Colorblind Theme (`colorblind` / Okabe-Ito):** `#38BDF8`, `#FDE047`, `#EA580C`, `#1D4ED8`.
+- **Legacy Concept Accent:** `Cosmic Ink` (`#0D0E12`) × `Ice Blue` (`#98BBD6`) (dipertahankan sebagai referensi desain awal karakter Sasha).
 
-## 4. Generative AI Prompt Reference (Midjourney / 3D Blender / Stable Diffusion)
-Gunakan prompt ini saat membutuhkan render visual atau aset ilustrasi:
+---
 
-> **Master Prompt**:
-> `3D chibi cybernetic moon rabbit mascot named Sasha, smooth matte dark ceramic chassis (#0D0E12), glowing ice blue neon accents (#98BBD6). Head features asymmetrical rabbit ears: left ear is tall, upright and sharp with a subtle glowing neon strip, right ear is relaxed and folded downward (lop-ear) with a metallic cyber hoop piercing. Iconic expressive glowing eyes shaped like crescent tareme moons: left eye pupil is a glowing stylized cross (✖), right eye pupil is a glowing heart (♥). Wearing an oversized futuristic dark techwear hoodie with subtle lunar crescent line-art. Soft ambient volumetric lighting, raytracing, clean minimal background, Figma 3D icon style, Octane render, 8k resolution.`
+## 3. Anatomical Features (1:1 Native SVG Parity)
+- **Mata Ekspresif (`× ♥`):**
+  - Mata Kiri: Silang presisi (`×`) dengan ujung membulat (`stroke-linecap="round"`).
+  - Mata Kanan: Hati tegas (`♥`).
+  - Varian Konteks: Mode kompak diam (`Resting & Wake`), redup saat tidur (`data-sleep="true"` tanpa penyusutan paksa/vertikal gepeng), serta mode musik/fokus aktif.
+- **Siluet Kelinci Asimetris (`docs/favicon.svg`):**
+  - Telinga Kiri: Tegak ramping ke atas dengan bagian dalam putih kontras.
+  - Telinga Kanan: Terlipat santai ke samping (*lop-ear*) menumpuk gradasi obsidian `#444450 -> #08080B`.
+- **Intro Morph Sequence (`"Hi."` -> Compact Capsule):**
+  - Boot awal menampilkan ikon **Obsidian Bunny** beserta sapaan `"Hi."` di tengah kanvas sebelum menyusut mulus tepat menjadi kapsul kompak `× ♥` di bibir atas layar.
+
+---
+
+## 4. Reference Artwork Prompt (3D Obsidian Edition)
+Gunakan prompt berikut bila membutuhkan render ilustrasi atau materi promosi tambahan:
+
+> `3D minimalist chibi obsidian moon rabbit mascot for CASA, matte pure black obsidian chassis (#09090C) with crisp asymmetric rabbit ears (left upright ear with clean white inner highlight, right folded lop-ear). Iconic glowing pure white minimalist eyes: left eye is a stylized cross (x), right eye is a heart (♥). Pure monochrome OLED aesthetic, sharp rim lighting against pitch black (#000000) background, no neon color leaks, 8k octane studio render.`

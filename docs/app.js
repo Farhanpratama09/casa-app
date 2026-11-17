@@ -10,9 +10,6 @@
   const REPO_NAME = 'casa-app';
   const RELEASES_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases`;
   const RELEASES_PAGE_URL = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases`;
-  const NEW_ISSUE_URL = `https://github.com/${REPO_OWNER}/${REPO_NAME}/issues/new`;
-  const FEEDBACK_ENDPOINT = '';
-  const ALLOWED_FEEDBACK_HOSTS = ['api.web3forms.com', 'formspree.io'];
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const SMALL_RING_C = 31.42; // 2 * PI * 5
@@ -266,7 +263,7 @@
     modeButtons: Array.from(document.querySelectorAll('[data-vm-mode]')),
     replayIntroBtn: $('replay-intro-btn'),
 
-    // Download + Feedback
+    // Download CTA & SHA-256
     primaryDownloadBtn: $('primary-download-btn'),
     primaryDownloadLabel: $('primary-download-label'),
     downloadSizeNote: $('download-size-note'),
@@ -274,12 +271,6 @@
     downloadCountText: $('download-count-text'),
     copyShaBtn: $('copy-sha-btn'),
     shaValueExe: $('sha-value-exe'),
-    feedbackForm: $('feedback-form'),
-    fbName: $('fb-name'),
-    fbCategory: $('fb-category'),
-    fbMessage: $('fb-message'),
-    fbStatus: $('fb-status'),
-    fbFallbackContainer: $('fb-fallback-container'),
   };
 
   function createSvgNode(tag, attrs) {
@@ -1141,6 +1132,7 @@
       download: { elementId: 'download', slug: 'unduh' },
       unduh: { elementId: 'download', slug: 'unduh' },
       feedback: { elementId: 'feedback', slug: 'feedback' },
+      discussions: { elementId: 'feedback', slug: 'feedback' },
     };
 
     const buildRouteUrl = (slug) => (slug ? `${ROUTE_BASE}${slug}` : ROUTE_BASE);
@@ -1901,110 +1893,11 @@
     });
   }
 
-  function isAllowedFeedbackEndpoint(urlStr) {
-    if (!urlStr) return false;
-    try {
-      const parsed = new URL(urlStr);
-      return (
-        parsed.protocol === 'https:' &&
-        ALLOWED_FEEDBACK_HOSTS.some(
-          (host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`)
-        )
-      );
-    } catch (_err) {
-      return false;
-    }
-  }
-
-  function buildGitHubIssueUrl(name, category, message) {
-    const cleanName = (name || 'Anonim').trim();
-    const title = `[${category}] ${message.slice(0, 60)}${message.length > 60 ? '...' : ''}`;
-    const body = [
-      `**Kategori:** ${category}`,
-      `**Pengirim:** ${cleanName}`,
-      '',
-      '**Detail Masukan / Masalah:**',
-      message,
-      '',
-      '---',
-      '_Dikirim melalui CASA Showcase Web_',
-    ].join('\n');
-
-    const params = new URLSearchParams({ title, body });
-    return `${NEW_ISSUE_URL}?${params.toString()}`;
-  }
-
-  function initFeedbackForm() {
-    if (!el.feedbackForm) return;
-
-    el.feedbackForm.addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      clearNode(el.fbFallbackContainer);
-
-      const name = (el.fbName && el.fbName.value ? el.fbName.value : '').trim();
-      const category = (el.fbCategory && el.fbCategory.value ? el.fbCategory.value : 'Bug Report').trim();
-      const message = (el.fbMessage && el.fbMessage.value ? el.fbMessage.value : '').trim();
-
-      if (message.length < 5) {
-        if (el.fbStatus) {
-          el.fbStatus.textContent = 'Tuliskan pesan minimal 5 karakter sebelum mengirim.';
-        }
-        if (el.fbMessage) el.fbMessage.focus();
-        return;
-      }
-
-      if (isAllowedFeedbackEndpoint(FEEDBACK_ENDPOINT)) {
-        if (el.fbStatus) el.fbStatus.textContent = 'Mengirim feedback...';
-        try {
-          const resp = await fetch(FEEDBACK_ENDPOINT, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Accept: 'application/json',
-            },
-            body: JSON.stringify({
-              name: name || 'Anonim',
-              category,
-              message,
-              source: 'casa-showcase',
-            }),
-          });
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-          if (el.fbStatus) {
-            el.fbStatus.textContent = 'Terima kasih! Feedback kamu sudah terkirim.';
-          }
-          el.feedbackForm.reset();
-          return;
-        } catch (_err) {
-          // Fall through cleanly to GitHub Issue fallback
-        }
-      }
-
-      const issueUrl = buildGitHubIssueUrl(name, category, message);
-      window.open(issueUrl, '_blank', 'noopener,noreferrer');
-
-      if (el.fbStatus) {
-        el.fbStatus.textContent = 'Membuka template GitHub Issue siap kirim di tab baru...';
-      }
-
-      if (el.fbFallbackContainer) {
-        const directLink = document.createElement('a');
-        directLink.href = issueUrl;
-        directLink.target = '_blank';
-        directLink.rel = 'noopener noreferrer';
-        directLink.className = 'feedback-fallback-link';
-        directLink.textContent = 'Klik di sini jika tab GitHub Issue belum terbuka ↗';
-        el.fbFallbackContainer.appendChild(directLink);
-      }
-    });
-  }
-
   // Boot
   initCleanNavigation();
   initVirtualMonitorControls();
   initCopyHash();
   initDownloadButtonCooldown();
-  initFeedbackForm();
   syncUI();
   void initSmartReleaseHub();
 })();

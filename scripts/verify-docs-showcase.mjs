@@ -557,7 +557,36 @@ async function main() {
     const overflowDesktop = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth
     );
-    check(!overflowDesktop, 'Desktop 1280x800 zero horizontal overflow');
+    check(
+      !overflowDesktop,
+      'Desktop 1280x800 zero horizontal overflow'
+    );
+
+    // Giscus + CSP verification on Community & Discussions section
+    const giscusAudit = await page.evaluate(() => {
+      const cspMeta = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content') || '';
+      const giscusScript = document.querySelector('#giscus-card script[src="https://giscus.app/client.js"]');
+      return {
+        cspAllowsGiscusScript: /script-src[^;]*https:\/\/giscus\.app/.test(cspMeta),
+        cspAllowsGiscusFrame: /frame-src[^;]*https:\/\/giscus\.app/.test(cspMeta),
+        cspAllowsGiscusStyle: /style-src[^;]*https:\/\/giscus\.app/.test(cspMeta),
+        hasContainer: Boolean(document.querySelector('#feedback #giscus-container.giscus')),
+        repo: giscusScript?.getAttribute('data-repo') || '',
+        repoId: giscusScript?.getAttribute('data-repo-id') || '',
+        categoryId: giscusScript?.getAttribute('data-category-id') || '',
+      };
+    });
+    check(
+      giscusAudit.cspAllowsGiscusScript &&
+        giscusAudit.cspAllowsGiscusFrame &&
+        giscusAudit.cspAllowsGiscusStyle &&
+        giscusAudit.hasContainer &&
+        giscusAudit.repo === 'Farhanpratama09/casa-app' &&
+        giscusAudit.repoId === 'R_kgDOVfEztQ' &&
+        giscusAudit.categoryId === 'DIC_kwDOVfEztc4DLWUK',
+      `Community & Discussions Giscus + CSP verified (${giscusAudit.repo})`
+    );
+
     check(
       consoleErrors.length === 0 && cspErrors.length === 0,
       `Desktop zero console/CSP errors (pageErrors=${consoleErrors.length}, csp=${cspErrors.length})`

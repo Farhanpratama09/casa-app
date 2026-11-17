@@ -2252,67 +2252,54 @@ textarea {
   word-break: break-all;
 }
 
-/* Feedback & Footer */
-.feedback-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
-  align-items: start;
-}
-
-.feedback-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.field-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.field-group {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.field-label {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.field-input,
-.field-select,
-.field-textarea {
-  width: 100%;
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
   border-radius: 8px;
   border: 1px solid var(--border-subtle);
-  background: #000000;
+  background: var(--bg-surface);
   color: #ffffff;
-  font-size: 13px;
-  padding: 9px 11px;
-}
-
-.field-textarea {
-  min-height: 96px;
-  resize: vertical;
-}
-
-.feedback-status {
-  margin: 0;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.feedback-fallback-link {
-  display: inline-block;
-  margin-top: 6px;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
-  text-decoration: underline;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.btn-secondary:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-elevated);
+  transform: translateY(-1px);
+}
+
+/* Community & Discussions (Giscus) */
+.discussions-header-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.discussions-quick-links {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.giscus-card {
+  padding: 20px;
+  min-height: 220px;
+}
+
+.giscus-card .giscus,
+.giscus-card .giscus-frame {
+  width: 100%;
 }
 
 .site-footer {
@@ -2443,10 +2430,12 @@ textarea {
 
   .vm-split-panel,
   .vm-desktop-files,
-  .feature-grid,
-  .feedback-grid,
-  .field-row {
+  .feature-grid {
     grid-template-columns: 1fr;
+  }
+
+  .giscus-card {
+    padding: 14px;
   }
 
   .download-cta-col {

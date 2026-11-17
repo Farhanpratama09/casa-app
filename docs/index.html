@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta
     http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://api.github.com https://api.web3forms.com https://formspree.io; base-uri 'self'; object-src 'none'; form-action 'self' https://github.com https://api.web3forms.com https://formspree.io;"
+    content="default-src 'self'; script-src 'self' https://giscus.app; style-src 'self' https://fonts.googleapis.com https://giscus.app; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://avatars.githubusercontent.com; frame-src 'self' https://giscus.app; connect-src 'self' https://api.github.com https://giscus.app; base-uri 'self'; object-src 'none'; form-action 'self' https://github.com;"
   />
   <meta name="theme-color" content="#000000" />
   <title>CASA — Dynamic Rabbit Island for Windows</title>
@@ -889,68 +889,59 @@
     </section>
 
     <!-- ====================================================================
-         FEEDBACK & FEATURE REQUESTS
+         COMMUNITY & DISCUSSIONS (GISCUS / GITHUB DISCUSSIONS)
          ==================================================================== -->
     <section id="feedback" class="section-block">
       <div class="container">
-        <div class="feedback-grid">
+        <div class="discussions-header-row">
           <div>
-            <span class="section-eyebrow">Community &amp; Triage</span>
-            <h2 class="section-title">Feedback &amp; Feature Requests</h2>
+            <span class="section-eyebrow">Community &amp; Discussions</span>
+            <h2 class="section-title">Community &amp; Discussions</h2>
             <p class="section-desc">
-              Temukan bug multi-monitor DPI atau ingin mengusulkan integrasi baru?
-              Kirim masukan langsung atau buka template GitHub Issue otomatis.
+              Diskusikan ide fitur, laporkan kendala DPI multi-monitor Windows, atau bagikan konfigurasi CASA milikmu langsung melalui GitHub Discussions terintegrasi (Giscus).
             </p>
           </div>
 
-          <div class="oled-card">
-            <form id="feedback-form" class="feedback-form" novalidate>
-              <div class="field-row">
-                <div class="field-group">
-                  <label for="fb-name" class="field-label">Nama / Handle (opsional)</label>
-                  <input
-                    id="fb-name"
-                    name="name"
-                    type="text"
-                    maxlength="64"
-                    class="field-input"
-                    placeholder="cth. @farhan"
-                    autocomplete="name"
-                  />
-                </div>
-
-                <div class="field-group">
-                  <label for="fb-category" class="field-label">Kategori</label>
-                  <select id="fb-category" name="category" class="field-select">
-                    <option value="Bug Report">Bug Report</option>
-                    <option value="Ide Fitur">Ide Fitur</option>
-                    <option value="Masukan UI">Masukan UI</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="field-group">
-                <label for="fb-message" class="field-label">Pesan / Detail Lingkungan</label>
-                <textarea
-                  id="fb-message"
-                  name="message"
-                  required
-                  maxlength="1500"
-                  class="field-textarea"
-                  placeholder="Jelaskan masalah, ide fitur, atau detail monitor Windows kamu..."
-                ></textarea>
-              </div>
-
-              <div>
-                <button type="submit" id="fb-submit-btn" class="btn-primary">
-                  <span>Kirim Feedback</span>
-                </button>
-              </div>
-
-              <p id="fb-status" class="feedback-status" role="status" aria-live="polite"></p>
-              <div id="fb-fallback-container"></div>
-            </form>
+          <div class="discussions-quick-links">
+            <a
+              href="https://github.com/Farhanpratama09/casa-app/discussions"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn-secondary"
+            >
+              <span>GitHub Discussions ↗</span>
+            </a>
+            <a
+              href="https://github.com/Farhanpratama09/casa-app/issues/new"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn-secondary"
+            >
+              <span>Laporkan Bug Issue ↗</span>
+            </a>
           </div>
+        </div>
+
+        <div class="oled-card giscus-card" id="giscus-card">
+          <div class="giscus" id="giscus-container"></div>
+          <script
+            src="https://giscus.app/client.js"
+            data-repo="Farhanpratama09/casa-app"
+            data-repo-id="R_kgDOVfEztQ"
+            data-category="General"
+            data-category-id="DIC_kwDOVfEztc4DLWUK"
+            data-mapping="specific"
+            data-term="CASA Community &amp; Discussions"
+            data-strict="0"
+            data-reactions-enabled="1"
+            data-emit-metadata="0"
+            data-input-position="top"
+            data-theme="transparent_dark"
+            data-lang="id"
+            data-loading="lazy"
+            crossorigin="anonymous"
+            async
+          ></script>
         </div>
       </div>
     </section>

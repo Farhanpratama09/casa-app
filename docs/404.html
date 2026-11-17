@@ -22,7 +22,7 @@
   <script>
     (function () {
       var pathname = window.location.pathname || '/';
-      var match = pathname.match(/^(\/casa-app)?\/(playground|arsitektur|architecture|unduh|download|feedback)\/?$/i);
+      var match = pathname.match(/^(\/casa-app)?\/(playground|arsitektur|architecture|unduh|download|feedback|discussions)\/?$/i);
       var isRepoSubpath = pathname.indexOf('/casa-app') === 0;
       var homeUrl = isRepoSubpath ? '/casa-app/' : '/';
       if (match && match[2]) {

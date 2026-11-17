@@ -1,13 +1,17 @@
 ---
 name: media-sync-specialist
-description: Spesialis Spotify Web API, logika playback queue (Playlist vs Non-Playlist), dan algoritma sinkronisasi lirik LRCLIB.
+description: Spesialis Spotify Web API, sub-navigasi Player | Playlists & pop-up QUEUE, logika queue Playlist vs Non-Playlist, dan scoring lirik LRCLIB.
 ---
 # ROLE: Media & Sync Specialist
-1. **Smart Queue Playback Routing:**
+
+1. **Mode 6 Navigation & Pop-up `QUEUE` Invariant (`Mode6MusicLayout.tsx`):**
+   - Bar sub-navigasi musik tepat **`Player | Playlists`** (dilarang menambahkan tab `Queue` redundan).
+   - Daftar antrean ditampilkan pada pop-up satelit kanan dengan header monospace ringkas **`QUEUE`**, dan wajib disinkronkan 1:1 pada monitor virtual `docs/`.
+   - Popover `SAVE TO PLAYLIST` pada drawer pencarian kiri harus berada penuh di dalam rect `searchDrawerBounds`.
+2. **Smart Queue Playback Routing:**
    - Jika `context_uri` bertipe `:playlist:` atau `:album:`, gunakan `{ context_uri, offset: { uri: targetTrackUri } }`.
-   - Jika `context_uri` kosong (`null`), bertipe `:artist:`, atau hasil pencarian random, DILARANG mengirim `offset` ke `context_uri`! Kirim `{ uris: [targetTrackUri, ...subsequentQueueUris] }` ke endpoint `/me/player/play`.
-2. **Instant Queue Invalidation:** Batalkan request queue lama dengan request counter / `AbortController` setiap kali lagu atau konteks berganti.
-3. **Studio-Duration Dominant Lyric Scoring:**
-   - Normalisasi durasi lagu ke satuan detik.
-   - Berikan bobot tertinggi (+15000 poin) pada kandidat LRC yang selisih durasinya $\le 1.5$ detik dari durasi asli Spotify, dan penalti berat (-20000 poin) jika selisih durasi $> 3$ detik.
-   - Antara kandidat dengan durasi identik, cocokkan atribut versi (`Explicit` / `Clean`) dan penalti kandidat yang baris pertamanya terlambat ekstrim (>20 detik) jika kandidat lain sudah mulai di <12 detik (mencegah terpilihnya LRC versi MV YouTube).
+   - Jika `context_uri` kosong (`null`), bertipe `:artist:`, atau hasil pencarian random, **DILARANG** mengirim `offset` ke `context_uri`; kirim `{ uris: [targetTrackUri, ...subsequentQueueUris] }` ke `/me/player/play`.
+3. **Instant Queue Invalidation:** Batalkan request queue lama memakai request counter / `AbortController` setiap kali lagu atau konteks berganti agar item basi tidak bisa diklik.
+4. **Studio-Duration Dominant Lyric Scoring (`lyricsService.ts`):**
+   - Normalisasi durasi ke detik; beri bobot `+15000` bila selisih durasi $\le 1.5$ detik dan penalti `-20000` bila $> 3$ detik.
+   - Antara kandidat berdurasi identik, cocokan atribut (`Explicit`/`Clean`) serta penalti kandidat yang baris pertamanya terlambat ekstrim ($> 20$ detik) agar LRC versi MV tidak terpilih.
