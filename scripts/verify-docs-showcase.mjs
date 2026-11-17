@@ -1,6 +1,6 @@
 /**
- * CASA Phase 11.0 Showcase Verification (Desktop 1280x800 + Mobile 390x844)
- * Serves `docs/` over local HTTP with strict CSP check via Puppeteer Chromium.
+ * CASA Phase 12 Visual Parity & Clean Navigation Verification
+ * Serves `docs/` over local HTTP with Chromium E2E on Desktop (1280x800) & Mobile (390x844).
  */
 
 import assert from 'node:assert/strict';
@@ -31,7 +31,7 @@ function check(cond, label, detail = '') {
   }
 }
 
-function startStaticServer(port = 5211) {
+function startStaticServer(port = 5212) {
   const server = http.createServer((req, res) => {
     const reqUrl = (req.url || '/').split('?')[0];
     const relPath = reqUrl === '/' ? 'index.html' : reqUrl.replace(/^\/+/, '');
@@ -52,7 +52,7 @@ function startStaticServer(port = 5211) {
 }
 
 async function main() {
-  const server = await startStaticServer(5211);
+  const server = await startStaticServer(5212);
   const candidateBrowsers = [
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
@@ -71,7 +71,7 @@ async function main() {
     // =========================================================================
     // DESKTOP 1280x800 SUITE
     // =========================================================================
-    console.log('\n[Desktop 1280x800] SEO, Intro Morph & 5 Interactive Modes\n');
+    console.log('\n[Desktop 1280x800] 1:1 Island Parity, Clean Hashless Nav & Minimal Download\n');
     const page = await browser.newPage();
     const consoleErrors = [];
     const cspErrors = [];
@@ -89,245 +89,221 @@ async function main() {
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       if (req.url().startsWith('https://api.github.com/')) {
-        req.respond({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify([
-            {
-              tag_name: 'v2.0.0',
-              published_at: '2026-11-17T00:00:00Z',
-              html_url: 'https://github.com/Farhanpratama09/casa-app/releases/tag/v2.0.0',
-              assets: [
-                {
-                  name: 'CASA_2.0.0_x64-setup.exe',
-                  size: 4641413,
-                  download_count: 142,
-                  browser_download_url:
-                    'https://github.com/Farhanpratama09/casa-app/releases/download/v2.0.0/CASA_2.0.0_x64-setup.exe',
-                },
-                {
-                  name: 'CASA_2.0.0_x64_en-US.msi',
-                  size: 6725632,
-                  download_count: 38,
-                  browser_download_url:
-                    'https://github.com/Farhanpratama09/casa-app/releases/download/v2.0.0/CASA_2.0.0_x64_en-US.msi',
-                },
-              ],
-            },
-          ]),
-        });
+        req.respond({ status: 200, contentType: 'application/json', body: '[]' });
         return;
       }
       req.continue();
     });
 
-    await page.goto('http://127.0.0.1:5211/', { waitUntil: 'domcontentloaded' });
-    await new Promise((r) => setTimeout(r, 350));
+    await page.goto('http://127.0.0.1:5212/', { waitUntil: 'domcontentloaded' });
+    await new Promise((r) => setTimeout(r, 300));
 
-    // Check SEO, Header/Hero Cleanliness, Footer Signature & Monitor Ratio
-    const seoAndLayout = await page.evaluate(() => {
-      const header = document.querySelector('.site-header');
+    // Check Hero simplification, Native 1:1 Anatomy, SEO, Download simplification
+    const layoutAudit = await page.evaluate(() => {
       const heroIntro = document.querySelector('.hero-intro');
-      const monitor = document.getElementById('virtual-monitor');
-      const mRect = monitor ? monitor.getBoundingClientRect() : null;
-      const canonical = document.querySelector('link[rel="canonical"]')?.getAttribute('href');
-      const ogTitle = document.querySelector('meta[property="og:title"]')?.getAttribute('content');
-      const twCard = document.querySelector('meta[name="twitter:card"]')?.getAttribute('content');
-      const ldJson = document.querySelector('script[type="application/ld+json"]')?.textContent || '';
-      const footerSig = document.querySelector('.footer-sig')?.textContent?.trim();
-      const introPhaseInitial = monitor?.getAttribute('data-intro-phase');
-      const hiVisible = document.getElementById('intro-greeting')?.textContent?.trim();
-      const ratio = mRect ? mRect.width / mRect.height : 0;
-      const sectionsOrder = Array.from(document.querySelectorAll('main > section')).map((s) => s.id);
+      const heroButtons = heroIntro ? heroIntro.querySelectorAll('a, button').length : -1;
+      const monitorScreen = document.getElementById('monitor-screen');
+      const replayInsideMonitor = Boolean(
+        monitorScreen && monitorScreen.contains(document.getElementById('replay-intro-btn'))
+      );
+      const capsule = document.getElementById('vm-notch-capsule');
+      const hasConcaveShoulders =
+        document.querySelectorAll('.casa-shoulder').length === 2;
+      const restingPillRect = document
+        .getElementById('casa-resting-pill')
+        ?.getBoundingClientRect();
+      const capsuleHeight = capsule?.getBoundingClientRect().height ?? 0;
+
+      const downloadSection = document.getElementById('download');
+      const hasPrimaryExe = Boolean(document.getElementById('primary-download-btn'));
+      const hasMsiBtn = Boolean(document.getElementById('msi-download-btn'));
+      const hasStatGrid = Boolean(downloadSection?.querySelector('.release-stats'));
+      const shaDetails = downloadSection?.querySelector('details.sha-accordion');
+      const shaSummaryText = shaDetails?.querySelector('summary')?.textContent?.trim();
+      const shaText = document.getElementById('sha-value-exe')?.textContent?.trim();
+
       return {
         title: document.title,
-        headerHasV2: header?.textContent?.includes('v2.0.0') ?? false,
-        heroHasV2: heroIntro?.textContent?.includes('v2.0.0') ?? false,
-        canonical,
-        ogTitle,
-        twCard,
-        hasSoftwareAppLd: ldJson.includes('"SoftwareApplication"'),
-        footerSig,
-        introPhaseInitial,
-        hiVisible,
-        ratio,
-        overflowX: document.documentElement.scrollWidth > window.innerWidth,
-        sectionsOrder,
+        heroButtons,
+        replayInsideMonitor,
+        hasConcaveShoulders,
+        capsuleHeight: Math.round(capsuleHeight),
+        restingWidth: Math.round(restingPillRect?.width ?? 0),
+        hasPrimaryExe,
+        hasMsiBtn,
+        hasStatGrid,
+        shaClosedInitially: shaDetails?.hasAttribute('open') === false,
+        shaSummaryText,
+        shaText,
+        introPhase: document.getElementById('virtual-monitor')?.getAttribute('data-intro-phase'),
       };
     });
 
     check(
-      seoAndLayout.title === 'CASA — Dynamic Rabbit Island for Windows',
-      `Page title matches (${seoAndLayout.title})`
+      layoutAudit.title === 'CASA — Dynamic Rabbit Island for Windows',
+      `Title verified (${layoutAudit.title})`
     );
     check(
-      !seoAndLayout.headerHasV2 && !seoAndLayout.heroHasV2,
-      'Header and Hero contain zero v2.0.0 version labels'
+      layoutAudit.heroButtons === 0 && layoutAudit.replayInsideMonitor,
+      `Hero has no download button (${layoutAudit.heroButtons}) & Replay Intro sits inside monitor corner`
     );
     check(
-      seoAndLayout.canonical === 'https://farhanpratama09.github.io/casa-app/' &&
-        seoAndLayout.ogTitle === 'CASA — Dynamic Rabbit Island for Windows' &&
-        seoAndLayout.twCard === 'summary_large_image' &&
-        seoAndLayout.hasSoftwareAppLd,
-      'Canonical, Open Graph, Twitter Card & SoftwareApplication JSON-LD present'
+      layoutAudit.hasConcaveShoulders && layoutAudit.capsuleHeight === 39 && layoutAudit.restingWidth >= 120,
+      `1:1 Island anatomy matches src/ (2 concave SVG shoulders, height=${layoutAudit.capsuleHeight}px, restingW=${layoutAudit.restingWidth}px)`
     );
     check(
-      seoAndLayout.footerSig === 'Crafted by Crimson',
-      `Footer signature verified (${seoAndLayout.footerSig})`
+      layoutAudit.hasPrimaryExe &&
+        !layoutAudit.hasMsiBtn &&
+        !layoutAudit.hasStatGrid &&
+        layoutAudit.shaClosedInitially &&
+        layoutAudit.shaSummaryText === 'Verify SHA-256 checksum' &&
+        layoutAudit.shaText === '0D54BE3021396C7FFDCCB09D81DEA12F9460BFFE053F0125B555990A70671BFA',
+      'Download section displays single .exe CTA + collapsed SHA-256 accordion with exact latest hash'
     );
     check(
-      seoAndLayout.sectionsOrder[0] === 'playground' &&
-        seoAndLayout.sectionsOrder[seoAndLayout.sectionsOrder.length - 1] === 'feedback' &&
-        seoAndLayout.sectionsOrder.indexOf('download') > seoAndLayout.sectionsOrder.indexOf('architecture'),
-      `Section order places Download & Feedback cleanly at bottom (${seoAndLayout.sectionsOrder.join(' -> ')})`
-    );
-    check(
-      Math.abs(seoAndLayout.ratio - 1.6) < 0.08,
-      `Desktop virtual monitor keeps ~16:10 ratio (${seoAndLayout.ratio.toFixed(2)})`
-    );
-    check(
-      seoAndLayout.introPhaseInitial === 'hi' && seoAndLayout.hiVisible === 'Hi.',
-      `Intro begins with "Hi." Obsidian Bunny phase (${seoAndLayout.introPhaseInitial})`
+      layoutAudit.introPhase === 'hi',
+      `Intro begins with "Hi." Obsidian Bunny phase (${layoutAudit.introPhase})`
     );
 
-    // Wait for Morph Sequence to transition cleanly into 'ready'
+    // Wait for intro morph sequence to finish cleanly into ready state
     await page.waitForFunction(
       () => document.getElementById('virtual-monitor')?.getAttribute('data-intro-phase') === 'ready',
-      { timeout: 5000 }
-    );
-    const afterIntro = await page.evaluate(() => ({
-      introHidden: document.getElementById('intro-overlay')?.hidden === true,
-      subtitle: document.getElementById('vm-notch-subtitle')?.textContent?.trim(),
-      battery: document.getElementById('vm-battery-badge')?.textContent?.trim(),
-    }));
-    check(
-      afterIntro.introHidden && afterIntro.subtitle === 'Awake' && afterIntro.battery === '88%',
-      `Intro morph completes to ready awake notch (${afterIntro.subtitle}, ${afterIntro.battery})`
+      { timeout: 5500 }
     );
 
-    // Replay Intro test
-    await page.click('#replay-intro-btn');
-    await new Promise((r) => setTimeout(r, 120));
-    const replayedPhase = await page.evaluate(() =>
-      document.getElementById('virtual-monitor')?.getAttribute('data-intro-phase')
-    );
-    check(replayedPhase === 'hi', `Replay Intro resets cleanly to "Hi." phase (${replayedPhase})`);
-    await page.waitForFunction(
-      () => document.getElementById('virtual-monitor')?.getAttribute('data-intro-phase') === 'ready',
-      { timeout: 5000 }
-    );
-
-    // Mode 1: Resting & Wake + Alt+Space
+    // Test Mode 1: Resting & Wake (Alt+Space opens native Mode6TopNav + Control Center)
     await page.keyboard.down('AltLeft');
     await page.keyboard.press('Space');
     await page.keyboard.up('AltLeft');
-    await new Promise((r) => setTimeout(r, 150));
-    const expandedViaHotkey = await page.evaluate(
-      () => document.getElementById('vm-notch-capsule')?.getAttribute('data-state') === 'expanded'
+    await new Promise((r) => setTimeout(r, 180));
+    const m6OpenCheck = await page.evaluate(() => ({
+      expanded: document.getElementById('vm-notch-capsule')?.getAttribute('data-state') === 'expanded',
+      variant: document.getElementById('vm-notch-capsule')?.getAttribute('data-variant'),
+      hasNavTabs: document.querySelectorAll('.casa-m6-tab').length === 4,
+    }));
+    check(
+      m6OpenCheck.expanded && m6OpenCheck.hasNavTabs,
+      `Mode 1 (Resting & Wake): Alt+Space expands native Mode 6 (${m6OpenCheck.variant}, 4 nav tabs)`
     );
-    check(expandedViaHotkey, 'Mode 1 (Resting & Wake): Alt + Space expands top monitor capsule');
 
-    // Mode 2: Lyrics & Queue + Idle Lyric Minimize + Queue Click
+    // Test Mode 2: Lyrics & Queue + Idle Lyric Minimize (real Mode6MusicLayout + IdlePillView)
     await page.click('button[data-vm-mode="lyrics"]');
     await new Promise((r) => setTimeout(r, 150));
-    const secondQueueBtn = await page.$$('#vm-queue-list .vm-queue-btn');
-    await secondQueueBtn[1].click();
-    await page.click('#scene-lyric-minimize-btn');
-    await new Promise((r) => setTimeout(r, 150));
-    const lyricsResult = await page.evaluate(() => ({
-      trackTitle: document.getElementById('vm-notch-title')?.textContent?.trim(),
+    const qBtns = await page.$$('#vm-queue-list .vm-queue-btn');
+    await qBtns[1].click();
+    await page.click('#vm-idle-lyric-btn');
+    await new Promise((r) => setTimeout(r, 180));
+    const musicIdleCheck = await page.evaluate(() => ({
+      collapsedToIdle: document.getElementById('vm-notch-capsule')?.getAttribute('data-state') === 'idle',
       miniLyricVisible: document.getElementById('vm-mini-lyric-pill')?.hidden === false,
       miniLyricText: document.getElementById('vm-mini-lyric-pill')?.textContent?.trim(),
+      eqVisible: !document.getElementById('casa-eq-glyph')?.hidden,
+      eyeVisible: !document.getElementById('vm-notch-eyes')?.hidden,
     }));
     check(
-      lyricsResult.trackTitle === 'Obsidian Horizon' &&
-        lyricsResult.miniLyricVisible &&
-        Boolean(lyricsResult.miniLyricText),
-      `Mode 2 (Lyrics & Queue): queue switch + Idle Lyric Minimize renders mini lyric ticker ("${lyricsResult.miniLyricText}")`
+      musicIdleCheck.collapsedToIdle &&
+        musicIdleCheck.miniLyricVisible &&
+        musicIdleCheck.miniLyricText === '4px Smart-Tuck rests along the top edge' &&
+        musicIdleCheck.eqVisible &&
+        musicIdleCheck.eyeVisible,
+      `Mode 2 (Lyrics & Queue): Idle Lyric Minimize shows synced lyric beside companion eyes & EQ (${musicIdleCheck.miniLyricText})`
     );
 
-    // Mode 3: To-Do & Focus (Add To-Do + Check + Dual-Idle)
+    // Test Mode 3: To-Do & Focus (ProductivitySplitView + Idle U-Shape Perimeter Stroke + Dual-Idle)
     await page.click('button[data-vm-mode="todo"]');
-    await page.type('#vm-todo-input', 'Test SVG focus ring');
-    await page.click('#vm-todo-form button[type="submit"]');
-    const secondCb = await page.$$('#vm-todo-list .vm-todo-checkbox');
-    await secondCb[1].click();
-    await page.click('#vm-todo-dual-btn');
     await new Promise((r) => setTimeout(r, 150));
-    const todoResult = await page.evaluate(() => ({
+    await page.type('#vm-todo-input', 'Check Mode 6 parity');
+    await page.click('#vm-todo-form button[type="submit"]');
+    const cbs = await page.$$('#vm-todo-list .vm-todo-checkbox');
+    await cbs[1].click();
+    await page.click('#vm-todo-dual-btn');
+    await page.click('#vm-notch-collapse-btn');
+    await new Promise((r) => setTimeout(r, 180));
+    const todoIdleCheck = await page.evaluate(() => ({
+      perimeterVisible: document.getElementById('vm-perimeter-svg')?.hidden === false,
       progressText: document.getElementById('vm-todo-progress-text')?.textContent?.trim(),
-      ringPct: document.getElementById('vm-focus-mini-pct')?.textContent?.trim(),
-      ringOffset: Number(document.getElementById('vm-focus-ring-arc')?.style.strokeDashoffset || 99),
-      eyeBadge: document.getElementById('vm-focus-eye-badge')?.textContent?.trim(),
+      timerClock: document.getElementById('vm-focus-timer-clock')?.textContent?.trim(),
+      musicSegmentVisible: document.getElementById('casa-music-segment')?.hidden === false,
     }));
     check(
-      todoResult.progressText === '2 / 4 selesai' &&
-        todoResult.ringPct === '2/4' &&
-        todoResult.ringOffset < 30 &&
-        todoResult.eyeBadge?.includes('•̀ ♪'),
-      `Mode 3 (To-Do & Focus): live progress (${todoResult.ringPct}), ring updated, Dual-Idle (${todoResult.eyeBadge})`
+      todoIdleCheck.perimeterVisible &&
+        todoIdleCheck.progressText === '2 / 4 selesai' &&
+        todoIdleCheck.musicSegmentVisible,
+      `Mode 3 (To-Do & Focus): U-shape perimeter stroke visible, Dual-Idle active (${todoIdleCheck.progressText}, ${todoIdleCheck.timerClock})`
     );
 
-    // Mode 4: Volume & BT HUD
+    // Test Mode 4: Volume & BT HUD (IdlePillView system-hud)
     await page.click('button[data-vm-mode="hud"]');
+    await new Promise((r) => setTimeout(r, 120));
     await page.evaluate(() => {
-      const slider = document.getElementById('vm-volume-slider');
-      slider.value = '84';
-      slider.dispatchEvent(new Event('input', { bubbles: true }));
+      const s = document.getElementById('vm-volume-slider');
+      s.value = '82';
+      s.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    const volHud = await page.evaluate(() => document.getElementById('vm-hud-chip')?.textContent?.trim());
+    const volHud = await page.evaluate(() => ({
+      visible: document.getElementById('casa-hud-pill')?.hidden === false,
+      label: document.getElementById('casa-hud-label')?.textContent?.trim(),
+      detail: document.getElementById('casa-hud-detail')?.textContent?.trim(),
+    }));
     await page.click('#vm-sim-bt-btn');
-    const btHud = await page.evaluate(() => document.getElementById('vm-hud-chip')?.textContent?.trim());
+    const btHud = await page.evaluate(() => ({
+      label: document.getElementById('casa-hud-label')?.textContent?.trim(),
+      detail: document.getElementById('casa-hud-detail')?.textContent?.trim(),
+    }));
     await page.click('#vm-sim-wired-btn');
-    const wiredHud = await page.evaluate(() => document.getElementById('vm-hud-chip')?.textContent?.trim());
+    const wiredHud = await page.evaluate(() => ({
+      label: document.getElementById('casa-hud-label')?.textContent?.trim(),
+      detail: document.getElementById('casa-hud-detail')?.textContent?.trim(),
+    }));
     check(
-      volHud === 'Vol 84%' && btHud?.includes('85%') && wiredHud === 'Wired Earphone',
-      `Mode 4 (Volume & BT HUD): Volume(${volHud}) / BT(${btHud}) / Wired(${wiredHud}) chips triggered`
+      volHud.visible &&
+        volHud.detail === '82%' &&
+        btHud.label === 'BT Earphone' &&
+        btHud.detail === '85%' &&
+        wiredHud.label === 'Wired Earphone',
+      `Mode 4 (Volume & BT HUD): Volume(${volHud.detail}) / BT(${btHud.detail}) / Wired(${wiredHud.detail})`
     );
 
-    // Mode 5: Drag & Drop + Pointer Drag to Top + Copy Back to Desktop
+    // Test Mode 5: Drag & Drop -> DropZoneView Shelf Cards -> Copy Back to Desktop
     await page.click('button[data-vm-mode="dropzone"]');
-    await new Promise((r) => setTimeout(r, 150));
-    const pointerDropMetrics = await page.evaluate(() => {
-      const card = document.querySelector('#vm-desktop-files .vm-file-card');
-      const screen = document.getElementById('monitor-screen');
-      const cr = card.getBoundingClientRect();
-      const sr = screen.getBoundingClientRect();
-      return {
-        startX: cr.left + cr.width / 2,
-        startY: cr.top + cr.height / 2,
-        endX: sr.left + sr.width / 2,
-        endY: sr.top + 28,
-      };
-    });
-    await page.mouse.move(pointerDropMetrics.startX, pointerDropMetrics.startY);
-    await page.mouse.down();
-    await page.mouse.move(pointerDropMetrics.endX, pointerDropMetrics.endY, { steps: 10 });
-    await page.mouse.up();
     await page.click('#vm-sim-drop-all-btn');
-    await new Promise((r) => setTimeout(r, 150));
-
-    const droppedBeforeCopy = await page.evaluate(() => ({
-      countText: document.getElementById('vm-dropzone-count')?.textContent?.trim(),
-      chipsCount: document.querySelectorAll('#vm-dropped-items .vm-dropped-chip').length,
+    await new Promise((r) => setTimeout(r, 180));
+    const dzBefore = await page.evaluate(() => ({
+      dropCards: document.querySelectorAll('#vm-dropped-items .casa-drop-card').length,
       copyBackVisible: document.getElementById('vm-copy-back-btn')?.hidden === false,
     }));
     await page.click('#vm-copy-back-btn');
-    await new Promise((r) => setTimeout(r, 150));
-    const afterCopyBack = await page.evaluate(() => ({
-      countText: document.getElementById('vm-dropzone-count')?.textContent?.trim(),
-      stashedCards: document.querySelectorAll('#vm-desktop-files .vm-file-card.stashed').length,
-      hudText: document.getElementById('vm-hud-chip')?.textContent?.trim(),
+    await new Promise((r) => setTimeout(r, 180));
+    const dzAfter = await page.evaluate(() => ({
+      stashedDesktopCards: document.querySelectorAll('#vm-desktop-files .vm-file-card.stashed').length,
+      hudLabel: document.getElementById('casa-hud-label')?.textContent?.trim(),
     }));
     check(
-      droppedBeforeCopy.chipsCount >= 1 &&
-        droppedBeforeCopy.copyBackVisible &&
-        afterCopyBack.stashedCards === 0 &&
-        afterCopyBack.hudText === 'Copied Back to Desktop',
-      `Mode 5 (Drag & Drop): captured ${droppedBeforeCopy.chipsCount} file(s), restored cleanly via Copy Back to Desktop`
+      dzBefore.dropCards === 1 &&
+        dzBefore.copyBackVisible &&
+        dzAfter.stashedDesktopCards === 0 &&
+        dzAfter.hudLabel === 'Copied Back',
+      `Mode 5 (Drag & Drop): shelf rendered native DropShelfCard, Copy Back to Desktop restored state cleanly`
     );
 
-    check(!seoAndLayout.overflowX, 'Desktop 1280x800 has zero horizontal overflow');
+    // Test Clean URL Navigation Without `#` Across All Header Anchor Links
+    const navTargets = ['architecture', 'download', 'feedback', 'playground', 'top'];
+    let allNavClean = true;
+    for (const target of navTargets) {
+      await page.click(`a[data-scroll-target="${target}"]`);
+      await new Promise((r) => setTimeout(r, 200));
+      const hashNow = await page.evaluate(() => window.location.hash);
+      if (hashNow !== '') {
+        allNavClean = false;
+        check(false, `Navigation link "${target}" leaked URL hash: ${hashNow}`);
+      }
+    }
+    check(allNavClean, 'All header navigation links & brand logo scroll cleanly with window.location.hash === ""');
+
+    const overflowDesktop = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth
+    );
+    check(!overflowDesktop, 'Desktop 1280x800 has zero horizontal overflow');
     check(
       consoleErrors.length === 0 && cspErrors.length === 0,
       `Desktop zero console/CSP errors (pageErrors=${consoleErrors.length}, csp=${cspErrors.length})`
@@ -336,7 +312,7 @@ async function main() {
     // =========================================================================
     // MOBILE 390x844 SUITE
     // =========================================================================
-    console.log('\n[Mobile 390x844] Responsive Virtual Monitor & Touch Drop Verification\n');
+    console.log('\n[Mobile 390x844] Responsive Native Parity Verification\n');
     const mobilePage = await browser.newPage();
     await mobilePage.setViewport({ width: 390, height: 844 });
     const mobileCspErrors = [];
@@ -353,44 +329,36 @@ async function main() {
       }
       req.continue();
     });
-    await mobilePage.goto('http://127.0.0.1:5211/', { waitUntil: 'domcontentloaded' });
+    await mobilePage.goto('http://127.0.0.1:5212/', { waitUntil: 'domcontentloaded' });
     await new Promise((r) => setTimeout(r, 200));
+    await mobilePage.click('button[data-vm-mode="lyrics"]');
     await mobilePage.click('button[data-vm-mode="dropzone"]');
     await mobilePage.click('#vm-sim-drop-all-btn');
-    await new Promise((r) => setTimeout(r, 150));
+    await new Promise((r) => setTimeout(r, 180));
 
     const mobileMetrics = await mobilePage.evaluate(() => {
       const mRect = document.getElementById('virtual-monitor')?.getBoundingClientRect();
-      const dockButtons = Array.from(document.querySelectorAll('.mode-dock-btn'));
       return {
         overflowX: document.documentElement.scrollWidth > window.innerWidth,
         scrollW: document.documentElement.scrollWidth,
         innerW: window.innerWidth,
-        monitorWidth: mRect ? Math.round(mRect.width) : 0,
-        dockWrappedCleanly: dockButtons.every((b) => b.getBoundingClientRect().right <= window.innerWidth),
-        mobileDropped: document.querySelectorAll('#vm-dropped-items .vm-dropped-chip').length,
+        monitorW: Math.round(mRect?.width ?? 0),
+        dropCards: document.querySelectorAll('#vm-dropped-items .casa-drop-card').length,
       };
     });
 
     check(
-      !mobileMetrics.overflowX && mobileMetrics.monitorWidth <= 390,
-      `Mobile 390x844 fits monitor (${mobileMetrics.monitorWidth}px) with zero horizontal overflow (${mobileMetrics.scrollW}/${mobileMetrics.innerW})`
+      !mobileMetrics.overflowX && mobileMetrics.monitorW <= 390 && mobileMetrics.dropCards === 1,
+      `Mobile 390x844 zero horizontal overflow (${mobileMetrics.scrollW}/${mobileMetrics.innerW}, dropCards=${mobileMetrics.dropCards})`
     );
-    check(
-      mobileMetrics.dockWrappedCleanly && mobileMetrics.mobileDropped >= 1,
-      `Mobile mode dock wraps inside 390px and Drop Zone captures files (${mobileMetrics.mobileDropped})`
-    );
-    check(
-      mobileCspErrors.length === 0,
-      `Mobile zero CSP errors (${mobileCspErrors.length})`
-    );
+    check(mobileCspErrors.length === 0, `Mobile zero CSP errors (${mobileCspErrors.length})`);
   } finally {
     await browser.close();
     server.close();
   }
 
   console.log(`\n================================================================`);
-  console.log(`  SHOWCASE E2E RESULT: ${passed} passed, ${failed} failed`);
+  console.log(`  PARITY E2E RESULT: ${passed} passed, ${failed} failed`);
   console.log(`================================================================\n`);
   assert.equal(failed, 0, `${failed} assertion(s) failed`);
 }

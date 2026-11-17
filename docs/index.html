@@ -21,7 +21,7 @@
   <meta property="og:title" content="CASA — Dynamic Rabbit Island for Windows" />
   <meta
     property="og:description"
-    content="Ambient desktop notch &amp; companion for Windows: kapsul interaktif monokrom di bibir atas monitor untuk musik, lirik, fokus Pomodoro, HUD perangkat keras, dan rak Drop Zone."
+    content="Ambient desktop notch &amp; companion for Windows: kapsul interaktif di bibir atas monitor untuk musik, lirik berjalan, fokus Pomodoro, HUD perangkat keras, dan Drop Zone."
   />
   <meta property="og:url" content="https://farhanpratama09.github.io/casa-app/" />
 
@@ -30,7 +30,7 @@
   <meta name="twitter:title" content="CASA — Dynamic Rabbit Island for Windows" />
   <meta
     name="twitter:description"
-    content="Ambient desktop notch &amp; companion for Windows dengan kontrol musik, lirik sinkron, Focus To-Do, HUD perangkat keras, dan Drag &amp; Drop."
+    content="Ambient desktop notch &amp; companion for Windows dengan pemutar musik, lirik berjalan, Focus To-Do, HUD audio/Bluetooth, dan Drop Zone."
   />
 
   <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
@@ -64,20 +64,20 @@
 </head>
 <body>
   <!-- ======================================================================
-       HEADER NAV (Minimal Monochrome, No Fixed Notch Collision, No Version Pill)
+       HEADER NAV (Minimal Monochrome, Clean URL Navigation Without #)
        ====================================================================== -->
   <header class="site-header">
     <div class="container header-inner">
-      <a href="#top" class="brand-link">
+      <a href="#top" data-scroll-target="top" class="brand-link">
         <img src="./favicon.svg" alt="" class="brand-logo" width="22" height="22" />
         <span>CASA</span>
       </a>
 
       <nav class="header-nav" aria-label="Navigasi Utama">
-        <a href="#playground">Playground</a>
-        <a href="#architecture">Arsitektur</a>
-        <a href="#download">Unduh</a>
-        <a href="#feedback">Feedback</a>
+        <a href="#playground" data-scroll-target="playground">Playground</a>
+        <a href="#architecture" data-scroll-target="architecture">Arsitektur</a>
+        <a href="#download" data-scroll-target="download">Unduh</a>
+        <a href="#feedback" data-scroll-target="feedback">Feedback</a>
       </nav>
 
       <a
@@ -94,29 +94,16 @@
 
   <main id="top">
     <!-- ====================================================================
-         HERO COPYWRITING + VIRTUAL MONITOR PLAYGROUND
+         FOCUSED HERO COPYWRITING + 1:1 VIRTUAL MONITOR SHOWCASE
          ==================================================================== -->
     <section id="playground" class="hero-showcase">
       <div class="container">
         <div class="hero-intro">
           <h1 class="hero-title">CASA — Dynamic Rabbit Island for Windows</h1>
           <p class="hero-lead">
-            Sebuah pulau ambient monokrom di bibir atas layar Windows. Menghadirkan ekspresi kelinci reaktif,
-            lirik berjalan, cincin fokus To-Do, HUD perangkat keras, serta rak Drop Zone tanpa memenuhi desktop.
+            Pulau ambient monokrom di bibir atas layar Windows untuk musik, lirik berjalan,
+            cincin fokus To-Do, HUD audio/Bluetooth, dan rak Drop Zone tanpa memenuhi desktop.
           </p>
-          <div class="hero-quick-links">
-            <a href="#download" id="hero-download-btn" class="btn-primary">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-              <span>Unduh Installer Windows</span>
-            </a>
-            <button type="button" id="replay-intro-btn" class="btn-secondary">
-              <span>Replay Intro</span>
-            </button>
-          </div>
         </div>
 
         <!-- VIRTUAL MONITOR FRAME (16:10 Desktop Ratio) -->
@@ -128,9 +115,13 @@
             data-mode="resting"
             aria-label="Monitor Virtual Simulasi CASA"
           >
-            <!-- Subtle Monitor Chrome Frame -->
             <div class="monitor-screen" id="monitor-screen">
-              <!-- Intro Boot Sequence Layer ("Hi." -> Obsidian Bunny shrinks to Notch Resting -> Wake) -->
+              <!-- Subtle Corner Replay Intro Trigger -->
+              <button type="button" id="replay-intro-btn" class="vm-replay-btn">
+                Replay Intro
+              </button>
+
+              <!-- Intro Boot Sequence Layer ("Hi." -> Obsidian Bunny shrinks to bezel -> Resting -> Wake) -->
               <div class="intro-overlay" id="intro-overlay" hidden>
                 <div class="intro-bunny-wrap" id="intro-bunny-wrap">
                   <svg
@@ -179,105 +170,435 @@
                 <div class="intro-greeting" id="intro-greeting">Hi.</div>
               </div>
 
-              <!-- MONITOR TOP-LIP CASA NOTCH CAPSULE -->
+              <!-- ==============================================================
+                   1:1 TOP-FLUSH NATIVE CASA NOTCH ASSEMBLY (CONCAVE SHOULDERS)
+                   ============================================================== -->
               <div class="vm-notch-mount" id="vm-notch-mount">
-                <div
-                  id="vm-notch-capsule"
-                  class="vm-notch-capsule"
-                  data-state="idle"
-                  role="region"
-                  aria-label="Kapsul CASA di Bezel Atas Monitor"
-                >
-                  <!-- Compact / Resting / Idle / Lyric Mini Row -->
-                  <div class="vm-notch-pill-row" id="vm-notch-pill-row">
-                    <div class="vm-notch-left">
-                      <svg
-                        id="vm-notch-eyes"
-                        class="vm-notch-eyes"
-                        viewBox="0 0 34 16"
-                        aria-hidden="true"
-                      ></svg>
-                      <span class="vm-notch-sep" aria-hidden="true"></span>
-                      <span id="vm-notch-title" class="vm-notch-title tabular">09:41</span>
-                      <span id="vm-notch-subtitle" class="vm-notch-subtitle">Resting</span>
-                    </div>
+                <div class="casa-notch-assembly" id="casa-notch-assembly">
+                  <!-- Bahu Kiri Inverse Corner Radius (exact src/components/CasaIsland.tsx SVG) -->
+                  <svg
+                    width="11"
+                    height="10"
+                    viewBox="0 0 11 10"
+                    fill="none"
+                    aria-hidden="true"
+                    class="casa-shoulder casa-shoulder-left"
+                  >
+                    <path d="M 0,0 H 11 V 10 H 10 A 10,10 0 0 0 0,0 Z" fill="#000000" />
+                  </svg>
 
-                    <div class="vm-notch-right">
-                      <!-- Mini Lyric Strip when Idle Lyric Minimize is Active -->
-                      <span id="vm-mini-lyric-pill" class="vm-mini-lyric-pill" hidden></span>
-                      <!-- Hardware HUD Pill -->
-                      <span id="vm-hud-chip" class="vm-hud-chip" hidden></span>
-                      <!-- Focus Progress Mini Ring + Countdown -->
-                      <span id="vm-focus-ring-wrap" class="vm-focus-ring-wrap" hidden>
-                        <svg viewBox="0 0 20 20" class="vm-focus-ring-svg" aria-hidden="true">
-                          <circle cx="10" cy="10" r="7.5" class="vm-ring-track" />
-                          <circle cx="10" cy="10" r="7.5" id="vm-focus-ring-arc" class="vm-ring-arc" />
+                  <!-- Bahu Kanan Inverse Corner Radius -->
+                  <svg
+                    width="11"
+                    height="10"
+                    viewBox="0 0 11 10"
+                    fill="none"
+                    aria-hidden="true"
+                    class="casa-shoulder casa-shoulder-right"
+                  >
+                    <path d="M 0,0 H 11 A 10,10 0 0 0 1,10 H 0 V 0 Z" fill="#000000" />
+                  </svg>
+
+                  <div
+                    id="vm-notch-capsule"
+                    class="vm-notch-capsule"
+                    data-state="idle"
+                    data-variant="idle"
+                    role="region"
+                    aria-label="Kapsul CASA di Bezel Atas Monitor"
+                  >
+                    <!-- Open U-Shape Perimeter Timer Border (mirrors CasaIsland.tsx U-path) -->
+                    <svg
+                      id="vm-perimeter-svg"
+                      class="vm-perimeter-svg"
+                      viewBox="0 0 240 39"
+                      preserveAspectRatio="none"
+                      aria-hidden="true"
+                      hidden
+                    >
+                      <path
+                        id="vm-perimeter-path"
+                        d="M 1,0 L 1,23 A 15,15 0 0 0 16,38 L 224,38 A 15,15 0 0 0 239,23 L 239,0"
+                        fill="none"
+                        stroke="#ffffff"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        pathLength="100"
+                        stroke-dasharray="100 100"
+                        stroke-dashoffset="25"
+                      />
+                    </svg>
+
+                    <!-- IDLE LAYER (h: 39px, exact IdlePillView.tsx modes 1-5 & System HUD) -->
+                    <div class="vm-idle-layer" id="vm-idle-layer">
+                      <!-- Mode 1: RestingPill (126x39px, ONLY scaled × ♥ eyes at slow opacity) -->
+                      <div class="casa-resting-pill" id="casa-resting-pill" hidden>
+                        <svg viewBox="0 0 18 18" class="casa-resting-eye" aria-hidden="true">
+                          <path
+                            d="M 3.5,3.5 L 14.5,14.5 M 14.5,3.5 L 3.5,14.5"
+                            fill="none"
+                            stroke="#ffffff"
+                            stroke-width="2.4"
+                            stroke-linecap="round"
+                          />
                         </svg>
-                        <span id="vm-focus-mini-pct" class="tabular">1/3</span>
-                      </span>
-                      <span id="vm-battery-badge" class="vm-battery-badge tabular">88%</span>
-                    </div>
-                  </div>
+                        <svg viewBox="0 0 18 18" class="casa-resting-eye" aria-hidden="true">
+                          <path
+                            d="M 9,15.2 L 8.1,14.4 C 4.2,10.9 2.2,8.9 2.2,6.2 C 2.2,4.1 3.9,2.5 5.9,2.5 C 7.2,2.5 8.3,3.2 9,4.3 C 9.7,3.2 10.8,2.5 12.1,2.5 C 14.1,2.5 15.8,4.1 15.8,6.2 C 15.8,8.9 13.8,10.9 9.9,14.4 Z"
+                            fill="#ffffff"
+                          />
+                        </svg>
+                      </div>
 
-                  <!-- Expanded Mode 6 Capsule Panel (Control / Music / Focus / Drop Zone) -->
-                  <div class="vm-notch-expanded" id="vm-notch-expanded" hidden>
-                    <div class="vm-exp-header">
-                      <span id="vm-exp-mode-title" class="vm-exp-heading">CASA Capsule</span>
-                      <div class="vm-exp-actions">
-                        <span class="vm-exp-meta tabular" id="vm-exp-clock">09:41</span>
-                        <button type="button" id="vm-notch-collapse-btn" class="vm-chip-btn">Tutup</button>
+                      <!-- Mode HUD: Transient System HUD Pill -->
+                      <div class="casa-hud-pill" id="casa-hud-pill" hidden>
+                        <span id="casa-hud-icon" class="casa-hud-icon" aria-hidden="true"></span>
+                        <span id="casa-hud-label" class="casa-hud-label">Volume</span>
+                        <div class="casa-hud-bar-wrap" id="casa-hud-bar-wrap" hidden>
+                          <div class="casa-hud-bar-fill" id="casa-hud-bar-fill"></div>
+                        </div>
+                        <span id="casa-hud-detail" class="casa-hud-detail tabular">68%</span>
+                      </div>
+
+                      <!-- Modes Standby / Music-Idle / Timer-Idle / Dual-Idle -->
+                      <div class="casa-active-pill" id="casa-active-pill">
+                        <div class="casa-avatar-slot" id="casa-avatar-slot">
+                          <svg
+                            id="vm-notch-eyes"
+                            class="casa-companion-svg"
+                            viewBox="0 0 34 16"
+                            aria-hidden="true"
+                          ></svg>
+                        </div>
+
+                        <span class="casa-vert-divider" id="casa-left-divider" aria-hidden="true"></span>
+
+                        <!-- Standby: Time · Date -->
+                        <div class="casa-clock-date" id="casa-standby-segment">
+                          <span id="vm-notch-title" class="casa-pill-time tabular">09:41</span>
+                          <span class="casa-pill-sep">·</span>
+                          <span id="vm-notch-date" class="casa-pill-date tabular">Sel, 17 Nov</span>
+                        </div>
+
+                        <!-- Music / Idle Lyric Segment -->
+                        <div class="casa-music-segment" id="casa-music-segment" hidden>
+                          <div class="casa-marquee-text" id="vm-pill-track-wrap">
+                            <span class="casa-pill-song" id="vm-pill-song">Midnight Coding</span>
+                            <span class="casa-pill-sep" id="vm-pill-song-sep">•</span>
+                            <span class="casa-pill-artist" id="vm-pill-artist">Lo-Fi Bunny</span>
+                          </div>
+                          <span class="casa-lyric-ticker" id="vm-mini-lyric-pill" hidden></span>
+                          <div class="casa-eq-glyph" id="casa-eq-glyph" aria-hidden="true">
+                            <span class="eq-bar eq-1"></span>
+                            <span class="eq-bar eq-2"></span>
+                            <span class="eq-bar eq-3"></span>
+                          </div>
+                        </div>
+
+                        <span class="casa-vert-divider" id="casa-mid-divider" hidden aria-hidden="true"></span>
+
+                        <!-- Timer / Focus Ring Segment -->
+                        <div class="casa-timer-segment" id="casa-timer-segment" hidden>
+                          <svg class="casa-mini-ring" viewBox="0 0 14 14" aria-hidden="true">
+                            <circle cx="7" cy="7" r="5" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="1.8" />
+                            <circle
+                              id="vm-focus-ring-arc"
+                              cx="7"
+                              cy="7"
+                              r="5"
+                              fill="none"
+                              stroke="#ffffff"
+                              stroke-width="1.8"
+                              stroke-linecap="round"
+                              stroke-dasharray="31.42"
+                              stroke-dashoffset="20.9"
+                            />
+                          </svg>
+                          <span id="vm-focus-task-label" class="casa-focus-task">Audit border</span>
+                          <span class="casa-pill-sep">·</span>
+                          <span id="vm-focus-timer-clock" class="casa-focus-mmss tabular">18:45</span>
+                        </div>
+
+                        <!-- Drop Zone File Count Badge / Battery Ring -->
+                        <span class="casa-vert-divider" id="casa-right-divider" aria-hidden="true"></span>
+
+                        <div class="casa-battery-pill" id="vm-battery-badge">
+                          <svg class="casa-battery-ring" viewBox="0 0 16 16" aria-hidden="true">
+                            <circle cx="8" cy="8" r="6.3" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1.7" />
+                            <circle
+                              cx="8"
+                              cy="8"
+                              r="6.3"
+                              fill="none"
+                              stroke="#E4E4E7"
+                              stroke-width="1.7"
+                              stroke-linecap="round"
+                              stroke-dasharray="39.58"
+                              stroke-dashoffset="4.75"
+                            />
+                          </svg>
+                          <span class="casa-battery-pct tabular">88%</span>
+                        </div>
                       </div>
                     </div>
 
-                    <!-- Expanded Subview: Control & Wake -->
-                    <div class="vm-exp-body" id="vm-exp-control">
-                      <div class="vm-exp-row">
-                        <div>
-                          <div class="vm-exp-item-title">Obsidian Companion</div>
-                          <div class="vm-exp-item-sub">Status aktif • Pintasan Alt + Space</div>
-                        </div>
-                        <button type="button" id="vm-exp-rest-btn" class="vm-chip-btn">Masuk Resting</button>
-                      </div>
-                    </div>
-
-                    <!-- Expanded Subview: Music + Idle Lyric Minimize -->
-                    <div class="vm-exp-body" id="vm-exp-music" hidden>
-                      <div class="vm-exp-music-row">
-                        <div class="vm-exp-music-meta">
-                          <div class="vm-exp-item-title" id="vm-exp-track-title">Midnight Coding</div>
-                          <div class="vm-exp-item-sub" id="vm-exp-track-artist">Lo-Fi Bunny</div>
-                          <div class="vm-exp-lyric-preview" id="vm-exp-lyric-line">Pure monochrome focus on Windows.</div>
-                        </div>
-                        <div class="vm-exp-btn-stack">
-                          <button type="button" id="vm-idle-lyric-btn" class="vm-chip-btn">Idle Lyric Minimize</button>
-                          <button type="button" id="vm-exp-play-btn" class="vm-chip-btn">Pause</button>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- Expanded Subview: Focus Progress -->
-                    <div class="vm-exp-body" id="vm-exp-focus" hidden>
-                      <div class="vm-exp-row">
-                        <div>
-                          <div class="vm-exp-item-title" id="vm-exp-focus-label">Sesi Fokus • 25:00</div>
-                          <div class="vm-exp-item-sub" id="vm-exp-focus-sub">1 / 3 To-Do selesai</div>
-                        </div>
-                        <button type="button" id="vm-exp-timer-btn" class="vm-chip-btn">Jeda Timer</button>
-                      </div>
-                    </div>
-
-                    <!-- Expanded Subview: Drop Zone Shelf -->
-                    <div class="vm-exp-body" id="vm-exp-dropzone" hidden>
-                      <div class="vm-dropzone-shelf" id="vm-dropzone-shelf">
-                        <div class="vm-dropzone-prompt" id="vm-dropzone-prompt">
-                          Lepaskan file di sini untuk menyimpan sementara
-                        </div>
-                        <div class="vm-dropped-items" id="vm-dropped-items"></div>
-                        <div class="vm-dropzone-footer">
-                          <span id="vm-dropzone-count" class="vm-exp-item-sub tabular">0 file di rak</span>
-                          <button type="button" id="vm-copy-back-btn" class="vm-chip-btn primary" hidden>
-                            Copy Back to Desktop
+                    <!-- ========================================================
+                         MODE 6 EXPANDED LAYER (1:1 Port of Mode6TopNav + Panels)
+                         ======================================================== -->
+                    <div class="vm-expanded-layer" id="vm-expanded-layer" hidden>
+                      <!-- 1:1 Mode6TopNav Header (h: 34px) -->
+                      <header class="casa-m6-header">
+                        <div class="casa-m6-head-left">
+                          <button type="button" id="vm-m6-eyes-btn" class="casa-m6-eye-btn" title="Mode Resting / Companion">
+                            <svg id="vm-m6-eyes" class="casa-companion-svg" viewBox="0 0 34 16" aria-hidden="true"></svg>
                           </button>
+                        </div>
+
+                        <nav class="casa-m6-nav" aria-label="Mode 6 Navigation">
+                          <button type="button" class="casa-m6-tab" data-m6-tab="music" aria-selected="false">Musik</button>
+                          <button type="button" class="casa-m6-tab" data-m6-tab="todo" aria-selected="false">Focus &amp; Tasks</button>
+                          <button type="button" class="casa-m6-tab" data-m6-tab="hud" aria-selected="false">Control Center</button>
+                          <button type="button" class="casa-m6-tab" data-m6-tab="dropzone" aria-selected="false">
+                            <span>Drop Zone</span>
+                            <span class="casa-m6-drop-badge tabular" id="vm-m6-drop-badge" hidden>0</span>
+                          </button>
+                        </nav>
+
+                        <div class="casa-m6-head-right">
+                          <button
+                            type="button"
+                            id="vm-notch-collapse-btn"
+                            class="casa-m6-icon-btn"
+                            title="Tutup Mode 6 ke Idle"
+                            aria-label="Tutup Mode 6"
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                              <polyline points="18 15 12 9 6 15" />
+                            </svg>
+                          </button>
+                        </div>
+                      </header>
+
+                      <!-- Mode 6 Content Body -->
+                      <div class="casa-m6-body">
+                        <!-- Panel A: Mode6MusicLayout + LyricsPanel + Queue -->
+                        <div class="casa-m6-panel casa-m6-music" id="vm-exp-music" hidden>
+                          <div class="casa-music-main">
+                            <div class="casa-music-subnav">
+                              <div class="casa-sub-pills">
+                                <button type="button" class="casa-sub-pill" data-music-sub="player" aria-pressed="true">Player</button>
+                                <button type="button" class="casa-sub-pill" data-music-sub="queue" aria-pressed="false">Queue</button>
+                              </div>
+                              <span class="casa-output-pill" id="vm-exp-audio-pill">
+                                <span id="vm-exp-audio-label">Speakers</span>
+                              </span>
+                            </div>
+
+                            <!-- Player Sub-view -->
+                            <div class="casa-music-player" id="vm-music-sub-player">
+                              <div class="casa-track-row">
+                                <div class="casa-track-left">
+                                  <div class="casa-cover-tile" aria-hidden="true">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                      <path d="M9 18V5l12-2v13" />
+                                      <circle cx="6" cy="18" r="3" />
+                                      <circle cx="18" cy="16" r="3" />
+                                    </svg>
+                                  </div>
+                                  <div class="casa-track-meta">
+                                    <div class="casa-track-title" id="vm-exp-track-title">Midnight Coding</div>
+                                    <div class="casa-track-artist" id="vm-exp-track-artist">Lo-Fi Bunny · SMTC</div>
+                                  </div>
+                                </div>
+                                <div class="casa-track-actions">
+                                  <button type="button" id="vm-exp-lyrics-toggle" class="casa-circle-btn active" title="Tampilkan Lirik">
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                                      <line x1="21" y1="6" x2="3" y2="6" />
+                                      <line x1="15" y1="12" x2="3" y2="12" />
+                                      <line x1="17" y1="18" x2="3" y2="18" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div class="casa-scrubber-row">
+                                <span class="casa-scrub-time tabular" id="vm-scrub-elapsed">0:42</span>
+                                <div class="casa-scrub-track">
+                                  <div class="casa-scrub-fill" id="vm-scrub-fill"></div>
+                                </div>
+                                <span class="casa-scrub-time tabular" id="vm-scrub-total">3:12</span>
+                              </div>
+
+                              <div class="casa-transport-row">
+                                <button type="button" id="vm-exp-prev-btn" class="casa-t-btn" aria-label="Sebelumnya">
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <polygon points="19 20 9 12 19 4 19 20" />
+                                    <line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="2" />
+                                  </svg>
+                                </button>
+                                <button type="button" id="vm-exp-play-btn" class="casa-t-play-btn" aria-label="Play / Pause">
+                                  Pause
+                                </button>
+                                <button type="button" id="vm-exp-next-btn" class="casa-t-btn" aria-label="Berikutnya">
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <polygon points="5 4 15 12 5 20 5 4" />
+                                    <line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </div>
+
+                            <!-- Embedded Queue View inside Mode 6 -->
+                            <div class="casa-music-queue" id="vm-music-sub-queue" hidden>
+                              <div class="casa-queue-mini-list" id="vm-exp-queue-list"></div>
+                            </div>
+                          </div>
+
+                          <!-- Right Split: On-Demand Lyrics + Idle Lyrics Minimize -->
+                          <div class="casa-music-lyrics-pane" id="vm-exp-lyrics-pane">
+                            <div class="casa-lyrics-head">
+                              <span class="casa-lyrics-eyebrow">LYRICS</span>
+                              <button type="button" id="vm-idle-lyric-btn" class="casa-idle-lyrics-chip">
+                                <span>Idle Lyric Minimize</span>
+                                <span class="casa-chip-dot" aria-hidden="true"></span>
+                              </button>
+                            </div>
+                            <div class="casa-lyrics-scroll" id="vm-exp-lyrics-scroll"></div>
+                          </div>
+                        </div>
+
+                        <!-- Panel B: ProductivitySplitView (74x74 Focus Ring Left | Time-Blocking Tasks Right) -->
+                        <div class="casa-m6-panel casa-m6-focus" id="vm-exp-focus" hidden>
+                          <div class="casa-prod-left">
+                            <div class="casa-prod-head">
+                              <span class="casa-prod-title" id="vm-exp-focus-task-head">Focus Timer</span>
+                              <span class="casa-prod-pct tabular" id="vm-exp-focus-ends">25% · 18:45</span>
+                            </div>
+                            <div class="casa-prod-body">
+                              <div class="casa-ring-74">
+                                <svg viewBox="0 0 74 74" class="casa-ring-74-svg" aria-hidden="true">
+                                  <circle cx="37" cy="37" r="30" stroke="rgba(255,255,255,0.10)" stroke-width="4.5" fill="none" />
+                                  <circle
+                                    id="vm-exp-ring-arc"
+                                    cx="37"
+                                    cy="37"
+                                    r="30"
+                                    stroke="#ffffff"
+                                    stroke-width="4.5"
+                                    stroke-dasharray="188.5"
+                                    stroke-dashoffset="141.3"
+                                    stroke-linecap="round"
+                                    fill="none"
+                                  />
+                                </svg>
+                                <div class="casa-ring-inner">
+                                  <span class="casa-ring-num tabular" id="vm-exp-ring-pct">33%</span>
+                                  <span class="casa-ring-sub">FOCUS</span>
+                                </div>
+                              </div>
+                              <div class="casa-prod-controls">
+                                <div class="casa-timer-digits tabular" id="vm-exp-timer-digits">18:45</div>
+                                <div class="casa-preset-row">
+                                  <button type="button" class="casa-preset-chip" data-preset-mins="5">5m</button>
+                                  <button type="button" class="casa-preset-chip active" data-preset-mins="25">25m</button>
+                                  <button type="button" class="casa-preset-chip" data-preset-mins="50">50m</button>
+                                </div>
+                                <div class="casa-timer-btns">
+                                  <button type="button" id="vm-exp-timer-btn" class="casa-btn-pill-white">Pause</button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div class="casa-prod-right">
+                            <div class="casa-prod-head">
+                              <span class="casa-prod-title">Time-Blocking &amp; Tasks</span>
+                              <span class="casa-todo-badge tabular" id="vm-exp-todo-count">1/3</span>
+                            </div>
+                            <div class="casa-exp-todo-list" id="vm-exp-todo-list"></div>
+                          </div>
+                        </div>
+
+                        <!-- Panel C: Mode6ControlCenterView (Tiles + CPU/RAM + SmoothOledSlider) -->
+                        <div class="casa-m6-panel casa-m6-control" id="vm-exp-control" hidden>
+                          <div class="casa-cc-tiles">
+                            <div class="casa-cc-tile">
+                              <span class="casa-cc-label">Wi-Fi</span>
+                              <span class="casa-cc-sub" id="vm-cc-wifi-sub">Studio_5G</span>
+                            </div>
+                            <button type="button" id="vm-cc-bt-btn" class="casa-cc-tile active">
+                              <span class="casa-cc-label">BT</span>
+                              <span class="casa-cc-sub" id="vm-cc-bt-sub">Earphone · 85%</span>
+                            </button>
+                            <button type="button" id="vm-cc-wired-btn" class="casa-cc-tile">
+                              <span class="casa-cc-label">Wired</span>
+                              <span class="casa-cc-sub" id="vm-cc-wired-sub">Audio Output</span>
+                            </button>
+                            <button type="button" id="vm-exp-rest-btn" class="casa-cc-tile">
+                              <span class="casa-cc-label">Sleep</span>
+                              <span class="casa-cc-sub">Mode Resting</span>
+                            </button>
+                          </div>
+
+                          <div class="casa-cc-telemetry">
+                            <div class="casa-cc-radial-card">
+                              <svg viewBox="0 0 36 36" class="casa-cc-ring" aria-hidden="true">
+                                <circle cx="18" cy="18" r="13.5" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3.5" />
+                                <circle cx="18" cy="18" r="13.5" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="84.8" stroke-dashoffset="64.4" transform="rotate(-90 18 18)" />
+                              </svg>
+                              <div>
+                                <div class="casa-cc-val tabular">24%</div>
+                                <div class="casa-cc-meta">CPU Processor</div>
+                              </div>
+                            </div>
+                            <div class="casa-cc-radial-card">
+                              <svg viewBox="0 0 36 36" class="casa-cc-ring" aria-hidden="true">
+                                <circle cx="18" cy="18" r="13.5" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3.5" />
+                                <circle cx="18" cy="18" r="13.5" fill="none" stroke="#a1a1aa" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="84.8" stroke-dashoffset="39.8" transform="rotate(-90 18 18)" />
+                              </svg>
+                              <div>
+                                <div class="casa-cc-val tabular">53%</div>
+                                <div class="casa-cc-meta">8.4 / 16 GB RAM</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div class="casa-cc-sliders">
+                            <div class="casa-cc-slider-box">
+                              <span class="casa-cc-slider-name">Vol</span>
+                              <div class="casa-cc-slider-bar">
+                                <div class="casa-cc-slider-fill" id="vm-cc-vol-fill"></div>
+                              </div>
+                              <span class="casa-cc-slider-val tabular" id="vm-cc-vol-val">68%</span>
+                            </div>
+                            <div class="casa-cc-slider-box">
+                              <span class="casa-cc-slider-name">Bright</span>
+                              <div class="casa-cc-slider-bar">
+                                <div class="casa-cc-slider-fill casa-cc-slider-fill-bright"></div>
+                              </div>
+                              <span class="casa-cc-slider-val tabular">80%</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <!-- Panel D: DropZoneView (1:1 Header Bar + Shelf Cards + Copy Back to Desktop) -->
+                        <div class="casa-m6-panel casa-m6-dropzone" id="vm-exp-dropzone" hidden>
+                          <div class="casa-dz-head">
+                            <span id="vm-dropzone-count" class="casa-dz-title tabular">Drop Zone Shelf</span>
+                            <div class="casa-dz-head-actions">
+                              <button type="button" id="vm-copy-back-btn" class="casa-dz-pill-btn primary" hidden>
+                                Copy Back to Desktop
+                              </button>
+                            </div>
+                          </div>
+
+                          <div class="casa-dz-body">
+                            <div class="casa-dz-empty" id="vm-dropzone-prompt">
+                              Drop files here or drag from desktop area below
+                            </div>
+                            <div class="casa-dropped-items" id="vm-dropped-items"></div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -285,9 +606,8 @@
                 </div>
               </div>
 
-              <!-- DESKTOP STAGE INSIDE VIRTUAL MONITOR (Changes Dynamically per Selected Mode) -->
+              <!-- DESKTOP INTERACTIVE WORKSPACE INSIDE MONITOR (5 SCENARIO WORKSPACES) -->
               <div class="monitor-desktop" id="monitor-desktop">
-                <!-- Wallpaper Ambient Subtle Grid -->
                 <div class="monitor-grid-bg" aria-hidden="true"></div>
 
                 <!-- Scenario 1: Resting & Wake -->
@@ -330,7 +650,7 @@
                   <div class="vm-split-panel">
                     <div class="vm-panel-box">
                       <div class="vm-panel-head">
-                        <span class="vm-panel-eyebrow">Workspace To-Do</span>
+                        <span class="vm-panel-eyebrow">Time-Blocking &amp; Tasks</span>
                         <span class="vm-panel-tag tabular" id="vm-todo-progress-text">1 / 3 selesai</span>
                       </div>
                       <ul class="vm-todo-list" id="vm-todo-list"></ul>
@@ -340,7 +660,7 @@
                           id="vm-todo-input"
                           class="vm-todo-input"
                           maxlength="48"
-                          placeholder="+ Tambah tugas fokus baru..."
+                          placeholder="+ Add a task..."
                         />
                         <button type="submit" class="vm-mini-action">Tambah</button>
                       </form>
@@ -348,11 +668,11 @@
 
                     <div class="vm-panel-box vm-focus-summary-box">
                       <div class="vm-panel-head">
-                        <span class="vm-panel-eyebrow">Notch Focus Ring &amp; Eyes</span>
+                        <span class="vm-panel-eyebrow">Notch Ring &amp; Eyes</span>
                         <span class="vm-panel-tag" id="vm-focus-eye-badge">•̀ ♥ Focus</span>
                       </div>
                       <p class="vm-focus-hint">
-                        Mencentang tugas langsung memperbarui cincin fokus di kapsul atas. Gabungkan musik &amp; timer untuk mode Dual-Idle (•̀ ♪).
+                        Mencentang tugas memperbarui progres cincin fokus pada kapsul atas. Aktifkan musik untuk mode Dual-Idle (•̀ ♪).
                       </p>
                       <div class="vm-inline-controls">
                         <button type="button" id="vm-todo-dual-btn" class="vm-mini-action">Toggle Dual-Idle (•̀ ♪)</button>
@@ -385,19 +705,19 @@
 
                     <div class="vm-inline-controls">
                       <button type="button" id="vm-sim-bt-btn" class="vm-action-btn">
-                        Connect BT Earphone · 85%
+                        BT Earphone · 85%
                       </button>
                       <button type="button" id="vm-sim-wired-btn" class="vm-action-btn">
-                        Switch Wired Earphone
+                        Wired Earphone
                       </button>
                     </div>
                   </div>
                 </section>
 
-                <!-- Scenario 5: Drag & Drop (Drop Zone) -->
+                <!-- Scenario 5: Drag & Drop -->
                 <section class="vm-scene" id="scene-dropzone" hidden aria-label="Skenario Drag and Drop Drop Zone">
                   <div class="vm-drop-header">
-                    <span class="vm-panel-eyebrow">Seret kartu ke bibir atas monitor atau gunakan Simulate Drop</span>
+                    <span class="vm-panel-eyebrow">Seret kartu ke kapsul atas atau klik Simulate Drop</span>
                     <button type="button" id="vm-sim-drop-all-btn" class="vm-mini-action">
                       Simulate Drop
                     </button>
@@ -408,7 +728,6 @@
             </div>
           </div>
 
-          <!-- Monitor Neck & Base Stand (Minimal OLED Silhouette) -->
           <div class="monitor-stand" aria-hidden="true">
             <div class="monitor-neck"></div>
             <div class="monitor-foot"></div>
@@ -478,27 +797,21 @@
     </section>
 
     <!-- ====================================================================
-         DOWNLOAD & VERIFICATION HUB (MOVED TO BOTTOM)
+         SIMPLIFIED DOWNLOAD SECTION AT PAGE BOTTOM
          ==================================================================== -->
     <section id="download" class="section-block">
       <div class="container">
-        <div class="section-header">
-          <span class="section-eyebrow">Windows Release</span>
-          <h2 class="section-title">Unduh CASA untuk Windows 64-bit</h2>
-          <p class="section-desc">
-            Installer ringkas dengan verifikasi checksum SHA-256 dan panduan Windows SmartScreen.
-          </p>
-        </div>
-
-        <div class="release-grid">
-          <div class="oled-card">
-            <div class="release-badge-row">
-              <span class="release-pill accent" id="release-version-badge">v2.0.0 Latest</span>
-              <span class="release-pill">Windows 10 / 11 x64</span>
-              <span class="release-pill" id="release-date-badge">Rilis Siap Unduh</span>
+        <div class="download-single-card oled-card">
+          <div class="download-main-row">
+            <div>
+              <span class="section-eyebrow">Windows 10 / 11 · 64-bit</span>
+              <h2 class="section-title">Unduh CASA untuk Windows</h2>
+              <p class="section-desc">
+                Installer ringan 4.44 MB dengan tanda tangan pembaruan OTA dan mode senyap 4px Smart-Tuck.
+              </p>
             </div>
 
-            <div class="release-cta-group">
+            <div class="download-cta-col">
               <a
                 href="https://github.com/Farhanpratama09/casa-app/releases/latest"
                 target="_blank"
@@ -506,39 +819,23 @@
                 id="primary-download-btn"
                 class="btn-primary"
               >
-                <span>Download CASA v2.0.0 for Windows (64-bit .exe)</span>
+                <span>Download CASA for Windows (.exe)</span>
               </a>
-
-              <a
-                href="https://github.com/Farhanpratama09/casa-app/releases"
-                target="_blank"
-                rel="noopener noreferrer"
-                id="msi-download-btn"
-                class="btn-secondary"
-              >
-                <span>Unduh .msi Installer</span>
-              </a>
+              <span class="download-size-note tabular" id="download-size-note">
+                NSIS Setup · 4.44 MB
+              </span>
             </div>
+          </div>
 
-            <p class="release-status-note" id="release-status-note">
-              Memeriksa aset rilis terbaru dari github.com/Farhanpratama09/casa-app...
-            </p>
+          <div class="smartscreen-guide">
+            <strong>Panduan Windows SmartScreen:</strong>
+            <span>
+              Saat dialog SmartScreen muncul, pilih <strong>More info</strong> → <strong>Run anyway</strong>.
+            </span>
+          </div>
 
-            <div class="release-stats">
-              <div class="stat-tile">
-                <div class="stat-value tabular" id="stat-exe-size">4.44 MB</div>
-                <div class="stat-label">NSIS Setup (.exe)</div>
-              </div>
-              <div class="stat-tile">
-                <div class="stat-value tabular" id="stat-msi-size">6.42 MB</div>
-                <div class="stat-label">MSI Package (.msi)</div>
-              </div>
-              <div class="stat-tile">
-                <div class="stat-value tabular" id="stat-total-downloads">—</div>
-                <div class="stat-label">Total Unduhan</div>
-              </div>
-            </div>
-
+          <details class="sha-accordion">
+            <summary class="sha-summary">Verify SHA-256 checksum</summary>
             <div class="checksum-box">
               <div class="checksum-header">
                 <span>SHA-256 · CASA_2.0.0_x64-setup.exe</span>
@@ -548,48 +845,13 @@
                 0D54BE3021396C7FFDCCB09D81DEA12F9460BFFE053F0125B555990A70671BFA
               </p>
             </div>
-          </div>
-
-          <div class="oled-card">
-            <div class="smartscreen-guide">
-              <strong>Panduan Windows SmartScreen</strong>
-              <span>
-                Karena CASA merupakan proyek open-source independen tanpa sertifikat EV korporat,
-                saat dialog SmartScreen muncul pilih <strong>"More info"</strong> lalu <strong>"Run anyway"</strong>.
-              </span>
-            </div>
-
-            <h3 class="control-card-title">
-              <span>Arsip Rilis Sebelumnya</span>
-              <span class="release-pill">GitHub Releases</span>
-            </h3>
-            <p class="control-card-hint">
-              Daftar rilis historis dimuat otomatis dari repositori resmi.
-            </p>
-
-            <ul id="archive-release-list" class="archive-list">
-              <li class="archive-item">
-                <div class="archive-item-meta">
-                  <strong>Memuat arsip rilis...</strong>
-                  <span class="archive-item-sub">github.com/Farhanpratama09/casa-app/releases</span>
-                </div>
-                <a
-                  href="https://github.com/Farhanpratama09/casa-app/releases"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="archive-link"
-                >
-                  Buka Releases ↗
-                </a>
-              </li>
-            </ul>
-          </div>
+          </details>
         </div>
       </div>
     </section>
 
     <!-- ====================================================================
-         FEEDBACK & FEATURE REQUESTS (AT PAGE BOTTOM ABOVE FOOTER)
+         FEEDBACK & FEATURE REQUESTS
          ==================================================================== -->
     <section id="feedback" class="section-block">
       <div class="container">

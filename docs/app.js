@@ -1,6 +1,6 @@
 /**
- * CASA — Dynamic Rabbit Island for Windows · Showcase Interactive Runtime
- * Zero dependencies, CSP-strict (no eval, no inline HTML injection, URL allowlists).
+ * CASA — Dynamic Rabbit Island for Windows · 1:1 Native Island Parity Showcase
+ * Zero external dependencies, CSP-strict (no eval, no inline HTML injection, URL allowlists).
  */
 
 (() => {
@@ -15,14 +15,17 @@
   const ALLOWED_FEEDBACK_HOSTS = ['api.web3forms.com', 'formspree.io'];
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
-  const RING_CIRCUMFERENCE = 47.12; // 2 * PI * 7.5
+  const SMALL_RING_C = 31.42; // 2 * PI * 5
+  const BIG_RING_C = 188.5; // 2 * PI * 30
 
   const QUEUE_TRACKS = [
     {
       id: 'trk-midnight',
       title: 'Midnight Coding',
       artist: 'Lo-Fi Bunny · SMTC',
-      duration: '03:12',
+      duration: '3:12',
+      elapsed: '0:42',
+      progressPct: 34,
       lyrics: [
         'Silence hums across an OLED screen',
         'Two monochrome eyes watch the top bezel',
@@ -35,7 +38,9 @@
       id: 'trk-obsidian',
       title: 'Obsidian Horizon',
       artist: 'CASA Synth · LRCLIB',
-      duration: '02:48',
+      duration: '2:48',
+      elapsed: '1:05',
+      progressPct: 48,
       lyrics: [
         '4px Smart-Tuck rests along the top edge',
         'Wait for the cue when the movie ends',
@@ -47,7 +52,9 @@
       id: 'trk-rabbit-island',
       title: 'Rabbit Island Waltz',
       artist: 'Asa & Sasha · Studio',
-      duration: '03:27',
+      duration: '3:27',
+      elapsed: '0:54',
+      progressPct: 28,
       lyrics: [
         'Tiny heart beside a calm tilted cross',
         'Press Alt + Space to widen the workspace',
@@ -59,7 +66,9 @@
       id: 'trk-crimson',
       title: 'Velvet Monochrome',
       artist: 'Crimson · Instrumental',
-      duration: '02:55',
+      duration: '2:55',
+      elapsed: '1:18',
+      progressPct: 52,
       lyrics: [
         'No stray pixels, only sharp hairlines',
         'Carry files right into the top Drop Zone',
@@ -76,26 +85,31 @@
   ];
 
   const SAMPLE_FILES = [
-    { id: 'file-brief', name: 'brief-casa.pdf', kind: 'PDF · 420 KB' },
-    { id: 'file-sasha', name: 'sasha-icon.svg', kind: 'SVG · 14 KB' },
-    { id: 'file-mix', name: 'mix-playlist.url', kind: 'URL · Web' },
+    { id: 'file-brief', name: 'brief-casa.pdf', ext: 'PDF', meta: 'PDF · 420 KB' },
+    { id: 'file-sasha', name: 'sasha-icon.svg', ext: 'SVG', meta: 'SVG · 14 KB' },
+    { id: 'file-mix', name: 'mix-playlist.url', ext: 'URL', meta: 'URL · Web' },
   ];
 
   const state = {
     mode: 'resting', // 'resting' | 'lyrics' | 'todo' | 'hud' | 'dropzone'
-    capsuleState: 'idle', // 'resting' | 'idle' | 'expanded'
-    expression: 'idle', // 'resting' | 'idle' | 'music' | 'focus' | 'dual_active'
+    capsuleState: 'idle', // 'idle' | 'expanded'
+    isRestingSleep: false,
+    expression: 'idle', // 'idle' | 'music' | 'focus' | 'dual_active'
     idleLyricMinimized: false,
+    musicSubTab: 'player', // 'player' | 'queue'
     musicPlaying: true,
     trackIndex: 0,
     lyricIndex: 0,
     todos: INITIAL_TODOS.map((t) => ({ ...t })),
     focusTimerRunning: true,
+    focusTotalMinutes: 25,
     focusSeconds: 18 * 60 + 45,
     dualIdleActive: false,
     volume: 68,
     audioOutputLabel: 'Speakers',
-    hudText: '',
+    hudKind: '', // '' | 'volume' | 'bluetooth' | 'wired'
+    hudLabel: '',
+    hudDetail: '',
     hudTimerId: null,
     droppedIds: [],
     introTimers: [],
@@ -111,45 +125,95 @@
     monitorScreen: $('monitor-screen'),
     introOverlay: $('intro-overlay'),
     capsule: $('vm-notch-capsule'),
+    perimeterSvg: $('vm-perimeter-svg'),
+    perimeterPath: $('vm-perimeter-path'),
+
+    idleLayer: $('vm-idle-layer'),
+    restingPill: $('casa-resting-pill'),
+    hudPill: $('casa-hud-pill'),
+    hudIcon: $('casa-hud-icon'),
+    hudLabel: $('casa-hud-label'),
+    hudBarWrap: $('casa-hud-bar-wrap'),
+    hudBarFill: $('casa-hud-bar-fill'),
+    hudDetail: $('casa-hud-detail'),
+    activePill: $('casa-active-pill'),
     eyes: $('vm-notch-eyes'),
+    standbySegment: $('casa-standby-segment'),
     title: $('vm-notch-title'),
-    subtitle: $('vm-notch-subtitle'),
+    date: $('vm-notch-date'),
+    musicSegment: $('casa-music-segment'),
+    pillTrackWrap: $('vm-pill-track-wrap'),
+    pillSong: $('vm-pill-song'),
+    pillSongSep: $('vm-pill-song-sep'),
+    pillArtist: $('vm-pill-artist'),
     miniLyricPill: $('vm-mini-lyric-pill'),
-    hudChip: $('vm-hud-chip'),
-    focusRingWrap: $('vm-focus-ring-wrap'),
+    eqGlyph: $('casa-eq-glyph'),
+    midDivider: $('casa-mid-divider'),
+    timerSegment: $('casa-timer-segment'),
     focusRingArc: $('vm-focus-ring-arc'),
-    focusMiniPct: $('vm-focus-mini-pct'),
+    focusTaskLabel: $('vm-focus-task-label'),
+    focusTimerClock: $('vm-focus-timer-clock'),
+    rightDivider: $('casa-right-divider'),
     batteryBadge: $('vm-battery-badge'),
-    expandedPanel: $('vm-notch-expanded'),
-    expModeTitle: $('vm-exp-mode-title'),
-    expClock: $('vm-exp-clock'),
+
+    expandedLayer: $('vm-expanded-layer'),
+    m6Eyes: $('vm-m6-eyes'),
+    m6EyesBtn: $('vm-m6-eyes-btn'),
+    m6TabButtons: Array.from(document.querySelectorAll('[data-m6-tab]')),
+    m6DropBadge: $('vm-m6-drop-badge'),
     collapseBtn: $('vm-notch-collapse-btn'),
-    expControl: $('vm-exp-control'),
+
     expMusic: $('vm-exp-music'),
     expFocus: $('vm-exp-focus'),
+    expControl: $('vm-exp-control'),
     expDropzone: $('vm-exp-dropzone'),
-    expRestBtn: $('vm-exp-rest-btn'),
+
+    musicSubButtons: Array.from(document.querySelectorAll('[data-music-sub]')),
+    musicSubPlayer: $('vm-music-sub-player'),
+    musicSubQueue: $('vm-music-sub-queue'),
+    expAudioLabel: $('vm-exp-audio-label'),
     expTrackTitle: $('vm-exp-track-title'),
     expTrackArtist: $('vm-exp-track-artist'),
-    expLyricLine: $('vm-exp-lyric-line'),
-    idleLyricBtn: $('vm-idle-lyric-btn'),
+    expLyricsToggle: $('vm-exp-lyrics-toggle'),
+    scrubElapsed: $('vm-scrub-elapsed'),
+    scrubFill: $('vm-scrub-fill'),
+    scrubTotal: $('vm-scrub-total'),
+    expPrevBtn: $('vm-exp-prev-btn'),
     expPlayBtn: $('vm-exp-play-btn'),
-    expFocusLabel: $('vm-exp-focus-label'),
-    expFocusSub: $('vm-exp-focus-sub'),
+    expNextBtn: $('vm-exp-next-btn'),
+    expQueueList: $('vm-exp-queue-list'),
+    expLyricsScroll: $('vm-exp-lyrics-scroll'),
+    idleLyricBtn: $('vm-idle-lyric-btn'),
+
+    expFocusTaskHead: $('vm-exp-focus-task-head'),
+    expFocusEnds: $('vm-exp-focus-ends'),
+    expRingArc: $('vm-exp-ring-arc'),
+    expRingPct: $('vm-exp-ring-pct'),
+    expTimerDigits: $('vm-exp-timer-digits'),
+    presetChips: Array.from(document.querySelectorAll('[data-preset-mins]')),
     expTimerBtn: $('vm-exp-timer-btn'),
+    expTodoCount: $('vm-exp-todo-count'),
+    expTodoList: $('vm-exp-todo-list'),
+
+    ccBtBtn: $('vm-cc-bt-btn'),
+    ccBtSub: $('vm-cc-bt-sub'),
+    ccWiredBtn: $('vm-cc-wired-btn'),
+    expRestBtn: $('vm-exp-rest-btn'),
+    ccVolFill: $('vm-cc-vol-fill'),
+    ccVolVal: $('vm-cc-vol-val'),
+
     dropzonePrompt: $('vm-dropzone-prompt'),
     droppedItems: $('vm-dropped-items'),
     dropzoneCount: $('vm-dropzone-count'),
     copyBackBtn: $('vm-copy-back-btn'),
 
-    // Scenes
+    // Desktop workspace scenes
     sceneResting: $('scene-resting'),
     sceneLyrics: $('scene-lyrics'),
     sceneTodo: $('scene-todo'),
     sceneHud: $('scene-hud'),
     sceneDropzone: $('scene-dropzone'),
 
-    // Scene controls
     desktopTime: $('vm-desktop-time'),
     clockStatus: $('vm-clock-status'),
     sceneToggleRestBtn: $('scene-toggle-rest-btn'),
@@ -173,23 +237,14 @@
     desktopFiles: $('vm-desktop-files'),
     simDropAllBtn: $('vm-sim-drop-all-btn'),
 
-    // Bottom Dock & Replay
     modeButtons: Array.from(document.querySelectorAll('[data-vm-mode]')),
     replayIntroBtn: $('replay-intro-btn'),
 
-    // Release Hub & Feedback
+    // Download + Feedback
     primaryDownloadBtn: $('primary-download-btn'),
-    msiDownloadBtn: $('msi-download-btn'),
-    heroDownloadBtn: $('hero-download-btn'),
-    releaseVersionBadge: $('release-version-badge'),
-    releaseDateBadge: $('release-date-badge'),
-    releaseStatusNote: $('release-status-note'),
-    statExeSize: $('stat-exe-size'),
-    statMsiSize: $('stat-msi-size'),
-    statTotalDownloads: $('stat-total-downloads'),
+    downloadSizeNote: $('download-size-note'),
     copyShaBtn: $('copy-sha-btn'),
     shaValueExe: $('sha-value-exe'),
-    archiveList: $('archive-release-list'),
     feedbackForm: $('feedback-form'),
     fbName: $('fb-name'),
     fbCategory: $('fb-category'),
@@ -218,6 +273,14 @@
     return `${hh}:${mm}`;
   }
 
+  function formatDateShort(date = new Date()) {
+    return date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
+  }
+
   function formatMMSS(sec) {
     const safe = Math.max(0, Math.floor(sec));
     const m = Math.floor(safe / 60);
@@ -226,41 +289,20 @@
   }
 
   /**
-   * Renders SVG eye geometry inside the virtual monitor Notch (strict monochrome #FFFFFF).
+   * 1:1 Port of `src/components/companion/CasaCompanionAvatar.tsx` SVG paths.
    */
-  function renderNotchEyes(expr) {
-    if (!el.eyes) return;
-    clearNode(el.eyes);
+  function renderCompanionAvatar(svgEl, expr) {
+    if (!svgEl) return;
+    clearNode(svgEl);
+
     const heartPath =
       'M 25,13.5 L 24.3,12.8 C 21.1,10.0 19.6,8.3 19.6,6.1 C 19.6,4.4 20.9,3.1 22.5,3.1 C 23.6,3.1 24.5,3.7 25,4.6 C 25.5,3.7 26.4,3.1 27.5,3.1 C 29.1,3.1 30.4,4.4 30.4,6.1 C 30.4,8.3 28.9,10.0 25.7,12.8 Z';
 
-    if (expr === 'resting') {
-      el.eyes.appendChild(
-        createSvgNode('path', {
-          d: 'M 3.5,8.5 Q 8,12 12.5,8.5',
-          fill: 'none',
-          stroke: '#a1a1aa',
-          'stroke-width': 2.0,
-          'stroke-linecap': 'round',
-        })
-      );
-      el.eyes.appendChild(
-        createSvgNode('path', {
-          d: 'M 20.5,8.5 Q 25,12 29.5,8.5',
-          fill: 'none',
-          stroke: '#a1a1aa',
-          'stroke-width': 2.0,
-          'stroke-linecap': 'round',
-        })
-      );
-      return;
-    }
-
-    // Left eye by active expression
+    // Left eye
     if (expr === 'music') {
-      el.eyes.appendChild(
+      svgEl.appendChild(
         createSvgNode('path', {
-          d: 'M 7.5,12 L 7.5,4 L 13,2.8',
+          d: 'M 9.8,11.6 L 9.8,3.2 L 14.2,4.8',
           fill: 'none',
           stroke: '#ffffff',
           'stroke-width': 1.9,
@@ -268,30 +310,42 @@
           'stroke-linejoin': 'round',
         })
       );
-      el.eyes.appendChild(
-        createSvgNode('circle', { cx: 6.2, cy: 12.2, r: 2.2, fill: '#ffffff' })
+      svgEl.appendChild(
+        createSvgNode('ellipse', {
+          cx: 6.8,
+          cy: 11.6,
+          rx: 3.0,
+          ry: 2.2,
+          transform: 'rotate(-18 6.8 11.6)',
+          fill: '#ffffff',
+        })
       );
     } else if (expr === 'focus' || expr === 'dual_active') {
-      el.eyes.appendChild(
+      svgEl.appendChild(
         createSvgNode('path', {
-          d: 'M 3.5,3.8 L 12.5,6.4',
+          d: 'M 4.2,3.0 L 12.2,5.6',
           fill: 'none',
           stroke: '#ffffff',
-          'stroke-width': 2.0,
+          'stroke-width': 1.9,
           'stroke-linecap': 'round',
         })
       );
-      el.eyes.appendChild(
-        createSvgNode('circle', { cx: 8.5, cy: 10.6, r: 2.3, fill: '#ffffff' })
+      svgEl.appendChild(
+        createSvgNode('circle', {
+          cx: 8.4,
+          cy: 9.8,
+          r: 2.7,
+          fill: '#ffffff',
+        })
       );
     } else {
-      // Idle ×
-      el.eyes.appendChild(
+      // ×
+      svgEl.appendChild(
         createSvgNode('path', {
           d: 'M 3.5,3.5 L 12.5,12.5 M 12.5,3.5 L 3.5,12.5',
           fill: 'none',
           stroke: '#ffffff',
-          'stroke-width': 2.2,
+          'stroke-width': 2.1,
           'stroke-linecap': 'round',
         })
       );
@@ -299,9 +353,9 @@
 
     // Right eye
     if (expr === 'dual_active') {
-      el.eyes.appendChild(
+      svgEl.appendChild(
         createSvgNode('path', {
-          d: 'M 25.5,12 L 25.5,4 L 30.8,2.8',
+          d: 'M 26.2,11.6 L 26.2,3.2 L 30.6,4.8',
           fill: 'none',
           stroke: '#ffffff',
           'stroke-width': 1.9,
@@ -309,26 +363,69 @@
           'stroke-linejoin': 'round',
         })
       );
-      el.eyes.appendChild(
-        createSvgNode('circle', { cx: 24.2, cy: 12.2, r: 2.2, fill: '#ffffff' })
+      svgEl.appendChild(
+        createSvgNode('ellipse', {
+          cx: 23.2,
+          cy: 11.6,
+          rx: 3.0,
+          ry: 2.2,
+          transform: 'rotate(-18 23.2 11.6)',
+          fill: '#ffffff',
+        })
       );
     } else {
-      el.eyes.appendChild(createSvgNode('path', { d: heartPath, fill: '#ffffff' }));
+      svgEl.appendChild(createSvgNode('path', { d: heartPath, fill: '#ffffff' }));
     }
   }
 
-  function showHudChip(label) {
+  function renderHudIcon(kind) {
+    if (!el.hudIcon) return;
+    clearNode(el.hudIcon);
+    const svg = createSvgNode('svg', {
+      width: 14,
+      height: 14,
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      stroke: 'currentColor',
+      'stroke-width': 2,
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+    });
+    if (kind === 'bluetooth') {
+      svg.appendChild(createSvgNode('polyline', { points: '6.5 6.5 17.5 17.5 12 23 12 1 17.5 6.5 6.5 17.5' }));
+    } else if (kind === 'wired') {
+      svg.appendChild(createSvgNode('path', { d: 'M3 18v-6a9 9 0 0 1 18 0v6' }));
+      svg.appendChild(createSvgNode('path', { d: 'M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z' }));
+    } else {
+      svg.appendChild(createSvgNode('polygon', { points: '11 5 6 9 2 9 2 15 6 15 11 19 11 5' }));
+      svg.appendChild(createSvgNode('path', { d: 'M15.54 8.46a5 5 0 0 1 0 7.07' }));
+    }
+    el.hudIcon.appendChild(svg);
+  }
+
+  function getActiveTrack() {
+    return QUEUE_TRACKS[state.trackIndex] || QUEUE_TRACKS[0];
+  }
+
+  function showHudChip(kind, label, detail, showBar = false) {
     if (state.hudTimerId) {
       window.clearTimeout(state.hudTimerId);
       state.hudTimerId = null;
     }
-    state.hudText = label;
+    state.hudKind = kind;
+    state.hudLabel = label;
+    state.hudDetail = detail;
+    renderHudIcon(kind);
+    if (el.hudBarWrap) el.hudBarWrap.hidden = !showBar;
     syncCapsuleUI();
+
     state.hudTimerId = window.setTimeout(() => {
-      state.hudText = '';
+      state.hudKind = '';
+      state.hudLabel = '';
+      state.hudDetail = '';
       state.hudTimerId = null;
       syncCapsuleUI();
-    }, 2600);
+    }, 2500);
   }
 
   function clearIntroTimers() {
@@ -342,9 +439,9 @@
 
     state.mode = 'resting';
     state.capsuleState = 'idle';
-    state.expression = 'resting';
+    state.isRestingSleep = true;
     state.idleLyricMinimized = false;
-    state.hudText = '';
+    state.hudKind = '';
 
     el.introOverlay.hidden = false;
     el.monitor.setAttribute('data-intro-phase', 'hi');
@@ -357,79 +454,89 @@
     const t2 = window.setTimeout(() => {
       el.monitor.setAttribute('data-intro-phase', 'resting');
       el.introOverlay.hidden = true;
-      state.expression = 'resting';
+      state.isRestingSleep = true;
       syncCapsuleUI();
     }, 2180);
 
     const t3 = window.setTimeout(() => {
       el.monitor.setAttribute('data-intro-phase', 'ready');
+      state.isRestingSleep = false;
       state.expression = 'idle';
       syncCapsuleUI();
-    }, 2700);
+      syncDesktopScenes();
+    }, 2750);
 
     state.introTimers.push(t1, t2, t3);
   }
 
-  function getActiveTrack() {
-    return QUEUE_TRACKS[state.trackIndex] || QUEUE_TRACKS[0];
-  }
-
-  function renderLyricsScene() {
+  function renderLyricsAndQueue() {
     const track = getActiveTrack();
-    if (el.lyricStage) {
-      clearNode(el.lyricStage);
+
+    // Desktop workspace synced lyrics + Mode 6 capsule synced lyrics
+    [el.lyricStage, el.expLyricsScroll].forEach((container, cIdx) => {
+      if (!container) return;
+      clearNode(container);
       track.lyrics.forEach((line, idx) => {
         const row = document.createElement('div');
-        row.className = idx === state.lyricIndex ? 'vm-lyric-row active' : 'vm-lyric-row';
+        row.className =
+          cIdx === 0
+            ? idx === state.lyricIndex
+              ? 'vm-lyric-row active'
+              : 'vm-lyric-row'
+            : idx === state.lyricIndex
+            ? 'casa-m6-lyric-row active'
+            : 'casa-m6-lyric-row';
         row.textContent = line;
-        el.lyricStage.appendChild(row);
+        container.appendChild(row);
       });
-    }
+    });
 
     if (el.queueCountTag) {
       el.queueCountTag.textContent = `${QUEUE_TRACKS.length} lagu`;
     }
 
-    if (el.queueList) {
-      clearNode(el.queueList);
+    // Desktop Queue List & Embedded Mode 6 Queue List
+    [el.queueList, el.expQueueList].forEach((listEl, isMini) => {
+      if (!listEl) return;
+      clearNode(listEl);
       QUEUE_TRACKS.forEach((item, idx) => {
-        const li = document.createElement('li');
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'vm-queue-btn';
+        btn.className = isMini ? 'casa-q-mini-btn' : 'vm-queue-btn';
         if (idx === state.trackIndex) {
           btn.setAttribute('aria-current', 'true');
         }
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
           state.trackIndex = idx;
           state.lyricIndex = 0;
           state.musicPlaying = true;
           syncUI();
         });
 
-        const left = document.createElement('div');
-        const tEl = document.createElement('div');
-        tEl.className = 'vm-queue-title';
-        tEl.textContent = item.title;
-        const aEl = document.createElement('div');
-        aEl.className = 'vm-queue-artist';
-        aEl.textContent = item.artist;
-        left.appendChild(tEl);
-        left.appendChild(aEl);
+        const titleSpan = document.createElement('span');
+        titleSpan.className = isMini ? '' : 'vm-queue-title';
+        titleSpan.textContent = item.title;
 
-        const right = document.createElement('span');
-        right.className = 'vm-queue-artist tabular';
-        right.textContent = item.duration;
+        const durSpan = document.createElement('span');
+        durSpan.className = isMini ? 'tabular' : 'vm-queue-artist tabular';
+        durSpan.textContent = isMini ? item.duration : `${item.artist} · ${item.duration}`;
 
-        btn.appendChild(left);
-        btn.appendChild(right);
-        li.appendChild(btn);
-        el.queueList.appendChild(li);
+        btn.appendChild(titleSpan);
+        btn.appendChild(durSpan);
+
+        if (isMini) {
+          listEl.appendChild(btn);
+        } else {
+          const li = document.createElement('li');
+          li.appendChild(btn);
+          listEl.appendChild(li);
+        }
       });
-    }
+    });
   }
 
-  function renderTodoScene() {
+  function renderTodos() {
     const doneCount = state.todos.filter((t) => t.done).length;
     const totalCount = Math.max(1, state.todos.length);
     const ratio = doneCount / totalCount;
@@ -437,17 +544,23 @@
     if (el.todoProgressText) {
       el.todoProgressText.textContent = `${doneCount} / ${state.todos.length} selesai`;
     }
+    if (el.expTodoCount) {
+      el.expTodoCount.textContent = `${doneCount}/${state.todos.length}`;
+    }
     if (el.focusEyeBadge) {
       el.focusEyeBadge.textContent = state.dualIdleActive ? '•̀ ♪ Dual-Idle' : '•̀ ♥ Focus';
     }
     if (el.focusRingArc) {
-      const offset = RING_CIRCUMFERENCE * (1 - ratio);
-      el.focusRingArc.style.strokeDashoffset = String(offset.toFixed(2));
+      el.focusRingArc.style.strokeDashoffset = (SMALL_RING_C * (1 - ratio)).toFixed(2);
     }
-    if (el.focusMiniPct) {
-      el.focusMiniPct.textContent = `${doneCount}/${state.todos.length}`;
+    if (el.expRingArc) {
+      el.expRingArc.style.strokeDashoffset = (BIG_RING_C * (1 - ratio)).toFixed(2);
+    }
+    if (el.expRingPct) {
+      el.expRingPct.textContent = `${Math.round(ratio * 100)}%`;
     }
 
+    // Desktop To-Do List
     if (el.todoList) {
       clearNode(el.todoList);
       state.todos.forEach((task) => {
@@ -474,9 +587,34 @@
         el.todoList.appendChild(li);
       });
     }
+
+    // 1:1 Mode 6 ProductivitySplitView Task Rows
+    if (el.expTodoList) {
+      clearNode(el.expTodoList);
+      state.todos.forEach((task) => {
+        const row = document.createElement('div');
+        row.className = task.done ? 'casa-exp-todo-item done' : 'casa-exp-todo-item';
+        row.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          task.done = !task.done;
+          syncUI();
+        });
+
+        const circle = document.createElement('span');
+        circle.className = 'casa-round-check';
+        circle.textContent = task.done ? '✓' : '';
+
+        const text = document.createElement('span');
+        text.textContent = task.text;
+
+        row.appendChild(circle);
+        row.appendChild(text);
+        el.expTodoList.appendChild(row);
+      });
+    }
   }
 
-  function renderDropzoneScene() {
+  function renderDropzoneCards() {
     if (el.desktopFiles) {
       clearNode(el.desktopFiles);
       SAMPLE_FILES.forEach((file) => {
@@ -492,7 +630,7 @@
 
         const meta = document.createElement('div');
         meta.className = 'vm-file-meta';
-        meta.textContent = isDropped ? 'Tersimpan di Drop Zone' : file.kind;
+        meta.textContent = isDropped ? 'Parked in Drop Zone' : file.meta;
 
         card.appendChild(title);
         card.appendChild(meta);
@@ -534,7 +672,7 @@
             }
             if (el.monitorScreen) {
               const sRect = el.monitorScreen.getBoundingClientRect();
-              const nearTopLip = ev.clientY <= sRect.top + 110;
+              const nearTopLip = ev.clientY <= sRect.top + 135;
               if (el.capsule) {
                 el.capsule.setAttribute('data-drop-hover', nearTopLip ? 'true' : 'false');
               }
@@ -546,7 +684,7 @@
             card.classList.remove('dragging');
             const sRect = el.monitorScreen ? el.monitorScreen.getBoundingClientRect() : null;
             const droppedNearTop =
-              state.pointerDrag.moved && sRect && ev.clientY <= sRect.top + 125;
+              state.pointerDrag.moved && sRect && ev.clientY <= sRect.top + 150;
             state.pointerDrag = null;
             if (el.capsule) el.capsule.removeAttribute('data-drop-hover');
             if (droppedNearTop) {
@@ -562,16 +700,53 @@
       });
     }
 
-    // Populate Drop Zone Shelf inside expanded Notch
+    // Populate 1:1 `DropShelfCard` items inside expanded Drop Zone
     if (el.droppedItems) {
       clearNode(el.droppedItems);
       state.droppedIds.forEach((fid) => {
         const meta = SAMPLE_FILES.find((f) => f.id === fid);
         if (!meta) return;
-        const chip = document.createElement('span');
-        chip.className = 'vm-dropped-chip';
-        chip.textContent = meta.name;
-        el.droppedItems.appendChild(chip);
+
+        const shelfCard = document.createElement('div');
+        shelfCard.className = 'casa-drop-card';
+
+        const top = document.createElement('div');
+        top.className = 'casa-drop-card-top';
+        const iconTile = document.createElement('div');
+        iconTile.className = 'casa-drop-icon-tile';
+        iconTile.textContent = meta.ext;
+        const info = document.createElement('div');
+        info.style.minWidth = '0';
+        const nameEl = document.createElement('div');
+        nameEl.className = 'casa-drop-name';
+        nameEl.textContent = meta.name;
+        const subEl = document.createElement('div');
+        subEl.className = 'casa-drop-meta';
+        subEl.textContent = meta.meta;
+        info.appendChild(nameEl);
+        info.appendChild(subEl);
+        top.appendChild(iconTile);
+        top.appendChild(info);
+
+        const bot = document.createElement('div');
+        bot.className = 'casa-drop-card-bot';
+        const hint = document.createElement('span');
+        hint.textContent = 'Parked';
+        const restoreBtn = document.createElement('button');
+        restoreBtn.type = 'button';
+        restoreBtn.className = 'casa-dz-pill-btn';
+        restoreBtn.textContent = 'Return';
+        restoreBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          state.droppedIds = state.droppedIds.filter((id) => id !== fid);
+          syncUI();
+        });
+        bot.appendChild(hint);
+        bot.appendChild(restoreBtn);
+
+        shelfCard.appendChild(top);
+        shelfCard.appendChild(bot);
+        el.droppedItems.appendChild(shelfCard);
       });
     }
 
@@ -579,7 +754,14 @@
       el.dropzonePrompt.hidden = state.droppedIds.length > 0;
     }
     if (el.dropzoneCount) {
-      el.dropzoneCount.textContent = `${state.droppedIds.length} file di rak`;
+      el.dropzoneCount.textContent =
+        state.droppedIds.length === 0
+          ? 'Drop Zone Shelf'
+          : `${state.droppedIds.length} ${state.droppedIds.length === 1 ? 'item parked' : 'items parked'}`;
+    }
+    if (el.m6DropBadge) {
+      el.m6DropBadge.hidden = state.droppedIds.length === 0;
+      el.m6DropBadge.textContent = String(state.droppedIds.length);
     }
     if (el.copyBackBtn) {
       el.copyBackBtn.hidden = state.droppedIds.length === 0;
@@ -609,130 +791,179 @@
     if (el.capsule) el.capsule.removeAttribute('data-drop-hover');
     state.capsuleState = 'idle';
     syncUI();
-    showHudChip('Copied Back to Desktop');
+    showHudChip('volume', 'Copied Back', 'Desktop', false);
+  }
+
+  function resolveActiveExpression() {
+    if (state.mode === 'lyrics') return 'music';
+    if (state.mode === 'todo') return state.dualIdleActive ? 'dual_active' : 'focus';
+    return 'idle';
+  }
+
+  function resolveMode6Variant() {
+    if (state.mode === 'lyrics') return 'music';
+    if (state.mode === 'todo') return 'todo';
+    if (state.mode === 'hud' || state.mode === 'resting') return 'control';
+    return 'dropzone';
   }
 
   function syncCapsuleUI() {
-    const nowText = formatClockHHMM();
+    const now = new Date();
+    const timeText = formatClockHHMM(now);
+    const dateText = formatDateShort(now);
     const track = getActiveTrack();
     const activeLyric = track.lyrics[state.lyricIndex] || track.lyrics[0];
+    const activeExpr = resolveActiveExpression();
+    const isExpanded = state.capsuleState === 'expanded';
+    const variant = resolveMode6Variant();
 
-    let activeExpr = state.expression;
-    if (state.mode === 'resting') {
-      activeExpr = state.expression === 'resting' ? 'resting' : 'idle';
-    } else if (state.mode === 'lyrics') {
-      activeExpr = 'music';
-    } else if (state.mode === 'todo') {
-      activeExpr = state.dualIdleActive ? 'dual_active' : 'focus';
-    } else if (state.mode === 'hud') {
-      activeExpr = 'idle';
-    } else if (state.mode === 'dropzone') {
-      activeExpr = 'idle';
+    renderCompanionAvatar(el.eyes, activeExpr);
+    renderCompanionAvatar(el.m6Eyes, activeExpr);
+
+    if (el.monitor) {
+      el.monitor.setAttribute('data-capsule-open', isExpanded ? 'true' : 'false');
     }
 
-    renderNotchEyes(activeExpr);
-
-    const isExpanded = state.capsuleState === 'expanded';
     if (el.capsule) {
       el.capsule.setAttribute('data-state', isExpanded ? 'expanded' : 'idle');
-      el.capsule.setAttribute('data-hud-active', state.hudText ? 'true' : 'false');
-    }
-    if (el.expandedPanel) {
-      el.expandedPanel.hidden = !isExpanded;
+      el.capsule.setAttribute('data-variant', variant);
     }
 
-    // Pill row text & widgets
-    if (state.mode === 'lyrics') {
-      if (el.title) el.title.textContent = state.idleLyricMinimized ? track.title : nowText;
-      if (el.subtitle) {
-        el.subtitle.textContent = state.idleLyricMinimized ? '' : track.title;
-      }
-      if (el.miniLyricPill) {
-        el.miniLyricPill.hidden = !state.idleLyricMinimized;
-        if (state.idleLyricMinimized) {
-          el.miniLyricPill.textContent = activeLyric;
-        }
-      }
-    } else if (state.mode === 'todo') {
-      if (el.title) el.title.textContent = formatMMSS(state.focusSeconds);
-      if (el.subtitle) {
-        el.subtitle.textContent = state.dualIdleActive ? 'Dual Focus' : 'Focus Active';
-      }
-      if (el.miniLyricPill) el.miniLyricPill.hidden = true;
-    } else {
-      if (el.title) el.title.textContent = nowText;
-      if (el.subtitle) {
-        el.subtitle.textContent =
-          activeExpr === 'resting'
-            ? 'Resting'
-            : state.mode === 'dropzone'
-            ? 'Drop Ready'
-            : 'Awake';
-      }
-      if (el.miniLyricPill) el.miniLyricPill.hidden = true;
+    if (el.idleLayer) el.idleLayer.hidden = isExpanded;
+    if (el.expandedLayer) el.expandedLayer.hidden = !isExpanded;
+
+    // Perimeter Open U-Shape Focus Timer Stroke (when To-Do & Focus active in Idle)
+    const showPerimeter = !isExpanded && state.mode === 'todo';
+    if (el.perimeterSvg) {
+      el.perimeterSvg.hidden = !showPerimeter;
+    }
+    if (el.perimeterPath) {
+      const done = state.todos.filter((t) => t.done).length;
+      const pct = Math.round((done / Math.max(1, state.todos.length)) * 100);
+      el.perimeterPath.style.strokeDashoffset = String(Math.max(5, 100 - pct));
     }
 
-    if (el.focusRingWrap) {
-      el.focusRingWrap.hidden = state.mode !== 'todo';
-    }
-    if (el.hudChip) {
-      if (state.hudText) {
-        el.hudChip.hidden = false;
-        el.hudChip.textContent = state.hudText;
-      } else {
-        el.hudChip.hidden = true;
-        el.hudChip.textContent = '';
+    // Idle Layers (RestingPill vs HUD vs Standby/Music/Timer Pill)
+    const showRestingOnly =
+      !isExpanded &&
+      !state.hudKind &&
+      state.mode === 'resting' &&
+      state.isRestingSleep;
+    const showHud = !isExpanded && Boolean(state.hudKind);
+    const showActivePill = !isExpanded && !showRestingOnly && !showHud;
+
+    if (el.restingPill) el.restingPill.hidden = !showRestingOnly;
+    if (el.hudPill) el.hudPill.hidden = !showHud;
+    if (el.activePill) el.activePill.hidden = !showActivePill;
+
+    if (showHud) {
+      if (el.hudLabel) el.hudLabel.textContent = state.hudLabel;
+      if (el.hudDetail) el.hudDetail.textContent = state.hudDetail;
+      if (el.hudBarFill && state.hudKind === 'volume') {
+        el.hudBarFill.style.width = `${state.volume}%`;
       }
     }
-    if (el.batteryBadge) {
-      el.batteryBadge.hidden = state.mode === 'lyrics' && state.idleLyricMinimized;
+
+    // Active Pill segments matching IdlePillView.tsx modes 2-5
+    if (el.standbySegment) {
+      el.standbySegment.hidden = state.mode === 'lyrics' || state.mode === 'todo';
+    }
+    if (el.title) el.title.textContent = timeText;
+    if (el.date) el.date.textContent = dateText;
+
+    const showMusicInPill =
+      state.mode === 'lyrics' || (state.mode === 'todo' && state.dualIdleActive);
+    if (el.musicSegment) {
+      el.musicSegment.hidden = !showMusicInPill;
+    }
+    if (el.pillTrackWrap) {
+      el.pillTrackWrap.hidden = state.mode === 'lyrics' && state.idleLyricMinimized;
+    }
+    if (el.pillSong) el.pillSong.textContent = track.title;
+    if (el.pillArtist) el.pillArtist.textContent = track.artist;
+
+    if (el.miniLyricPill) {
+      const showLyricStrip = state.mode === 'lyrics' && state.idleLyricMinimized;
+      el.miniLyricPill.hidden = !showLyricStrip;
+      if (showLyricStrip) {
+        el.miniLyricPill.textContent = activeLyric;
+      }
+    }
+    if (el.eqGlyph) {
+      el.eqGlyph.classList.toggle('paused', !state.musicPlaying);
     }
 
-    // Expanded panel active subview matching current monitor scenario
-    if (el.expClock) el.expClock.textContent = nowText;
-    if (el.expControl) el.expControl.hidden = state.mode !== 'resting' && state.mode !== 'hud';
-    if (el.expMusic) el.expMusic.hidden = state.mode !== 'lyrics';
-    if (el.expFocus) el.expFocus.hidden = state.mode !== 'todo';
-    if (el.expDropzone) el.expDropzone.hidden = state.mode !== 'dropzone';
-
-    if (el.expModeTitle) {
-      el.expModeTitle.textContent =
-        state.mode === 'lyrics'
-          ? 'Music & Lyrics'
-          : state.mode === 'todo'
-          ? 'Focus & To-Do'
-          : state.mode === 'dropzone'
-          ? 'Drop Zone Shelf'
-          : 'CASA Capsule';
+    const showTimerInPill = state.mode === 'todo';
+    if (el.midDivider) {
+      el.midDivider.hidden = !(showMusicInPill && showTimerInPill);
     }
+    if (el.timerSegment) {
+      el.timerSegment.hidden = !showTimerInPill;
+    }
+    if (el.focusTaskLabel) {
+      const firstOpen = state.todos.find((t) => !t.done);
+      el.focusTaskLabel.textContent = firstOpen ? firstOpen.text : 'Focus Complete';
+    }
+    if (el.focusTimerClock) {
+      el.focusTimerClock.textContent = formatMMSS(state.focusSeconds);
+    }
+
+    const hideBatteryInMinimal =
+      state.mode === 'lyrics' || state.mode === 'todo';
+    if (el.rightDivider) el.rightDivider.hidden = hideBatteryInMinimal;
+    if (el.batteryBadge) el.batteryBadge.hidden = hideBatteryInMinimal;
+
+    // Mode 6 Header Active Pill
+    el.m6TabButtons.forEach((btn) => {
+      const tab = btn.getAttribute('data-m6-tab');
+      const isMatch =
+        (tab === 'music' && state.mode === 'lyrics') ||
+        (tab === 'todo' && state.mode === 'todo') ||
+        (tab === 'hud' && (state.mode === 'hud' || state.mode === 'resting')) ||
+        (tab === 'dropzone' && state.mode === 'dropzone');
+      btn.setAttribute('aria-selected', isMatch ? 'true' : 'false');
+    });
+
+    // Expanded Mode 6 Body Subviews
+    if (el.expMusic) el.expMusic.hidden = variant !== 'music';
+    if (el.expFocus) el.expFocus.hidden = variant !== 'todo';
+    if (el.expControl) el.expControl.hidden = variant !== 'control';
+    if (el.expDropzone) el.expDropzone.hidden = variant !== 'dropzone';
+
+    // Mode 6 Music Player Metadata
+    if (el.expAudioLabel) el.expAudioLabel.textContent = state.audioOutputLabel;
     if (el.expTrackTitle) el.expTrackTitle.textContent = track.title;
     if (el.expTrackArtist) el.expTrackArtist.textContent = track.artist;
-    if (el.expLyricLine) el.expLyricLine.textContent = activeLyric;
+    if (el.scrubElapsed) el.scrubElapsed.textContent = track.elapsed;
+    if (el.scrubTotal) el.scrubTotal.textContent = track.duration;
+    if (el.scrubFill) el.scrubFill.style.width = `${track.progressPct}%`;
     if (el.expPlayBtn) el.expPlayBtn.textContent = state.musicPlaying ? 'Pause' : 'Play';
-    if (el.idleLyricBtn) {
-      el.idleLyricBtn.textContent = state.idleLyricMinimized
-        ? 'Expand Lyrics'
-        : 'Idle Lyric Minimize';
-    }
+    if (el.musicSubPlayer) el.musicSubPlayer.hidden = state.musicSubTab !== 'player';
+    if (el.musicSubQueue) el.musicSubQueue.hidden = state.musicSubTab !== 'queue';
+    el.musicSubButtons.forEach((b) => {
+      b.setAttribute(
+        'aria-pressed',
+        b.getAttribute('data-music-sub') === state.musicSubTab ? 'true' : 'false'
+      );
+    });
+
     if (el.sceneLyricMinimizeBtn) {
       el.sceneLyricMinimizeBtn.textContent = state.idleLyricMinimized
-        ? 'Restore Capsule'
+        ? 'Restore Expanded'
         : 'Idle Lyric Minimize';
     }
 
-    const doneCount = state.todos.filter((t) => t.done).length;
-    if (el.expFocusLabel) {
-      el.expFocusLabel.textContent = `Sesi Fokus · ${formatMMSS(state.focusSeconds)}`;
-    }
-    if (el.expFocusSub) {
-      el.expFocusSub.textContent = `${doneCount} / ${state.todos.length} To-Do selesai`;
-    }
+    // Mode 6 Focus & Control Center values
+    if (el.expTimerDigits) el.expTimerDigits.textContent = formatMMSS(state.focusSeconds);
+    if (el.expFocusEnds) el.expFocusEnds.textContent = `ends ${timeText}`;
     if (el.expTimerBtn) {
-      el.expTimerBtn.textContent = state.focusTimerRunning ? 'Jeda Timer' : 'Lanjut Focus';
+      el.expTimerBtn.textContent = state.focusTimerRunning ? 'Pause' : 'Start';
     }
+    if (el.ccVolFill) el.ccVolFill.style.width = `${state.volume}%`;
+    if (el.ccVolVal) el.ccVolVal.textContent = `${state.volume}%`;
   }
 
-  function syncUI() {
+  function syncDesktopScenes() {
     if (el.monitor) {
       el.monitor.setAttribute('data-mode', state.mode);
     }
@@ -752,59 +983,98 @@
 
     if (el.desktopTime) el.desktopTime.textContent = formatClockHHMM();
     if (el.clockStatus) {
-      el.clockStatus.textContent =
-        state.expression === 'resting'
-          ? 'Mode Resting — arahkan kursor ke kapsul atas atau tekan Alt + Space untuk membangunkan'
-          : state.capsuleState === 'expanded'
-          ? 'Kapsul Mekar — klik Tutup atau tekan Alt + Space untuk kembali ringkas'
-          : 'Kapsul Aktif (× ♥) — klik kapsul di bezel atas untuk membuka kontrol penuh';
+      el.clockStatus.textContent = state.isRestingSleep
+        ? 'RestingPill (126×39px) terpejam di bezel atas — hover, klik, atau Alt + Space untuk bangun'
+        : state.capsuleState === 'expanded'
+        ? 'Mode 6 Expanded terbuka — klik ikon Chevron atas atau tekan Alt + Space untuk menutup'
+        : 'Idle Standby (× ♥) aktif — klik kapsul di atas untuk memekarkan Mode 6';
     }
-
     if (el.hudReadout) {
       el.hudReadout.textContent = `Volume ${state.volume}% · ${state.audioOutputLabel}`;
     }
     if (el.volumePct) {
       el.volumePct.textContent = `${state.volume}%`;
     }
+  }
 
-    renderLyricsScene();
-    renderTodoScene();
-    renderDropzoneScene();
+  function syncUI() {
+    syncDesktopScenes();
+    renderLyricsAndQueue();
+    renderTodos();
+    renderDropzoneCards();
     syncCapsuleUI();
   }
 
   function switchMode(nextMode) {
-    // Cancel opening animation cleanly if user interacts early
     clearIntroTimers();
     if (el.introOverlay) el.introOverlay.hidden = true;
     if (el.monitor) el.monitor.setAttribute('data-intro-phase', 'ready');
 
     state.mode = nextMode;
+    state.isRestingSleep = false;
+    state.idleLyricMinimized = false;
+
     if (nextMode === 'resting') {
-      state.expression = 'idle';
       state.capsuleState = 'idle';
-      state.idleLyricMinimized = false;
     } else if (nextMode === 'lyrics') {
-      state.expression = 'music';
-      state.capsuleState = 'idle';
-      state.idleLyricMinimized = false;
+      state.capsuleState = 'expanded';
+      state.musicSubTab = 'player';
     } else if (nextMode === 'todo') {
-      state.expression = state.dualIdleActive ? 'dual_active' : 'focus';
-      state.capsuleState = 'idle';
-      state.idleLyricMinimized = false;
+      state.capsuleState = 'expanded';
     } else if (nextMode === 'hud') {
-      state.expression = 'idle';
       state.capsuleState = 'idle';
-      showHudChip(`Vol ${state.volume}%`);
+      showHudChip('volume', 'Volume', `${state.volume}%`, true);
     } else if (nextMode === 'dropzone') {
-      state.expression = 'idle';
       state.capsuleState = 'expanded';
     }
     syncUI();
   }
 
+  /**
+   * Clean URL Navigation Without Hash (`#`)
+   */
+  function initCleanNavigation() {
+    if (window.location.hash) {
+      const initialId = window.location.hash.replace(/^#/, '');
+      const target = document.getElementById(initialId);
+      if (target) {
+        window.requestAnimationFrame(() => {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
+      window.history.replaceState(
+        null,
+        '',
+        window.location.pathname + window.location.search
+      );
+    }
+
+    const navLinks = Array.from(document.querySelectorAll('a[data-scroll-target], a[href^="#"]'));
+    navLinks.forEach((link) => {
+      link.addEventListener('click', (ev) => {
+        const href = link.getAttribute('href') || '';
+        const targetId = link.getAttribute('data-scroll-target') || href.replace(/^#/, '');
+        if (!targetId) return;
+
+        ev.preventDefault();
+        if (targetId === 'top') {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+          const targetEl = document.getElementById(targetId);
+          if (targetEl) {
+            targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }
+        window.history.replaceState(
+          null,
+          '',
+          window.location.pathname + window.location.search
+        );
+      });
+    });
+  }
+
   function initVirtualMonitorControls() {
-    // Mode dock switches
     el.modeButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
         const next = btn.getAttribute('data-vm-mode');
@@ -812,15 +1082,40 @@
       });
     });
 
+    el.m6TabButtons.forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const tab = btn.getAttribute('data-m6-tab');
+        if (tab === 'music') switchMode('lyrics');
+        else if (tab === 'todo') switchMode('todo');
+        else if (tab === 'hud') {
+          state.mode = 'hud';
+          state.capsuleState = 'expanded';
+          syncUI();
+        } else if (tab === 'dropzone') switchMode('dropzone');
+      });
+    });
+
+    el.musicSubButtons.forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const sub = btn.getAttribute('data-music-sub');
+        if (sub) {
+          state.musicSubTab = sub;
+          syncCapsuleUI();
+        }
+      });
+    });
+
     if (el.replayIntroBtn) {
       el.replayIntroBtn.addEventListener('click', startIntroMorphSequence);
     }
 
-    // Capsule Hover & Click Wake
+    // Hover & Click on Native Notch Assembly
     if (el.capsule) {
       el.capsule.addEventListener('mouseenter', () => {
-        if (state.mode === 'resting' && state.expression === 'resting') {
-          state.expression = 'idle';
+        if (state.mode === 'resting' && state.isRestingSleep) {
+          state.isRestingSleep = false;
           syncUI();
         }
       });
@@ -828,9 +1123,7 @@
       el.capsule.addEventListener('click', (ev) => {
         if (ev.target && ev.target.closest('button')) return;
         if (state.capsuleState === 'idle') {
-          if (state.expression === 'resting') {
-            state.expression = 'idle';
-          }
+          state.isRestingSleep = false;
           state.capsuleState = 'expanded';
           state.idleLyricMinimized = false;
           syncUI();
@@ -850,19 +1143,16 @@
         ev.preventDefault();
         el.capsule.removeAttribute('data-drop-hover');
         const fid = ev.dataTransfer ? ev.dataTransfer.getData('text/plain') : '';
-        if (fid) {
-          captureFileIntoDropZone(fid);
-        }
+        if (fid) captureFileIntoDropZone(fid);
       });
     }
 
-    // Monitor screen HTML5 dragover zone near top bezel
     if (el.monitorScreen) {
       el.monitorScreen.addEventListener('dragover', (ev) => {
         if (state.mode !== 'dropzone') return;
         ev.preventDefault();
         const rect = el.monitorScreen.getBoundingClientRect();
-        if (ev.clientY <= rect.top + 115) {
+        if (ev.clientY <= rect.top + 145) {
           openDropZoneTarget(true);
         }
       });
@@ -870,7 +1160,7 @@
       el.monitorScreen.addEventListener('drop', (ev) => {
         if (state.mode !== 'dropzone') return;
         const rect = el.monitorScreen.getBoundingClientRect();
-        if (ev.clientY <= rect.top + 130) {
+        if (ev.clientY <= rect.top + 160) {
           ev.preventDefault();
           if (el.capsule) el.capsule.removeAttribute('data-drop-hover');
           const fid = ev.dataTransfer ? ev.dataTransfer.getData('text/plain') : '';
@@ -887,61 +1177,72 @@
       });
     }
 
-    if (el.expRestBtn) {
-      el.expRestBtn.addEventListener('click', (ev) => {
+    if (el.m6EyesBtn) {
+      el.m6EyesBtn.addEventListener('click', (ev) => {
         ev.stopPropagation();
+        state.mode = 'resting';
         state.capsuleState = 'idle';
-        state.expression = 'resting';
+        state.isRestingSleep = !state.isRestingSleep;
         syncUI();
       });
     }
 
-    // Global Alt + Space inside monitor showcase
+    if (el.expRestBtn) {
+      el.expRestBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.mode = 'resting';
+        state.capsuleState = 'idle';
+        state.isRestingSleep = true;
+        syncUI();
+      });
+    }
+
+    // Alt + Space toggle inside playground
     window.addEventListener('keydown', (ev) => {
       if (ev.altKey && ev.code === 'Space') {
         ev.preventDefault();
-        if (state.expression === 'resting') {
-          state.expression = 'idle';
-          state.capsuleState = 'expanded';
-        } else {
-          state.capsuleState = state.capsuleState === 'expanded' ? 'idle' : 'expanded';
-        }
+        state.isRestingSleep = false;
+        state.idleLyricMinimized = false;
+        state.capsuleState = state.capsuleState === 'expanded' ? 'idle' : 'expanded';
         syncUI();
       }
     });
 
-    // Scene 1: Resting & Wake buttons
     if (el.sceneToggleRestBtn) {
       el.sceneToggleRestBtn.addEventListener('click', () => {
-        state.expression = state.expression === 'resting' ? 'idle' : 'resting';
-        if (state.expression === 'resting') state.capsuleState = 'idle';
+        state.isRestingSleep = !state.isRestingSleep;
+        if (state.isRestingSleep) state.capsuleState = 'idle';
         syncUI();
       });
     }
 
     if (el.sceneToggleExpandBtn) {
       el.sceneToggleExpandBtn.addEventListener('click', () => {
-        state.expression = 'idle';
+        state.isRestingSleep = false;
         state.capsuleState = state.capsuleState === 'expanded' ? 'idle' : 'expanded';
         syncUI();
       });
     }
 
-    // Scene 2: Lyrics & Idle Lyric Minimize
-    const toggleIdleLyricMinimize = (ev) => {
+    // Lyrics & Music Controls + Idle Lyric Minimize
+    const triggerIdleLyricMinimize = (ev) => {
       if (ev) ev.stopPropagation();
       state.mode = 'lyrics';
-      state.idleLyricMinimized = !state.idleLyricMinimized;
-      state.capsuleState = 'idle';
-      state.expression = 'music';
+      if (state.capsuleState === 'expanded') {
+        state.idleLyricMinimized = true;
+        state.capsuleState = 'idle';
+      } else {
+        state.idleLyricMinimized = !state.idleLyricMinimized;
+        if (!state.idleLyricMinimized) state.capsuleState = 'expanded';
+      }
       syncUI();
     };
 
     if (el.sceneLyricMinimizeBtn) {
-      el.sceneLyricMinimizeBtn.addEventListener('click', toggleIdleLyricMinimize);
+      el.sceneLyricMinimizeBtn.addEventListener('click', triggerIdleLyricMinimize);
     }
     if (el.idleLyricBtn) {
-      el.idleLyricBtn.addEventListener('click', toggleIdleLyricMinimize);
+      el.idleLyricBtn.addEventListener('click', triggerIdleLyricMinimize);
     }
     if (el.expPlayBtn) {
       el.expPlayBtn.addEventListener('click', (ev) => {
@@ -950,8 +1251,24 @@
         syncCapsuleUI();
       });
     }
+    if (el.expPrevBtn) {
+      el.expPrevBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.trackIndex = (state.trackIndex - 1 + QUEUE_TRACKS.length) % QUEUE_TRACKS.length;
+        state.lyricIndex = 0;
+        syncUI();
+      });
+    }
+    if (el.expNextBtn) {
+      el.expNextBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.trackIndex = (state.trackIndex + 1) % QUEUE_TRACKS.length;
+        state.lyricIndex = 0;
+        syncUI();
+      });
+    }
 
-    // Scene 3: To-Do & Focus
+    // To-Do & Focus Presets
     if (el.todoForm && el.todoInput) {
       el.todoForm.addEventListener('submit', (ev) => {
         ev.preventDefault();
@@ -985,34 +1302,50 @@
         syncUI();
       });
     }
+    el.presetChips.forEach((chip) => {
+      chip.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const mins = Number(chip.getAttribute('data-preset-mins') || 25);
+        state.focusTotalMinutes = mins;
+        state.focusSeconds = mins * 60;
+        el.presetChips.forEach((c) => c.classList.toggle('active', c === chip));
+        syncCapsuleUI();
+      });
+    });
 
-    // Scene 4: Volume & BT HUD
+    // Volume & BT HUD Controls
     if (el.volumeSlider) {
       el.volumeSlider.addEventListener('input', () => {
         state.volume = Number(el.volumeSlider.value);
-        if (el.volumePct) el.volumePct.textContent = `${state.volume}%`;
-        if (el.hudReadout) {
-          el.hudReadout.textContent = `Volume ${state.volume}% · ${state.audioOutputLabel}`;
-        }
-        showHudChip(`Vol ${state.volume}%`);
-      });
-    }
-    if (el.simBtBtn) {
-      el.simBtBtn.addEventListener('click', () => {
-        state.audioOutputLabel = 'BT Earphone • 85%';
-        syncUI();
-        showHudChip('BT Earphone · 85%');
-      });
-    }
-    if (el.simWiredBtn) {
-      el.simWiredBtn.addEventListener('click', () => {
-        state.audioOutputLabel = 'Wired Earphone';
-        syncUI();
-        showHudChip('Wired Earphone');
+        state.capsuleState = 'idle';
+        syncDesktopScenes();
+        showHudChip('volume', 'Volume', `${state.volume}%`, true);
       });
     }
 
-    // Scene 5: Simulate Drop + Copy Back to Desktop
+    const triggerBtHud = (ev) => {
+      if (ev) ev.stopPropagation();
+      state.audioOutputLabel = 'BT Earphone • 85%';
+      state.capsuleState = 'idle';
+      if (el.ccBtSub) el.ccBtSub.textContent = 'Earphone · 85%';
+      syncDesktopScenes();
+      showHudChip('bluetooth', 'BT Earphone', '85%', false);
+    };
+
+    const triggerWiredHud = (ev) => {
+      if (ev) ev.stopPropagation();
+      state.audioOutputLabel = 'Wired Earphone';
+      state.capsuleState = 'idle';
+      syncDesktopScenes();
+      showHudChip('wired', 'Wired Earphone', 'Connected', false);
+    };
+
+    if (el.simBtBtn) el.simBtBtn.addEventListener('click', triggerBtHud);
+    if (el.ccBtBtn) el.ccBtBtn.addEventListener('click', triggerBtHud);
+    if (el.simWiredBtn) el.simWiredBtn.addEventListener('click', triggerWiredHud);
+    if (el.ccWiredBtn) el.ccWiredBtn.addEventListener('click', triggerWiredHud);
+
+    // Drop Zone
     if (el.simDropAllBtn) {
       el.simDropAllBtn.addEventListener('click', () => {
         const nextFile =
@@ -1027,12 +1360,12 @@
       });
     }
 
-    // Auto intervals (lyrics ticker, clock refresh, focus countdown)
+    // Live Intervals
     state.lyricIntervalId = window.setInterval(() => {
       if (state.mode === 'lyrics' && state.musicPlaying) {
         const track = getActiveTrack();
         state.lyricIndex = (state.lyricIndex + 1) % track.lyrics.length;
-        renderLyricsScene();
+        renderLyricsAndQueue();
         syncCapsuleUI();
       }
     }, 2200);
@@ -1046,12 +1379,10 @@
 
     state.clockIntervalId = window.setInterval(() => {
       if (el.desktopTime) el.desktopTime.textContent = formatClockHHMM();
-      if (state.capsuleState === 'idle' && state.mode === 'resting') {
-        syncCapsuleUI();
-      }
+      if (state.capsuleState === 'idle') syncCapsuleUI();
     }, 15000);
 
-    // Trigger opening morph intro when virtual monitor enters viewport
+    // Trigger Intro Morph once monitor enters viewport
     let introTriggered = false;
     const triggerIntroOnce = () => {
       if (introTriggered) return;
@@ -1076,7 +1407,7 @@
   }
 
   /**
-   * Smart GitHub Release Hub (Strict URL validation, DOM safe rendering)
+   * Release Download Link Sync (Single Primary .exe Button)
    */
   function isSafeGitHubUrl(urlStr) {
     if (!urlStr || typeof urlStr !== 'string') return false;
@@ -1098,171 +1429,36 @@
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   }
 
-  function formatReleaseDate(isoStr) {
-    if (!isoStr) return 'Latest Build';
-    const d = new Date(isoStr);
-    if (Number.isNaN(d.getTime())) return 'Latest Build';
-    return d.toLocaleDateString('id-ID', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    });
-  }
-
-  function renderArchiveReleases(archiveReleases) {
-    if (!el.archiveList) return;
-    clearNode(el.archiveList);
-
-    if (!archiveReleases || archiveReleases.length === 0) {
-      const emptyLi = document.createElement('li');
-      emptyLi.className = 'archive-item';
-
-      const metaDiv = document.createElement('div');
-      metaDiv.className = 'archive-item-meta';
-      const strong = document.createElement('strong');
-      strong.textContent = 'Riwayat Rilis GitHub';
-      const sub = document.createElement('span');
-      sub.className = 'archive-item-sub';
-      sub.textContent = 'Lihat seluruh changelog & biner resmi di GitHub Releases.';
-      metaDiv.appendChild(strong);
-      metaDiv.appendChild(sub);
-
-      const link = document.createElement('a');
-      link.href = RELEASES_PAGE_URL;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      link.className = 'archive-link';
-      link.textContent = 'GitHub Releases ↗';
-
-      emptyLi.appendChild(metaDiv);
-      emptyLi.appendChild(link);
-      el.archiveList.appendChild(emptyLi);
-      return;
-    }
-
-    archiveReleases.slice(0, 4).forEach((rel) => {
-      const li = document.createElement('li');
-      li.className = 'archive-item';
-
-      const meta = document.createElement('div');
-      meta.className = 'archive-item-meta';
-
-      const title = document.createElement('strong');
-      title.textContent = rel.tag_name || rel.name || 'Release';
-
-      const relDownloads = Array.isArray(rel.assets)
-        ? rel.assets.reduce((sum, a) => sum + (Number(a.download_count) || 0), 0)
-        : 0;
-
-      const sub = document.createElement('span');
-      sub.className = 'archive-item-sub';
-      sub.textContent = `${formatReleaseDate(rel.published_at)} · ${relDownloads.toLocaleString('id-ID')} unduhan`;
-
-      meta.appendChild(title);
-      meta.appendChild(sub);
-
-      const link = document.createElement('a');
-      link.href = isSafeGitHubUrl(rel.html_url) ? rel.html_url : RELEASES_PAGE_URL;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      link.className = 'archive-link';
-      link.textContent = 'Unduh ↗';
-
-      li.appendChild(meta);
-      li.appendChild(link);
-      el.archiveList.appendChild(li);
-    });
-  }
-
   async function initSmartReleaseHub() {
     try {
       const response = await fetch(RELEASES_API_URL, {
         headers: { Accept: 'application/vnd.github+json' },
       });
-      if (!response.ok) throw new Error(`GitHub API ${response.status}`);
-
+      if (!response.ok) return;
       const releases = await response.json();
-      if (!Array.isArray(releases)) throw new Error('Invalid GitHub API shape');
-
-      let totalDownloads = 0;
-      releases.forEach((rel) => {
-        if (Array.isArray(rel.assets)) {
-          rel.assets.forEach((asset) => {
-            totalDownloads += Number(asset.download_count) || 0;
-          });
-        }
-      });
-
-      if (el.statTotalDownloads) {
-        el.statTotalDownloads.textContent = totalDownloads.toLocaleString('id-ID');
-      }
+      if (!Array.isArray(releases)) return;
 
       const v2Release = releases.find(
         (rel) => typeof rel.tag_name === 'string' && rel.tag_name.startsWith('v2.')
       );
-      const latestRelease = v2Release || releases[0];
-
-      if (v2Release && Array.isArray(v2Release.assets) && v2Release.assets.length > 0) {
+      if (v2Release && Array.isArray(v2Release.assets)) {
         const exeAsset = v2Release.assets.find(
           (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
         );
-        const msiAsset = v2Release.assets.find(
-          (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.msi')
-        );
-
         if (exeAsset && isSafeGitHubUrl(exeAsset.browser_download_url)) {
           const sizeLabel = formatMegabytes(exeAsset.size) || '4.44 MB';
-          if (el.statExeSize) el.statExeSize.textContent = sizeLabel;
           if (el.primaryDownloadBtn) {
             el.primaryDownloadBtn.href = exeAsset.browser_download_url;
-            el.primaryDownloadBtn.textContent = `Download CASA ${v2Release.tag_name} for Windows (.exe · ${sizeLabel})`;
           }
-          if (el.heroDownloadBtn) {
-            el.heroDownloadBtn.href = exeAsset.browser_download_url;
-          }
-        }
-
-        if (msiAsset && isSafeGitHubUrl(msiAsset.browser_download_url)) {
-          const msiSizeLabel = formatMegabytes(msiAsset.size) || '6.42 MB';
-          if (el.statMsiSize) el.statMsiSize.textContent = msiSizeLabel;
-          if (el.msiDownloadBtn) {
-            el.msiDownloadBtn.href = msiAsset.browser_download_url;
-            el.msiDownloadBtn.textContent = `Unduh .msi (${msiSizeLabel})`;
+          if (el.downloadSizeNote) {
+            el.downloadSizeNote.textContent = `NSIS Setup · ${sizeLabel}`;
           }
         }
-
-        if (el.releaseVersionBadge) {
-          el.releaseVersionBadge.textContent = `${v2Release.tag_name} Latest`;
-        }
-        if (el.releaseDateBadge) {
-          el.releaseDateBadge.textContent = formatReleaseDate(v2Release.published_at);
-        }
-        if (el.releaseStatusNote) {
-          el.releaseStatusNote.textContent = `Terhubung langsung ke GitHub Release ${v2Release.tag_name} resmi.`;
-        }
-      } else {
-        if (el.primaryDownloadBtn) el.primaryDownloadBtn.href = RELEASES_PAGE_URL;
-        if (el.msiDownloadBtn) el.msiDownloadBtn.href = RELEASES_PAGE_URL;
-        if (el.releaseStatusNote) {
-          const latestTag = latestRelease && latestRelease.tag_name ? latestRelease.tag_name : 'v2.0.0';
-          el.releaseStatusNote.textContent =
-            `Tag v2.0.0 aktif di repositori (rilis terbaru di API: ${latestTag}).`;
-        }
+      } else if (el.primaryDownloadBtn) {
+        el.primaryDownloadBtn.href = RELEASES_PAGE_URL;
       }
-
-      const archiveItems = v2Release
-        ? releases.filter((rel) => rel !== v2Release)
-        : releases;
-      renderArchiveReleases(archiveItems);
     } catch (_err) {
-      if (el.statTotalDownloads) el.statTotalDownloads.textContent = 'GitHub';
-      if (el.releaseStatusNote) {
-        el.releaseStatusNote.textContent =
-          'Tidak dapat memuat metadata live dari GitHub API saat ini. Gunakan tombol untuk membuka halaman Releases resmi.';
-      }
       if (el.primaryDownloadBtn) el.primaryDownloadBtn.href = RELEASES_PAGE_URL;
-      if (el.msiDownloadBtn) el.msiDownloadBtn.href = RELEASES_PAGE_URL;
-      renderArchiveReleases([]);
     }
   }
 
@@ -1382,6 +1578,7 @@
   }
 
   // Boot
+  initCleanNavigation();
   initVirtualMonitorControls();
   initCopyHash();
   initFeedbackForm();
