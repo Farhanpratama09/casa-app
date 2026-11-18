@@ -1784,7 +1784,7 @@
           ? exeVersion.trim().startsWith('v')
             ? exeVersion.trim()
             : `v${exeVersion.trim()}`
-          : 'v2.0.3';
+          : 'v2.0.4';
       el.downloadSizeText.textContent = `${versionTag} · NSIS Setup (.exe) · ${exeSize}`;
     }
     if (el.downloadCountText) {
@@ -1886,13 +1886,13 @@
       let exeSize = null;
       let exeVersion = null;
       if (v2Release && Array.isArray(v2Release.assets)) {
-        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.0.3';
+        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.0.4';
         const exeAsset = v2Release.assets.find(
           (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
         );
         if (exeAsset && isSafeGitHubUrl(exeAsset.browser_download_url)) {
           exeUrl = exeAsset.browser_download_url;
-          exeSize = formatMegabytes(exeAsset.size) || '4.43 MB';
+          exeSize = formatMegabytes(exeAsset.size) || '4.47 MB';
         }
       }
 
@@ -1911,7 +1911,7 @@
         );
       } catch (_err) {}
     } catch (_err) {
-      // Keep static v2.0.3 fallback link & hide download count gracefully when offline/rate-limited
+      // Keep static v2.0.4 fallback link & hide download count gracefully when offline/rate-limited
     }
   }
 
