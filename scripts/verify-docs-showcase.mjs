@@ -635,16 +635,17 @@ async function main() {
     await mockPage.setViewport({ width: 1280, height: 800 });
     let headerSafetyOk = true;
     let postedReviewBody = null;
+    const nowMs = Date.now();
     const sampleReviews = [
       {
         id: 'rev-1',
         author_name: 'Nadia K.',
         rating: 5,
         comment: 'Sangat bersih di OLED 240Hz, pop-up QUEUE instan!',
-        app_version: 'v2.0.3',
-        creator_reply: 'Terima kasih Nadia! Mode Monokrom OLED memang fokus utama v2.0.3.',
-        replied_at: '2026-11-18T10:00:00Z',
-        created_at: '2026-11-18T09:00:00Z',
+        app_version: 'v2.0.4',
+        creator_reply: 'Terima kasih Nadia! Mode Monokrom OLED memang fokus utama v2.0.4.',
+        replied_at: new Date(nowMs - 15 * 60 * 1000).toISOString(),
+        created_at: new Date(nowMs - 20 * 1000).toISOString(),
       },
       {
         id: 'rev-2',
@@ -654,7 +655,37 @@ async function main() {
         app_version: 'v2.0.3',
         creator_reply: null,
         replied_at: null,
-        created_at: '2026-11-17T15:00:00Z',
+        created_at: new Date(nowMs - 26 * 3600 * 1000).toISOString(),
+      },
+      {
+        id: 'rev-3',
+        author_name: 'Raka M.',
+        rating: 5,
+        comment: 'Focus timer langsung auto-check To-Do saat selesai.',
+        app_version: 'v2.0.4',
+        creator_reply: null,
+        replied_at: null,
+        created_at: new Date(nowMs - 3 * 3600 * 1000).toISOString(),
+      },
+      {
+        id: 'rev-4',
+        author_name: 'Sinta A.',
+        rating: 5,
+        comment: 'Ring baterai & brightness slider responsif.',
+        app_version: 'v2.0.3',
+        creator_reply: null,
+        replied_at: null,
+        created_at: new Date(nowMs - 4 * 86400 * 1000).toISOString(),
+      },
+      {
+        id: 'rev-5',
+        author_name: 'Dimas W.',
+        rating: 4,
+        comment: 'Sudah pakai seminggu lebih di Windows 11, super stabil.',
+        app_version: 'v2.0.2',
+        creator_reply: null,
+        replied_at: null,
+        created_at: '2026-10-02T08:15:00Z',
       },
     ];
     await mockPage.setRequestInterception(true);
@@ -687,10 +718,10 @@ async function main() {
             contentType: 'application/json',
             body: JSON.stringify([
               {
-                total_reviews: 2,
-                avg_rating: 4.5,
-                count_5: 1,
-                count_4: 1,
+                total_reviews: 5,
+                avg_rating: 4.6,
+                count_5: 3,
+                count_4: 2,
                 count_3: 0,
                 count_2: 0,
                 count_1: 0,
@@ -727,12 +758,24 @@ async function main() {
 
     await mockPage.goto('http://127.0.0.1:5213/casa-app/', { waitUntil: 'domcontentloaded' });
     await mockPage.waitForFunction(
-      () => document.querySelectorAll('#reviews-list .review-item').length === 2,
+      () => document.querySelectorAll('#reviews-list .review-item').length === 5,
       { timeout: 4000 }
     );
+    const beforeFilterAudit = await mockPage.evaluate(() => {
+      const dates = Array.from(document.querySelectorAll('#reviews-list .review-item > .review-item-head .review-date'));
+      return {
+        downloadSubtext: document.querySelector('#download .section-desc')?.textContent?.trim() || '',
+        feedbackSubtext: document.querySelector('#feedback .section-desc')?.textContent?.trim() || '',
+        dateTexts: dates.map((d) => d.textContent?.trim() || ''),
+        dateTitles: dates.map((d) => d.getAttribute('title') || ''),
+        replyDateText:
+          document.querySelector('#reviews-list .creator-reply-box .review-date')?.textContent?.trim() ||
+          '',
+      };
+    });
     await mockPage.click('#reviews-filter-bar button[data-filter-rating="5"]');
     await mockPage.waitForFunction(
-      () => document.querySelectorAll('#reviews-list .review-item').length === 1,
+      () => document.querySelectorAll('#reviews-list .review-item').length === 3,
       { timeout: 4000 }
     );
     await mockPage.click('#review-star-picker button[data-star-value="5"]');
@@ -754,12 +797,30 @@ async function main() {
     await mockCtx.close();
     mockServer.close();
 
+    const expectedDownloadSubtext =
+      'Installer ringan dengan dukungan pembaruan otomatis dan mode senyap 4px Smart-Tuck.';
+    const hasHybridTimestamps =
+      beforeFilterAudit.dateTexts[0] === 'Baru saja' &&
+      beforeFilterAudit.replyDateText === '15 menit lalu' &&
+      beforeFilterAudit.dateTexts[1] === 'Kemarin' &&
+      beforeFilterAudit.dateTexts[2] === '3 jam lalu' &&
+      beforeFilterAudit.dateTexts[3] === '4 hari lalu' &&
+      beforeFilterAudit.dateTexts[4] === '2 Okt 2026' &&
+      beforeFilterAudit.dateTitles.every((t) => /^\d{1,2} [A-Za-z]+ \d{4}, \d{2}:\d{2}$/.test(t));
+
+    check(
+      beforeFilterAudit.downloadSubtext === expectedDownloadSubtext &&
+        beforeFilterAudit.feedbackSubtext.includes('TikTok') &&
+        hasHybridTimestamps,
+      `Evergreen #download copy, TikTok subtitle & hybrid review timestamps + tooltips verified`
+    );
+
     check(
       headerSafetyOk &&
-        liveMockAudit.avgScore === '4.5' &&
-        liveMockAudit.totalText === '2 ulasan' &&
+        liveMockAudit.avgScore === '4.6' &&
+        liveMockAudit.totalText === '5 ulasan' &&
         liveMockAudit.creatorBadge === 'Creator' &&
-        liveMockAudit.filteredCount === 1 &&
+        liveMockAudit.filteredCount === 3 &&
         postedReviewBody?.rating === 5 &&
         postedReviewBody?.author_name === 'Tariq Z.' &&
         typeof postedReviewBody?.elapsed_ms === 'number' &&

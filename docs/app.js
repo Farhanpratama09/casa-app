@@ -1961,16 +1961,53 @@
     }
   }
 
+  function formatReviewCalendarDate(d) {
+    return d.toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  }
+
+  function formatReviewFullTimestamp(isoStr) {
+    if (!isoStr) return '';
+    try {
+      const d = new Date(isoStr);
+      if (Number.isNaN(d.getTime())) return '';
+      const datePart = formatReviewCalendarDate(d);
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      return `${datePart}, ${hh}:${mm}`;
+    } catch (_err) {
+      return '';
+    }
+  }
+
   function formatReviewDate(isoStr) {
     if (!isoStr) return '';
     try {
       const d = new Date(isoStr);
       if (Number.isNaN(d.getTime())) return '';
-      return d.toLocaleDateString('id-ID', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-      });
+      const diffSeconds = Math.floor(Math.max(0, Date.now() - d.getTime()) / 1000);
+      if (diffSeconds < 60) {
+        return 'Baru saja';
+      }
+      if (diffSeconds < 3600) {
+        const mins = Math.floor(diffSeconds / 60);
+        return `${mins} menit lalu`;
+      }
+      if (diffSeconds < 86400) {
+        const hours = Math.floor(diffSeconds / 3600);
+        return `${hours} jam lalu`;
+      }
+      const days = Math.floor(diffSeconds / 86400);
+      if (days === 1) {
+        return 'Kemarin';
+      }
+      if (days < 7) {
+        return `${days} hari lalu`;
+      }
+      return formatReviewCalendarDate(d);
     } catch (_err) {
       return '';
     }
@@ -2117,6 +2154,11 @@
 
       const dateEl = document.createElement('time');
       dateEl.className = 'review-date';
+      if (item.created_at) {
+        dateEl.setAttribute('datetime', item.created_at);
+        const fullCreatedTip = formatReviewFullTimestamp(item.created_at);
+        if (fullCreatedTip) dateEl.setAttribute('title', fullCreatedTip);
+      }
       dateEl.textContent = formatReviewDate(item.created_at);
 
       head.appendChild(authorGroup);
@@ -2142,6 +2184,11 @@
 
         const replyDate = document.createElement('time');
         replyDate.className = 'review-date';
+        if (item.replied_at) {
+          replyDate.setAttribute('datetime', item.replied_at);
+          const fullReplyTip = formatReviewFullTimestamp(item.replied_at);
+          if (fullReplyTip) replyDate.setAttribute('title', fullReplyTip);
+        }
         replyDate.textContent = formatReviewDate(item.replied_at);
 
         replyHead.appendChild(badge);
