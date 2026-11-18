@@ -36,7 +36,7 @@ function check(cond, label, detail = '') {
   }
 }
 
-function startStaticServer(port = 5212, { injectMockSupabaseKey = '' } = {}) {
+function startStaticServer(port = 5212, { overrideSupabaseKey } = {}) {
   const server = http.createServer((req, res) => {
     const rawUrl = (req.url || '/').split('?')[0];
     // Support both `/casa-app/...` (GitHub Pages project subpath) and `/`
@@ -62,11 +62,13 @@ function startStaticServer(port = 5212, { injectMockSupabaseKey = '' } = {}) {
 
     const ext = path.extname(filePath).toLowerCase();
     res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
-    if (injectMockSupabaseKey && relPath === 'app.js') {
-      const src = fs.readFileSync(filePath, 'utf8').replace(
-        "const SUPABASE_PUBLISHABLE_KEY = '';",
-        `const SUPABASE_PUBLISHABLE_KEY = '${injectMockSupabaseKey}';`
-      );
+    if (typeof overrideSupabaseKey === 'string' && relPath === 'app.js') {
+      const src = fs
+        .readFileSync(filePath, 'utf8')
+        .replace(
+          /const\s+SUPABASE_PUBLISHABLE_KEY\s*=\s*(['"`]).*?\1;/,
+          `const SUPABASE_PUBLISHABLE_KEY = '${overrideSupabaseKey}';`
+        );
       res.end(src, 'utf8');
       return;
     }
@@ -79,7 +81,7 @@ function startStaticServer(port = 5212, { injectMockSupabaseKey = '' } = {}) {
 }
 
 async function main() {
-  const server = await startStaticServer(5212);
+  const server = await startStaticServer(5212, { overrideSupabaseKey: '' });
   const candidateBrowsers = [
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
@@ -620,7 +622,7 @@ async function main() {
 
     // Mocked Supabase Live Mode Suite (apikey-only header compatibility, Creator reply, filter & submit-review)
     const mockServer = await startStaticServer(5213, {
-      injectMockSupabaseKey: 'sb_publishable_e2e_mock_key',
+      overrideSupabaseKey: 'sb_publishable_e2e_mock_key',
     });
     const mockCtx = await browser.createBrowserContext();
     const mockPage = await mockCtx.newPage();
