@@ -9,6 +9,11 @@ import { useSkillStore } from '../store';
 import { TimerExpandedView } from '../../features/timer/TimerExpandedView';
 import { TimerPillSlot } from '../../features/timer/TimerPillSlot';
 import { formatDurationClock } from '../../features/timer/timerUtils';
+import {
+  loadPersistedFocusedTaskId,
+  loadPersistedTodos,
+  reconcileTimerFocusedTaskId,
+} from '../../features/todo/todoPersistence';
 
 export const timerSkill: CasaSkill<TimerState> = {
   manifest: {
@@ -27,16 +32,19 @@ export const timerSkill: CasaSkill<TimerState> = {
     },
   },
 
-  initialState: {
-    isActive: false,
-    isPaused: true,
-    totalSeconds: 25 * 60,
-    remainingSeconds: 25 * 60,
-    presetTotalSeconds: 25 * 60,
-    currentCycle: 1,
-    mode: 'focus',
-    focusedTaskId: null,
-    isAlarmRinging: false,
+  get initialState(): TimerState {
+    const hydratedTodos = loadPersistedTodos();
+    return {
+      isActive: false,
+      isPaused: true,
+      totalSeconds: 25 * 60,
+      remainingSeconds: 25 * 60,
+      presetTotalSeconds: 25 * 60,
+      currentCycle: 1,
+      mode: 'focus',
+      focusedTaskId: loadPersistedFocusedTaskId(hydratedTodos),
+      isAlarmRinging: false,
+    };
   },
 
   getPriority: (state: TimerState): SkillPriorityTier => {
@@ -48,6 +56,20 @@ export const timerSkill: CasaSkill<TimerState> = {
   },
 
   onMount: (getState, setState) => {
+    // Re-validate initial focusedTaskId against hydrated To-Do list on startup
+    const bootTodos = useSkillStore.getState().skillStates['core.todo']?.todos;
+    const hydratedTodos = Array.isArray(bootTodos) ? bootTodos : loadPersistedTodos();
+    const initialTimer = getState();
+    if (initialTimer?.focusedTaskId) {
+      const validFocusId = reconcileTimerFocusedTaskId(initialTimer.focusedTaskId, hydratedTodos);
+      if (validFocusId !== initialTimer.focusedTaskId) {
+        setState((prev: TimerState) => ({
+          ...prev,
+          focusedTaskId: validFocusId,
+        }));
+      }
+    }
+
     const interval = setInterval(() => {
       const state = getState();
       if (!state.isActive || state.isPaused || state.isAlarmRinging) return;

@@ -5,6 +5,7 @@ import { TodoItem } from '../../types/island';
 import { TodoCardView } from '../../components/views/TodoCardView';
 import { TodoExpandedView } from '../../features/todo/TodoExpandedView';
 import { TodoPillSlot } from '../../features/todo/TodoPillSlot';
+import { loadPersistedTodos } from '../../features/todo/todoPersistence';
 
 export interface TodoSkillState {
   todos: TodoItem[];
@@ -27,13 +28,10 @@ export const todoSkill: CasaSkill<TodoSkillState> = {
     },
   },
 
-  initialState: {
-    todos: [
-      { id: '1', text: 'Review CASA Top-Bezel Notch styling', completed: true, isPinned: false, scheduledTime: '09:00' },
-      { id: '2', text: 'Fine-tune 2-column split-card music & timer', completed: false, isPinned: true, scheduledTime: '10:30' },
-      { id: '3', text: 'Configure Win32 WS_EX_NOACTIVATE focus lock', completed: false, isPinned: false, scheduledTime: '14:00' },
-      { id: '4', text: 'Verify Micro-Status Header clock and wave', completed: false, isPinned: false },
-    ],
+  get initialState(): TodoSkillState {
+    return {
+      todos: loadPersistedTodos(),
+    };
   },
 
   getPriority: (_state: TodoSkillState): SkillPriorityTier => {

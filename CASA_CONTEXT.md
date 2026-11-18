@@ -50,6 +50,7 @@ asaverse/
 ├─ scripts/
 │  ├─ verify-docs-showcase.mjs        ← E2E Puppeteer parity Desktop (1280x800) & Mobile (390x844) + CSP & Reviews
 │  ├─ verify-reviews-security.mjs     ← Unit test Node untuk anti-spam NFKC/word-boundary, IPv6 /64 HMAC & webhook crypto
+│  ├─ verify-todo-persistence.mjs     ← Verifikasi persistensi To-Do antar-sesi, initial empty [], & validasi focusedTaskId
 │  ├─ verify-search-playlist-flow.mjs ← Verifikasi Search Drawer & Playlist popover flow
 │  └─ verify-*.{ts,js}                ← Logic test suite (lyrics, queue, browser sanitizer, time-sync, hitbox)
 ├─ src-tauri/
@@ -126,7 +127,7 @@ asaverse/
 - **Single Clock Sync, `Unsynced` Auto-Scroll & To-Do Alarm `v2.0.4`:**
   - *Single Playback Clock:* `playbackClock.ts` menyatukan `resolvePlaybackPositionMs`, `computeLyricAdjustedTimeMs` (`75 ms` companion, `0 ms` native), dan `computeSyncedLyricIndex` (`50 ms` hysteresis) untuk Mode 6 & Idle Pill, disertai re-anchor SMTC (`reanchorMediaPlaybackClock`) saat transisi expanded/idle & Playing/Paused.
   - *Proportional Unsynced Scroll:* Lirik tanpa timestamp menampilkan badge `Unsynced` dengan gulir halus proporsional (`computeUnsyncedScrollProgress`, margin intro/outro ±9%) dan jeda otomatis 4 detik saat digulir manual via *mouse wheel*.
-  - *Timer → To-Do Auto-Check:* Saat alarm berakhir pada item To-Do tertaut, muncul 3 aksi (`Selesai` | `+5m` | `Dismiss`), dan mencentang/menghapus item lebih dulu otomatis melepaskan tautan `focusedTaskId` (`unlinkTodoFromTimerState`).
+  - *Timer → To-Do Auto-Check & Persistent Storage:* Daftar To-Do berawal kosong (`[]`) tanpa dummy task dan dipersistensikan sinkron via [todoPersistence.ts](./src/features/todo/todoPersistence.ts) (`localStorage` `casa_todo_items_v1` + validasi startup `focusedTaskId`); saat alarm berakhir pada item To-Do tertaut, muncul 3 aksi (`Selesai` | `+5m` | `Dismiss`), dan mencentang/menghapus item lebih dulu otomatis melepaskan tautan `focusedTaskId` (`unlinkTodoFromTimerState`).
 
 ### 4.3 Web Showcase & Ratings/Reviews (`docs/` & `supabase/`)
 - **1:1 Parity Demo:** Simulasi interaktif di [docs/index.html](./docs/index.html) & [docs/app.js](./docs/app.js) mengikuti anatomi kapsul, intro `"Hi."`, Mode 6 `Player | Playlists` + `QUEUE`, Circular Battery Ring, Brightness HUD, Control Center, dan Drop Zone di aplikasi desktop.

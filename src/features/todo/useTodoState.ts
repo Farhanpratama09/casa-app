@@ -1,9 +1,10 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useSkillStore } from '../../skills/store';
 import { TodoSkillState, TodoItem } from './types';
 import { TimerState } from '../timer/types';
 import { computeRemainingSecondsUntil, unlinkTodoFromTimerState } from '../timer/timerUtils';
 import { stopAlarmChime } from '../../utils/alarmChime';
+import { loadPersistedTodos } from './todoPersistence';
 
 export function useTodoState() {
   const todoState: TodoSkillState = useSkillStore(
@@ -26,7 +27,7 @@ export function useTodoState() {
 
       updateState((prev) => ({
         ...prev,
-        todos: prev.todos.map((t) =>
+        todos: (prev?.todos || []).map((t) =>
           t.id === id
             ? { ...t, completed: willComplete, isPinned: willComplete ? false : t.isPinned }
             : t
@@ -63,7 +64,7 @@ export function useTodoState() {
 
       updateState((prev) => ({
         ...prev,
-        todos: prev.todos.map((t) => {
+        todos: (prev?.todos || []).map((t) => {
           if (t.id === id) {
             return { ...t, isPinned: willPin };
           }
@@ -128,7 +129,7 @@ export function useTodoState() {
       const normalized = scheduledTime?.trim() ? scheduledTime.trim() : undefined;
       updateState((prev) => ({
         ...prev,
-        todos: prev.todos.map((t) =>
+        todos: (prev?.todos || []).map((t) =>
           t.id === id ? { ...t, scheduledTime: normalized } : t
         ),
       }));
@@ -156,7 +157,7 @@ export function useTodoState() {
     (id: string) => {
       updateState((prev) => ({
         ...prev,
-        todos: prev.todos.filter((t) => t.id !== id),
+        todos: (prev?.todos || []).filter((t) => t.id !== id),
       }));
       let shouldStopChime = false;
       updateSkillState('core.timer', (prevTimer: TimerState) => {
@@ -181,12 +182,34 @@ export function useTodoState() {
     [updateState]
   );
 
+  const editTodoText = useCallback(
+    (id: string, nextText: string) => {
+      const trimmed = nextText.trim();
+      if (!trimmed) return;
+      updateState((prev) => ({
+        ...prev,
+        todos: (prev?.todos || []).map((t) =>
+          t.id === id ? { ...t, text: trimmed } : t
+        ),
+      }));
+    },
+    [updateState]
+  );
+
+  const hydratedTodos = useMemo(() => {
+    if (Array.isArray(todoState?.todos)) {
+      return todoState.todos;
+    }
+    return loadPersistedTodos();
+  }, [todoState?.todos]);
+
   return {
     todoState,
-    todos: todoState?.todos || [],
+    todos: hydratedTodos,
     toggleTodo,
     togglePin,
     addTodo,
+    editTodoText,
     setTodoScheduledTime,
     removeTodo,
     reorderTodos,

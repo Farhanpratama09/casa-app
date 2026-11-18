@@ -2,6 +2,12 @@ import { create } from 'zustand';
 import { CasaSkill, PRIORITY_WEIGHTS, SkillId, SkillPriorityTier } from './types';
 import { SkillRegistry } from './registry';
 import { getRegisteredSkillIds } from '../features/skillsRegistry';
+import {
+  loadPersistedTodos,
+  reconcileTimerFocusedTaskId,
+  savePersistedFocusedTaskId,
+  savePersistedTodos,
+} from '../features/todo/todoPersistence';
 
 interface SkillStoreState {
   skillStates: Record<SkillId, any>;
@@ -48,8 +54,35 @@ export const useSkillStore = create<SkillStoreState>((set, get) => ({
 
     // Set initial state if not already populated
     if (skillStates[id] === undefined) {
+      let seededState = skill.initialState;
+      if (id === 'core.todo') {
+        const hydratedTodos = loadPersistedTodos();
+        seededState = { todos: hydratedTodos };
+        // Also strip any stale timer focusedTaskId if core.timer booted before core.todo
+        const currentTimer = get().skillStates['core.timer'];
+        if (currentTimer?.focusedTaskId) {
+          const validId = reconcileTimerFocusedTaskId(currentTimer.focusedTaskId, hydratedTodos);
+          if (validId !== currentTimer.focusedTaskId) {
+            savePersistedFocusedTaskId(validId);
+            set((state) => ({
+              skillStates: {
+                ...state.skillStates,
+                'core.timer': { ...state.skillStates['core.timer'], focusedTaskId: validId },
+              },
+            }));
+          }
+        }
+      } else if (id === 'core.timer' && seededState?.focusedTaskId) {
+        const currentTodos = get().skillStates['core.todo']?.todos;
+        const hydratedTodos = Array.isArray(currentTodos) ? currentTodos : loadPersistedTodos();
+        const validId = reconcileTimerFocusedTaskId(seededState.focusedTaskId, hydratedTodos);
+        if (validId !== seededState.focusedTaskId) {
+          savePersistedFocusedTaskId(validId);
+          seededState = { ...seededState, focusedTaskId: validId };
+        }
+      }
       set((state) => ({
-        skillStates: { ...state.skillStates, [id]: skill.initialState },
+        skillStates: { ...state.skillStates, [id]: seededState },
       }));
     }
 
@@ -86,15 +119,34 @@ export const useSkillStore = create<SkillStoreState>((set, get) => ({
   },
 
   updateSkillState: (id: SkillId, patchOrFn: any) => {
+    let persistedTodosToWrite: any[] | null = null;
+    let persistedFocusedIdToWrite: string | null | undefined;
+
     set((state) => {
       const prev = state.skillStates[id];
       const next =
         typeof patchOrFn === 'function' ? patchOrFn(prev) : { ...prev, ...patchOrFn };
 
+      if (id === 'core.todo' && next && Array.isArray(next.todos)) {
+        persistedTodosToWrite = next.todos;
+      }
+      if (id === 'core.timer' && next && 'focusedTaskId' in next) {
+        if (!prev || prev.focusedTaskId !== next.focusedTaskId) {
+          persistedFocusedIdToWrite = next.focusedTaskId ?? null;
+        }
+      }
+
       return {
         skillStates: { ...state.skillStates, [id]: next },
       };
     });
+
+    if (persistedTodosToWrite !== null) {
+      savePersistedTodos(persistedTodosToWrite);
+    }
+    if (persistedFocusedIdToWrite !== undefined) {
+      savePersistedFocusedTaskId(persistedFocusedIdToWrite);
+    }
 
     get().recalculateArbitration();
   },
