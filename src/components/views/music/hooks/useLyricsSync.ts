@@ -4,6 +4,8 @@ import { PlaybackSource } from '../constants';
 import {
   PlaybackClockSnapshot,
   computeInterpolatedPositionMs,
+  computeLyricAdjustedTimeMs,
+  computeSyncedLyricIndex,
   EXTERNAL_SEEK_SNAP_THRESHOLD_MS,
 } from '../../../../features/media/playbackClock';
 import {
@@ -140,36 +142,18 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
 
   const getLyricAdjustedTime = useCallback(
     (timeMs: number, ignoreLeadTime: boolean = false): number => {
-      // In native mode, read raw audio clock directly without GSMTC delay compensation
-      if (playbackSource === 'native') {
-        return timeMs;
-      }
-      const leadMs = ignoreLeadTime || isSeekingRef.current ? 0 : 75;
-      return timeMs - lyricOffsetMs + leadMs;
+      return computeLyricAdjustedTimeMs(timeMs, {
+        playbackSource,
+        offsetSeconds: lyricOffsetSeconds,
+        ignoreLeadTime: ignoreLeadTime || isSeekingRef.current,
+      });
     },
-    [playbackSource, lyricOffsetMs]
+    [playbackSource, lyricOffsetSeconds]
   );
 
   const computeRawLyricIndex = useCallback(
     (lines: Array<{ id: string; timeMs: number; text: string; time?: number }>, timeMs: number): number => {
-      if (!lines || lines.length === 0) return -1;
-      const firstLineMs = lines[0].timeMs;
-
-      // Natural Transition: If intro > 3000ms and playback hasn't reached first line yet
-      if (timeMs < firstLineMs && firstLineMs > 3000) {
-        return -1;
-      }
-
-      let activeIdx = 0;
-      // 50ms Hysteresis band: prevents boundary flicker / stutter between lines
-      for (let i = 1; i < lines.length; i++) {
-        if (timeMs >= lines[i].timeMs + 50) {
-          activeIdx = i;
-        } else {
-          break;
-        }
-      }
-      return activeIdx;
+      return computeSyncedLyricIndex(lines, timeMs);
     },
     []
   );
@@ -578,45 +562,38 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
     applyProgressUpdate,
   ]);
 
-  // Reaktivitas Auto-Sync: Tangani Asynchronous Lyrics Arrival & Sinkronisasi Posisi Aktif
+  // Reaktivitas Auto-Sync: Tangani Asynchronous Lyrics Arrival & Sinkronisasi Posisi Aktif (Single Formula)
   useEffect(() => {
     if (!displayLines || displayLines.length === 0) return;
 
-    // Hitung posisi waktu pemutaran saat ini (dalam detik)
-    const currentSec =
+    const currentMs =
       playbackSource === 'native'
-        ? (currentTimeSeconds > 0 ? currentTimeSeconds : (audioRef.current ? audioRef.current.currentTime : 0))
-        : (preciseTimeMs > 0 ? preciseTimeMs / 1000 : externalCurrentTimeSeconds);
+        ? currentTimeSeconds > 0
+          ? currentTimeSeconds * 1000
+          : audioRef.current
+          ? audioRef.current.currentTime * 1000
+          : 0
+        : playbackClockRef.current
+        ? computeInterpolatedPositionMs(playbackClockRef.current, Date.now())
+        : preciseTimeMs > 0
+        ? preciseTimeMs
+        : externalCurrentTimeSeconds * 1000;
 
-    // Stale Clock Guard on Track Change: tahan kalkulasi baris aktif di 0 sampai waktu <= 1 detik
+    // Stale Clock Guard on Track Change: tahan kalkulasi baris aktif di -1 sampai waktu <= 1 detik
     if (isTrackChangingRef.current) {
-      if (currentSec <= 1) {
+      if (currentMs <= 1000) {
         isTrackChangingRef.current = false;
       } else {
-        if (activeLyricIndex !== 0) {
-          lastActiveIndexRef.current = 0;
-          setActiveLyricIndex(0);
+        if (activeLyricIndex !== -1) {
+          lastActiveIndexRef.current = -1;
+          setActiveLyricIndex(-1);
         }
         return;
       }
     }
 
-    // Cari index baris lirik berdasarkan currentSec saat ini
-    let currentIndex = -1;
-    for (let i = displayLines.length - 1; i >= 0; i--) {
-      const line = displayLines[i];
-      const lineSec =
-        (line as any).timeSeconds ??
-        (line as any).seconds ??
-        line.time ??
-        (typeof line.timeMs === 'number' ? line.timeMs / 1000 : 0);
-      if (lineSec <= currentSec + 0.05) {
-        currentIndex = i;
-        break;
-      }
-    }
-
-    if (currentIndex !== -1 && currentIndex !== activeLyricIndex) {
+    const currentIndex = computeRawLyricIndex(displayLines, getLyricAdjustedTime(currentMs));
+    if (currentIndex !== activeLyricIndex) {
       lastActiveIndexRef.current = currentIndex;
       setActiveLyricIndex(currentIndex);
     }
@@ -628,6 +605,8 @@ export function useLyricsSync(params: UseLyricsSyncParams) {
     preciseTimeMs,
     activeLyricIndex,
     audioRef,
+    computeRawLyricIndex,
+    getLyricAdjustedTime,
   ]);
 
   const calibrateExternalTime = useCallback((timeMs: number, shiftSyncBaseline: boolean = false) => {

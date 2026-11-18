@@ -2104,7 +2104,7 @@
 
       const versionEl = document.createElement('span');
       versionEl.className = 'review-version-badge';
-      versionEl.textContent = item.app_version || 'v2.0.3';
+      versionEl.textContent = item.app_version || 'v2.0.4';
 
       const starsWrap = document.createElement('span');
       starsWrap.className = 'reviews-stars-row';
@@ -2365,7 +2365,7 @@
               comment,
               website_hp: websiteHp,
               elapsed_ms: elapsedMs,
-              app_version: 'v2.0.3',
+              app_version: 'v2.0.4',
             }),
           });
 

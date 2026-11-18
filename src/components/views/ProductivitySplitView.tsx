@@ -20,6 +20,7 @@ export interface ProductivitySplitViewProps {
   onSetCustomMinutes?: (minutes: number) => void;
   onAddFiveMinutes?: () => void;
   onDismissAlarm?: () => void;
+  onCompleteFocusedTodo?: (taskId?: string | null) => void;
   focusedTaskId?: string | null;
   onFocusTask?: (id: string, scheduledTime?: string) => void;
   todos: TodoItem[];
@@ -68,6 +69,7 @@ export const ProductivitySplitView: React.FC<ProductivitySplitViewProps> = ({
   onSetCustomMinutes,
   onAddFiveMinutes,
   onDismissAlarm,
+  onCompleteFocusedTodo,
   focusedTaskId: propFocusedTaskId,
   onFocusTask,
   todos,
@@ -77,10 +79,15 @@ export const ProductivitySplitView: React.FC<ProductivitySplitViewProps> = ({
   onTogglePin,
   onDeleteTodo,
 }) => {
-  const { addFiveMinutes: storeAddFiveMinutes, dismissAlarm: storeDismissAlarm } =
-    useTimerState();
+  const {
+    addFiveMinutes: storeAddFiveMinutes,
+    dismissAlarm: storeDismissAlarm,
+    completeFocusedTodoAndDismiss: storeCompleteFocusedTodoAndDismiss,
+  } = useTimerState();
   const handleAddFiveMinutes = onAddFiveMinutes ?? storeAddFiveMinutes;
   const handleDismissAlarm = onDismissAlarm ?? storeDismissAlarm;
+  const handleCompleteFocusedTodo =
+    onCompleteFocusedTodo ?? storeCompleteFocusedTodoAndDismiss;
   const isAlarmRinging = Boolean(timer.isAlarmRinging);
   const effectiveFocusedTaskId =
     propFocusedTaskId !== undefined ? propFocusedTaskId : timer.focusedTaskId ?? null;
@@ -297,28 +304,70 @@ export const ProductivitySplitView: React.FC<ProductivitySplitViewProps> = ({
             </div>
 
             <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  unlockAlarmAudio();
-                  handleAddFiveMinutes();
-                }}
-                style={{ backgroundColor: 'var(--casa-timer, #F59E0B)' }}
-                className="flex-1 h-[24px] px-2.5 rounded-full hover:brightness-110 text-black text-[10px] font-bold transition-all cursor-pointer active:scale-95"
-              >
-                +5m
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDismissAlarm();
-                }}
-                className="flex-1 h-[24px] px-2.5 rounded-full bg-white/[0.10] hover:bg-white/[0.20] border border-white/15 text-white text-[10px] font-semibold transition-colors cursor-pointer active:scale-95"
-              >
-                Dismiss
-              </button>
+              {activeFocusTask ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCompleteFocusedTodo(activeFocusTask.id);
+                    }}
+                    style={{ backgroundColor: 'var(--casa-timer, #F59E0B)' }}
+                    className="flex-1 h-[24px] px-2.5 rounded-full hover:brightness-110 text-black text-[10px] font-bold transition-all cursor-pointer active:scale-95 whitespace-nowrap"
+                    title="Matikan alarm, reset timer & centang tugas selesai"
+                  >
+                    Selesai
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      unlockAlarmAudio();
+                      handleAddFiveMinutes();
+                    }}
+                    className="h-[24px] px-2.5 rounded-full bg-white/[0.12] hover:bg-white/[0.20] border border-white/20 text-white text-[10px] font-semibold transition-colors cursor-pointer active:scale-95 shrink-0 whitespace-nowrap"
+                    title="Tambah 5 menit & pertahankan tautan tugas"
+                  >
+                    +5m
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDismissAlarm();
+                    }}
+                    className="h-[24px] px-2.5 rounded-full bg-white/[0.06] hover:bg-white/[0.16] border border-white/[0.12] text-white/80 hover:text-white text-[10px] font-semibold transition-colors cursor-pointer active:scale-95 shrink-0 whitespace-nowrap"
+                    title="Matikan alarm tanpa mencentang tugas"
+                  >
+                    Dismiss
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      unlockAlarmAudio();
+                      handleAddFiveMinutes();
+                    }}
+                    style={{ backgroundColor: 'var(--casa-timer, #F59E0B)' }}
+                    className="flex-1 h-[24px] px-2.5 rounded-full hover:brightness-110 text-black text-[10px] font-bold transition-all cursor-pointer active:scale-95"
+                  >
+                    +5m
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDismissAlarm();
+                    }}
+                    className="flex-1 h-[24px] px-2.5 rounded-full bg-white/[0.10] hover:bg-white/[0.20] border border-white/15 text-white text-[10px] font-semibold transition-colors cursor-pointer active:scale-95"
+                  >
+                    Dismiss
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ) : (

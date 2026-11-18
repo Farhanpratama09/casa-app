@@ -39,6 +39,7 @@ export const TodoExpandedView: React.FC<TodoExpandedViewProps> = ({
       onSetCustomMinutes={timer.setCustomMinutes}
       onAddFiveMinutes={timer.addFiveMinutes}
       onDismissAlarm={timer.dismissAlarm}
+      onCompleteFocusedTodo={timer.completeFocusedTodoAndDismiss}
       focusedTaskId={timer.focusedTaskId}
       onFocusTask={timer.toggleFocusTask}
       todos={state.todos || []}

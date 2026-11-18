@@ -40,6 +40,7 @@ export interface CasaAudioContextType {
   audioError: string | null;
   currentTime: number; // in seconds
   currentTimeMs: number; // in milliseconds
+  getAccurateTimeMs: () => number;
   duration: number; // in seconds
   durationMs: number; // in milliseconds
   volume: number; // 0.0 - 1.0
@@ -928,6 +929,16 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
       ? 'spotify'
       : null;
 
+  const getAccurateTimeMs = useCallback(() => {
+    if (audioRef.current && !isResolvingAudioRef.current) {
+      const rawMs = audioRef.current.currentTime * 1000;
+      if (Number.isFinite(rawMs) && rawMs >= 0) {
+        return rawMs;
+      }
+    }
+    return currentTimeMs;
+  }, [currentTimeMs]);
+
   const contextValue: CasaAudioContextType = {
     audioRef,
     playbackSource,
@@ -939,6 +950,7 @@ export const CasaAudioProvider: React.FC<CasaAudioProviderProps> = ({ children }
     audioError,
     currentTime,
     currentTimeMs,
+    getAccurateTimeMs,
     duration,
     durationMs,
     volume,

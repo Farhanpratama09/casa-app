@@ -2,7 +2,8 @@ import { useCallback } from 'react';
 import { useSkillStore } from '../../skills/store';
 import { TodoSkillState, TodoItem } from './types';
 import { TimerState } from '../timer/types';
-import { computeRemainingSecondsUntil, stopAndResetTimerState } from '../timer/timerUtils';
+import { computeRemainingSecondsUntil, unlinkTodoFromTimerState } from '../timer/timerUtils';
+import { stopAlarmChime } from '../../utils/alarmChime';
 
 export function useTodoState() {
   const todoState: TodoSkillState = useSkillStore(
@@ -33,12 +34,15 @@ export function useTodoState() {
       }));
 
       if (willComplete) {
+        let shouldStopChime = false;
         updateSkillState('core.timer', (prevTimer: TimerState) => {
-          if (!prevTimer || prevTimer.focusedTaskId !== id) {
-            return prevTimer;
-          }
-          return stopAndResetTimerState(prevTimer);
+          const { nextState, stoppedAlarm } = unlinkTodoFromTimerState(prevTimer, id);
+          shouldStopChime = stoppedAlarm;
+          return nextState;
         });
+        if (shouldStopChime) {
+          stopAlarmChime();
+        }
       }
     },
     [updateState, updateSkillState]
@@ -154,8 +158,14 @@ export function useTodoState() {
         ...prev,
         todos: prev.todos.filter((t) => t.id !== id),
       }));
-      if (useSkillStore.getState().skillStates['core.timer']?.focusedTaskId === id) {
-        updateSkillState('core.timer', { focusedTaskId: null });
+      let shouldStopChime = false;
+      updateSkillState('core.timer', (prevTimer: TimerState) => {
+        const { nextState, stoppedAlarm } = unlinkTodoFromTimerState(prevTimer, id);
+        shouldStopChime = stoppedAlarm;
+        return nextState;
+      });
+      if (shouldStopChime) {
+        stopAlarmChime();
       }
     },
     [updateState, updateSkillState]

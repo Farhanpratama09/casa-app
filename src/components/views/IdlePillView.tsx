@@ -22,7 +22,12 @@ import { useSystemHardware, SystemHudAlert } from '../../hooks/useSystemHardware
 import { useSystemTelemetry } from '../../hooks/useSystemTelemetry';
 import { BatteryPill } from '../system/BatteryPill';
 import { useCasaAudio } from '../../context/CasaAudioContext';
-import { getActiveLyrics } from '../../utils/lyricsService';
+import {
+  computeLyricAdjustedTimeMs,
+  computeSyncedLyricIndex,
+  resolvePlaybackPositionMs,
+} from '../../features/media/playbackClock';
+import { reanchorMediaPlaybackClock } from '../../skills/media/MediaSkill';
 import { RestingPill } from '../companion/RestingPill';
 import {
   CasaCompanionAvatar,
@@ -243,13 +248,21 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
     ? Boolean(isNativePlaying && nativeTrack)
     : Boolean(song?.isPlaying && song?.title && song.title.trim() !== '');
 
+  useEffect(() => {
+    reanchorMediaPlaybackClock();
+  }, [isExpanded]);
+
   const isIdleLyricsEnabled = Boolean(mediaState?.showIdleLyrics);
   const activeLyricsResult =
     playbackSource === 'native'
       ? casaAudio.lyricsData || mediaState?.lyricsData
       : mediaState?.lyricsData;
-  const livePositionSec =
-    playbackSource === 'native' ? casaAudio.currentTime : (song?.currentTime ?? 0);
+  const livePositionMs = resolvePlaybackPositionMs({
+    playbackSource: playbackSource === 'native' ? 'native' : 'companion',
+    playbackClock: mediaState?.playbackClock,
+    nativePositionMs: casaAudio.getAccurateTimeMs(),
+    fallbackPositionSec: song?.currentTime ?? 0,
+  });
 
   let activeLyricText = '';
   if (
@@ -259,14 +272,14 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
     Array.isArray(activeLyricsResult.lines) &&
     activeLyricsResult.lines.length > 0
   ) {
-    const active = getActiveLyrics(
-      activeLyricsResult.lines,
-      livePositionSec,
-      0.35,
-      activeLyricsResult.offsetSeconds || 0
-    );
-    if (active.current && active.current.trim() !== '') {
-      activeLyricText = active.current.trim();
+    const adjustedMs = computeLyricAdjustedTimeMs(livePositionMs, {
+      playbackSource: playbackSource === 'native' ? 'native' : 'companion',
+      offsetSeconds: activeLyricsResult.offsetSeconds || 0,
+    });
+    const activeIdx = computeSyncedLyricIndex(activeLyricsResult.lines, adjustedMs);
+    const candidate = activeIdx >= 0 ? activeLyricsResult.lines[activeIdx]?.text : undefined;
+    if (candidate && candidate.trim() !== '') {
+      activeLyricText = candidate.trim();
     }
   }
 
@@ -277,7 +290,7 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
 
   // Akses langsung state timer dari store
   const timerState = useSkillStore((s) => s.skillStates['core.timer']);
-  const { addFiveMinutes, dismissAlarm } = useTimerState();
+  const { addFiveMinutes, dismissAlarm, completeFocusedTodoAndDismiss } = useTimerState();
   const todos: TodoItem[] = useSkillStore((s) => s.skillStates['core.todo']?.todos || []);
   const isTimerActive = Boolean(timerState?.isActive);
   const isAlarmRinging = Boolean(timerState?.isAlarmRinging);
@@ -640,7 +653,7 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
             e.stopPropagation();
             onExpandSkill?.('core.timer');
           }}
-          className={`w-[360px] px-3.5 h-full flex items-center justify-between gap-2.5 bg-[#000000] select-none ${
+          className={`${focusedTask ? 'w-[428px]' : 'w-[360px]'} px-3.5 h-full flex items-center justify-between gap-2.5 bg-[#000000] select-none ${
             isExpanded ? 'pointer-events-none' : 'cursor-pointer'
           }`}
         >
@@ -669,33 +682,80 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                addFiveMinutes();
-              }}
-              style={{ backgroundColor: 'var(--casa-timer, #F59E0B)' }}
-              className="h-[22px] px-2 rounded-full hover:brightness-110 text-black font-sans text-[10px] font-bold transition-all cursor-pointer active:scale-95"
-              title="Tambah 5 menit & lanjutkan"
-            >
-              +5m
-            </button>
-            <button
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                dismissAlarm();
-              }}
-              className="h-[22px] px-2 rounded-full bg-white/[0.10] hover:bg-white/[0.20] border border-white/15 text-white font-sans text-[10px] font-semibold transition-colors cursor-pointer active:scale-95"
-              title="Matikan alarm & reset preset"
-            >
-              Dismiss
-            </button>
+            {focusedTask ? (
+              <>
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    completeFocusedTodoAndDismiss(focusedTask.id);
+                  }}
+                  style={{ backgroundColor: 'var(--casa-timer, #F59E0B)' }}
+                  className="h-[22px] px-2.5 rounded-full hover:brightness-110 text-black font-sans text-[10px] font-bold transition-all cursor-pointer active:scale-95 whitespace-nowrap"
+                  title="Matikan alarm, reset timer & centang tugas selesai"
+                >
+                  Selesai
+                </button>
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    addFiveMinutes();
+                  }}
+                  className="h-[22px] px-2 rounded-full bg-white/[0.12] hover:bg-white/[0.20] border border-white/20 text-white font-sans text-[10px] font-semibold transition-colors cursor-pointer active:scale-95 whitespace-nowrap"
+                  title="Tambah 5 menit & pertahankan tautan tugas"
+                >
+                  +5m
+                </button>
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    dismissAlarm();
+                  }}
+                  className="h-[22px] px-2 rounded-full bg-white/[0.06] hover:bg-white/[0.16] border border-white/[0.12] text-white/80 hover:text-white font-sans text-[10px] font-medium transition-colors cursor-pointer active:scale-95 whitespace-nowrap"
+                  title="Matikan alarm tanpa mencentang tugas"
+                >
+                  Dismiss
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    addFiveMinutes();
+                  }}
+                  style={{ backgroundColor: 'var(--casa-timer, #F59E0B)' }}
+                  className="h-[22px] px-2 rounded-full hover:brightness-110 text-black font-sans text-[10px] font-bold transition-all cursor-pointer active:scale-95"
+                  title="Tambah 5 menit & lanjutkan"
+                >
+                  +5m
+                </button>
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    dismissAlarm();
+                  }}
+                  className="h-[22px] px-2 rounded-full bg-white/[0.10] hover:bg-white/[0.20] border border-white/15 text-white font-sans text-[10px] font-semibold transition-colors cursor-pointer active:scale-95"
+                  title="Matikan alarm & reset preset"
+                >
+                  Dismiss
+                </button>
+              </>
+            )}
           </div>
         </motion.div>
       ) : activeModeKey === 'system-hud' && hudAlert ? (

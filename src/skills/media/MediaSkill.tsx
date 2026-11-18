@@ -43,8 +43,10 @@ import {
   PlaybackClockSnapshot,
   computeInterpolatedPositionMs,
   reconcilePlaybackClockSnapshot,
+  snapPlaybackClockAnchor,
   isPlaybackSeekLocked,
 } from '../../features/media/playbackClock';
+import { useSkillStore } from '../store';
 
 import type { NativeTrack } from '../../services/nativeAudioService';
 
@@ -90,6 +92,100 @@ const interpolateClockTick = (prev: MediaSkillState): MediaSkillState => {
     },
   };
 };
+
+let lastModeReanchorAtMs = 0;
+
+/**
+ * Re-anchors the single global playbackClock snapshot when transitioning between Mode 6 (Expanded)
+ * and Mode Idle (Collapsed), and calibrates active SMTC / Spotify timestamps without spawning extra timers.
+ */
+export function reanchorMediaPlaybackClock(): void {
+  const store = useSkillStore.getState();
+  const prev = store.skillStates['core.media'] as MediaSkillState | undefined;
+  if (!prev || prev.playbackSource === 'native' || !prev.playbackClock) return;
+
+  const nowMs = Date.now();
+  store.updateSkillState('core.media', (s: MediaSkillState) => {
+    if (!s?.playbackClock || s.playbackSource === 'native') return s;
+    const snapped = snapPlaybackClockAnchor(s.playbackClock, nowMs);
+    if (!snapped) return s;
+    return {
+      ...s,
+      playbackClock: snapped,
+      song: {
+        ...s.song,
+        currentTime: snapped.basePositionMs / 1000,
+      },
+    };
+  });
+
+  if (prev.song?.isPlaying && nowMs - lastModeReanchorAtMs > 1500) {
+    lastModeReanchorAtMs = nowMs;
+    if (prev.song.is_spotify && isSpotifyUserConnected()) {
+      void getSpotifyPlaybackSnapshot()
+        .then((snap) => {
+          if (!snap || isPlaybackSeekLocked()) return;
+          useSkillStore.getState().updateSkillState('core.media', (s: MediaSkillState) => {
+            if (!s || s.playbackSource === 'native' || !s.hasNativeMedia) return s;
+            const durMs =
+              snap.durationMs > 0 ? snap.durationMs : s.playbackClock?.durationMs || 0;
+            const calibrated = reconcilePlaybackClockSnapshot(s.playbackClock, {
+              incomingPositionMs: snap.progressMs,
+              isPlaying: snap.isPlaying,
+              durationMs: durMs,
+              nowMs: snap.capturedAtMs,
+              isPositionFresh: true,
+              calibrateMinorDrift: true,
+            });
+            return {
+              ...s,
+              playbackClock: calibrated,
+              song: {
+                ...s.song,
+                currentTime: computeInterpolatedPositionMs(calibrated, Date.now()) / 1000,
+              },
+            };
+          });
+        })
+        .catch(() => {});
+    } else if (!prev.song.is_browser && prev.hasNativeMedia) {
+      void getCurrentMedia()
+        .then((snap) => {
+          if (!snap || snap.is_browser || isPlaybackSeekLocked()) return;
+          if (typeof snap.position !== 'number' || Number.isNaN(snap.position) || snap.position < 0) {
+            return;
+          }
+          const reqNow = Date.now();
+          useSkillStore.getState().updateSkillState('core.media', (s: MediaSkillState) => {
+            if (!s || s.playbackSource === 'native' || !s.hasNativeMedia) return s;
+            if (snap.title && s.song.title && snap.title.trim() !== s.song.title.trim()) {
+              return s;
+            }
+            const durMs =
+              s.playbackClock?.durationMs ||
+              (snap.duration > 0 ? Math.round(snap.duration * 1000) : 0);
+            const calibrated = reconcilePlaybackClockSnapshot(s.playbackClock, {
+              incomingPositionMs: Math.round(snap.position * 1000),
+              isPlaying: snap.is_playing,
+              durationMs: durMs,
+              nowMs: reqNow,
+              isPositionFresh: true,
+              calibrateMinorDrift: true,
+            });
+            return {
+              ...s,
+              playbackClock: calibrated,
+              song: {
+                ...s.song,
+                currentTime: computeInterpolatedPositionMs(calibrated, Date.now()) / 1000,
+              },
+            };
+          });
+        })
+        .catch(() => {});
+    }
+  }
+}
 
 export const isValidTrackMetadata = (title?: string, _artist?: string): boolean => {
   if (!title) return false;
@@ -710,6 +806,9 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
                 ? Math.round(payload.position * 1000)
                 : null;
 
+            const playStateChanged = Boolean(
+              s.playbackClock && s.playbackClock.isPlaying !== payload.is_playing
+            );
             const nextClock = reconcilePlaybackClockSnapshot(s.playbackClock, {
               incomingPositionMs: incomingPosMs,
               isPlaying: payload.is_playing,
@@ -717,7 +816,8 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
               nowMs,
               forceSnap: trackChanged && !isPlaybackSeekLocked(),
               isPositionFresh: Boolean(trackChanged || (nativePosChanged && !isBrowserStaleZero)),
-              calibrateMinorDrift: Boolean(!payload.is_browser && nativePosChanged),
+              calibrateMinorDrift: Boolean(!payload.is_browser && (nativePosChanged || playStateChanged)),
+              playStateChanged,
             });
 
             const syncedCurrentTime = computeInterpolatedPositionMs(nextClock, nowMs) / 1000;
@@ -763,6 +863,19 @@ export const mediaSkill: CasaSkill<MediaSkillState> = {
               },
             };
           });
+
+          if (
+            !trackChanged &&
+            !isNativeMode &&
+            prev?.song?.isPlaying === false &&
+            payload.is_playing &&
+            payload.is_spotify &&
+            isSpotifyUserConnected()
+          ) {
+            setTimeout(() => {
+              if (isMounted) void syncSpotifyClockSnapshot();
+            }, 250);
+          }
 
           const needsLyricsFetch =
             !isNativeMode &&

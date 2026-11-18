@@ -1,4 +1,4 @@
-# CASA_CONTEXT.md — Single Source of Truth (`v2.0.3`)
+# CASA_CONTEXT.md — Single Source of Truth (`v2.0.4`)
 
 > Dibuat dari implementasi nyata pada `src/`, `src-tauri/`, dan `docs/` (bukan asumsi). Wajib diperbarui setiap kali kode atau arsitektur berubah.  
 > **CASA** — *Dynamic Rabbit Island for Windows* (`com.farhanpratama.casa`) · MIT License.
@@ -10,7 +10,7 @@
 | Aspek | Detail |
 |---|---|
 | Form factor | Window Tauri transparan, frameless, `alwaysOnTop`, `skipTaskbar`, `shadow:false`, dipusatkan di tepi atas monitor aktif |
-| Identifier / Versi | `com.farhanpratama.casa` / **`2.0.3`** (`tauri.conf.json`, `Cargo.toml`, `package.json`) |
+| Identifier / Versi | `com.farhanpratama.casa` / **`2.0.4`** (`tauri.conf.json`, `Cargo.toml`, `package.json`) |
 | Window utama | `1100×340` terkunci (kanvas logis 1100 px menghindari *DWM swapchain ResizeBuffers hitch*; hitbox dinamis via `WS_EX_TRANSPARENT` per `HitRect`) |
 | Settings window | Window sekunder `settings` (`DesktopSettingsWindow.tsx`) berarsitektur flat OLED 2-kolom dengan tombol **`Quit CASA`** |
 | Frontend | React 19, TypeScript 5.7 (`strict`), Vite 6 (dev `127.0.0.1:1420`), Tailwind 3.4, framer-motion 12, zustand 5, lucide-react |
@@ -40,7 +40,7 @@ asaverse/
 │  ├─ styles.css             ← Pure OLED theme + native Mode 6 capsule & Play Store reviews styling
 │  ├─ 404.html               ← Clean SPA sub-route restoration (/playground, /arsitektur, /unduh, /feedback)
 │  ├─ favicon.svg            ← Obsidian Bunny icon (`× ♥`)
-│  ├─ PRD.md                 ← Product Requirements Document v2.0.3
+│  ├─ PRD.md                 ← Product Requirements Document v2.0.4
 │  └─ sasha-character-spec.md
 ├─ supabase/                 ← Backend moderasi ulasan publik (`ivlyujaafwqziogajjtk.supabase.co`)
 │  ├─ config.toml            ← `verify_jwt = false` untuk `submit-review` & `telegram-webhook`
@@ -53,10 +53,11 @@ asaverse/
 │  ├─ verify-search-playlist-flow.mjs ← Verifikasi Search Drawer & Playlist popover flow
 │  └─ verify-*.{ts,js}                ← Logic test suite (lyrics, queue, browser sanitizer, time-sync, hitbox)
 ├─ src-tauri/
-│  ├─ tauri.conf.json        ← v2.0.3, com.farhanpratama.casa, 1100x340, CSP, updater pubkey + endpoints
+│  ├─ tauri.conf.json        ← v2.0.4, com.farhanpratama.casa, 1100x340, CSP, updater pubkey + endpoints
 │  ├─ capabilities/default.json
 │  └─ src/
 │     ├─ main.rs / lib.rs    ← DPI window align (`position_window_top`), 50Hz hitbox, `Alt+Space`, tray EN, `quit_app`, updater
+│     ├─ update_monitor.rs   ← Lightweight ETag (`If-None-Match`) background GitHub release check (5s launch, focus/wake, 45m) + badge `1` state
 │     ├─ hitbox.rs           ← Multi-rect `HitRect` poller 50Hz + `set_island_pinned`
 │     ├─ spotify_oauth.rs    ← OAuth 2.0 loopback :8888 (`start_spotify_login`, `refresh_spotify_user_token`)
 │     ├─ native_audio.rs     ← Pencarian & stream resolution native audio (`search_tracks_native`, `resolve_track_stream`)
@@ -97,17 +98,17 @@ asaverse/
 - **Global Shortcut:** Plugin `global-shortcut` mendaftarkan `Alt+Space` (`casa://toggle-island`) tanpa panic bila bentrok (`SHORTCUT_ALT_SPACE_REGISTERED`).
 - **System Tray (English Uniform):** `Show / Hide CASA`, `Gaming Mode: Auto`, dan `Quit CASA`. Baik aksi tray `quit` maupun command IPC `quit_app` sama-sama memanggil `app.global_shortcut().unregister_all()` sebelum `app.exit(0)`.
 - **Hitbox 50Hz (`hitbox.rs`):** `update_island_hitboxes` menerima maksimal 6 `HitRect` (`center_offset_x`, `top_offset`, `width`, `height`) yang mencakup kapsul utama, *Search Drawer* (+ tinggi popover `AddToPlaylistPopover`), *Queue Popout*, serta pod *Wi-Fi* / *Bluetooth*.
-- **OTA Auto-Updater (`check_app_update`, `install_app_update`):** Membaca `endpoints` di `tauri.conf.json` (`.../releases/latest/download/latest.json`) dengan verifikasi tanda tangan publik Minisign.
+- **OTA Auto-Updater & Background Notifier (`check_app_update`, `install_app_update`, `update_monitor.rs`):** Membaca `endpoints` di `tauri.conf.json` (`.../releases/latest/download/latest.json`) dengan verifikasi tanda tangan publik Minisign; daemon latar belakang melakukan pengecekan senyap memakai `ETag` / `If-None-Match` ke `api.github.com/repos/farhanpratama09/casa-app/releases/latest` (5 detik pasca-buka, focus/wake debounced, interval 45 menit) dan menyalakan badge `1` pada Settings hingga pengguna menekan **Check Updates**.
 
 ### 3.2 Ringkasan IPC Commands (`invoke_handler` di `lib.rs`)
 - **Window & Lifecycle:** `set_ignore_cursor_events`, `align_window_top`, `adjust_window_size`, `focus_island_window`, `set_window_visibility`, `toggle_gaming_mode`, `quit_app`, `update_island_hitbox`, `update_island_hitboxes`, `set_island_pinned`.
-- **System & OTA:** `get_global_shortcut_status`, `get_autostart_enabled`, `set_autostart_enabled`, `check_app_update`, `install_app_update`.
+- **System & OTA:** `get_global_shortcut_status`, `get_autostart_enabled`, `set_autostart_enabled`, `check_app_update`, `install_app_update`, `get_update_notification_status`, `trigger_background_update_check`, `dismiss_update_badge`, `clear_update_notification`.
 - **Media & Spotify:** `media_play_pause`, `media_next_track`, `media_prev_track`, `control_media_session`, `quick_swap_session`, `seek_media_session`, `get_current_media`, `spotify_play_track`, `spotify_play_uri_stealth`, `minimize_spotify_stealth`, `is_spotify_running`, `ensure_spotify_running_silent`, `focus_spotify_window`, `launch_spotify_process_clean`, `quit_spotify_app`, `start_spotify_login`, `refresh_spotify_user_token`, `search_tracks_native`, `resolve_track_stream`.
 - **Hardware & Drop Zone:** `get_system_metrics`, `get_system_telemetry`, `get_hardware_telemetry`, `set_master_volume`, `toggle_audio_mute`, `set_display_brightness`, `set_stay_awake`, `get_stay_awake`, `get_radio_states`, `toggle_wifi`, `toggle_bluetooth`, `scan_wifi_networks`, `connect_wifi_network`, `list_paired_bluetooth`, `toggle_bluetooth_device`, `get_audio_output_devices`, `set_default_audio_endpoint`, `get_file_metadata`, `register_drop_zone_files`, `read_clipboard_text`, `read_clipboard_files`, `save_clipboard_image`, `copy_files_to_clipboard`, `pick_drop_zone_files`, `launch_file_item`, `reveal_in_folder`, `open_file_item`, `open_url_item`.
 
 ---
 
-## 4. Arsitektur Frontend & UX `v2.0.3` (`src/` & `docs/`)
+## 4. Arsitektur Frontend & UX `v2.0.4` (`src/` & `docs/`)
 
 ### 4.1 Dimensi Kapsul (`islandLayoutState.ts`)
 - **Smart-Tuck:** `120×4 px` (sensor hover `124×8 px`), cooldown pasca-fullscreen `450 ms`.
@@ -121,6 +122,11 @@ asaverse/
 ### 4.2 Sub-Navigasi Musik & Tema (`Mode6MusicLayout.tsx`, `Mode6ControlCenterView.tsx`, `BatteryPill.tsx`)
 - **Sub-Navigasi:** Hanya **`Player | Playlists`** (tab `Queue` redundan dihapus); daftar antrean diakses melalui tombol toggle pod kanan ber-header **`QUEUE`**.
 - **Pure Monochrome Fidelity:** Saat `settings.theme === 'monochrome'`, seluruh elemen (`BatteryPill`, ikon `Speaker` / `Headphones` / `Bluetooth`, cincin CPU/RAM/Focus, status Wi-Fi/BT) wajib membaca token dari `CASA_THEME_PALETTES` (`#FFFFFF` / zinc) tanpa kelas warna statis Tailwind (`text-emerald-*`, `text-green-*`, dll.).
+
+- **Single Clock Sync, `Unsynced` Auto-Scroll & To-Do Alarm `v2.0.4`:**
+  - *Single Playback Clock:* `playbackClock.ts` menyatukan `resolvePlaybackPositionMs`, `computeLyricAdjustedTimeMs` (`75 ms` companion, `0 ms` native), dan `computeSyncedLyricIndex` (`50 ms` hysteresis) untuk Mode 6 & Idle Pill, disertai re-anchor SMTC (`reanchorMediaPlaybackClock`) saat transisi expanded/idle & Playing/Paused.
+  - *Proportional Unsynced Scroll:* Lirik tanpa timestamp menampilkan badge `Unsynced` dengan gulir halus proporsional (`computeUnsyncedScrollProgress`, margin intro/outro ±9%) dan jeda otomatis 4 detik saat digulir manual via *mouse wheel*.
+  - *Timer → To-Do Auto-Check:* Saat alarm berakhir pada item To-Do tertaut, muncul 3 aksi (`Selesai` | `+5m` | `Dismiss`), dan mencentang/menghapus item lebih dulu otomatis melepaskan tautan `focusedTaskId` (`unlinkTodoFromTimerState`).
 
 ### 4.3 Web Showcase & Ratings/Reviews (`docs/` & `supabase/`)
 - **1:1 Parity Demo:** Simulasi interaktif di [docs/index.html](./docs/index.html) & [docs/app.js](./docs/app.js) mengikuti anatomi kapsul, intro `"Hi."`, Mode 6 `Player | Playlists` + `QUEUE`, Circular Battery Ring, Brightness HUD, Control Center, dan Drop Zone di aplikasi desktop.

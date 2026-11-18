@@ -22,6 +22,62 @@ export function stopAndResetTimerState<
   };
 }
 
+/**
+ * Silences an active/expired alarm and restores the timer cleanly to its preset duration.
+ */
+export function dismissAndResetTimerState<
+  T extends {
+    isActive: boolean;
+    isPaused: boolean;
+    isAlarmRinging?: boolean;
+    totalSeconds: number;
+    remainingSeconds: number;
+    presetTotalSeconds?: number;
+    focusedTaskId?: string | null;
+  }
+>(prev: T, clearFocusedTask: boolean = false): T {
+  const resetSecs = prev.presetTotalSeconds || prev.totalSeconds || 25 * 60;
+  return {
+    ...prev,
+    isActive: false,
+    isPaused: true,
+    isAlarmRinging: false,
+    totalSeconds: resetSecs,
+    remainingSeconds: resetSecs,
+    ...(clearFocusedTask ? { focusedTaskId: null } : {}),
+  };
+}
+
+/**
+ * Detaches a manually completed or deleted To-Do item from timer state so no stale reference remains.
+ * If the alarm for that linked task is currently ringing, also stops & resets the alarm state.
+ */
+export function unlinkTodoFromTimerState<
+  T extends {
+    isActive: boolean;
+    isPaused: boolean;
+    isAlarmRinging?: boolean;
+    totalSeconds: number;
+    remainingSeconds: number;
+    presetTotalSeconds?: number;
+    focusedTaskId?: string | null;
+  }
+>(prev: T | undefined, todoId: string): { nextState: T | undefined; stoppedAlarm: boolean } {
+  if (!prev || prev.focusedTaskId !== todoId) {
+    return { nextState: prev, stoppedAlarm: false };
+  }
+  if (prev.isAlarmRinging) {
+    return { nextState: dismissAndResetTimerState(prev, true), stoppedAlarm: true };
+  }
+  return {
+    nextState: {
+      ...prev,
+      focusedTaskId: null,
+    },
+    stoppedAlarm: false,
+  };
+}
+
 export function formatDurationClock(remainingSeconds: number): string {
   const safe = Math.max(0, Math.floor(remainingSeconds));
   const hours = Math.floor(safe / 3600);

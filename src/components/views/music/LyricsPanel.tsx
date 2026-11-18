@@ -2,6 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, memo 
 import { RotateCw } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { LyricLine, parseTimeToSeconds } from '../../../utils/lyricsService';
+import { computeUnsyncedScrollProgress } from '../../../features/media/playbackClock';
 
 /**
  * Hardware-grade Auto-scrolling Lyrics Marquee
@@ -208,6 +209,115 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = memo(({
   const [userOffset, setUserOffset] = useState<number>(0);
   const userScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Proportional auto-scroll state for unsynchronized (plain) lyrics
+  const unsyncedScrollRef = useRef<HTMLDivElement>(null);
+  const unsyncedManualPauseUntilRef = useRef<number>(0);
+  const unsyncedResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unsyncedRafRef = useRef<number | null>(null);
+  const [isUnsyncedManualPaused, setIsUnsyncedManualPaused] = useState(false);
+
+  // Reset unsynced scroll to top whenever track lines switch
+  useEffect(() => {
+    if (isSynced) return;
+    unsyncedManualPauseUntilRef.current = 0;
+    setIsUnsyncedManualPaused(false);
+    if (unsyncedScrollRef.current) {
+      unsyncedScrollRef.current.scrollTop = 0;
+    }
+  }, [isSynced, lines]);
+
+  // Smooth proportional scroll based on current playback ratio with ±9% intro/outro margins
+  useEffect(() => {
+    if (isSynced || isLoading || isInstrumental || lines.length === 0 || !hasActiveSession) {
+      return;
+    }
+    if (isUnsyncedManualPaused || Date.now() < unsyncedManualPauseUntilRef.current) {
+      return;
+    }
+
+    const container = unsyncedScrollRef.current;
+    if (!container) return;
+
+    const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
+    if (maxScroll <= 0) return;
+
+    const durationMs = duration > 0 ? duration * 1000 : 0;
+    const progressRatio = computeUnsyncedScrollProgress(audioAdjustedTime, durationMs, 0.09, 0.09);
+    const targetTop = Math.round(progressRatio * maxScroll);
+
+    if (Math.abs(targetTop - container.scrollTop) < 1.5) return;
+
+    if (unsyncedRafRef.current !== null) {
+      cancelAnimationFrame(unsyncedRafRef.current);
+      unsyncedRafRef.current = null;
+    }
+
+    const stepGlide = () => {
+      const el = unsyncedScrollRef.current;
+      if (!el || Date.now() < unsyncedManualPauseUntilRef.current) {
+        unsyncedRafRef.current = null;
+        return;
+      }
+      const diff = targetTop - el.scrollTop;
+      if (Math.abs(diff) <= 0.8) {
+        el.scrollTop = targetTop;
+        unsyncedRafRef.current = null;
+        return;
+      }
+      el.scrollTop += diff * 0.22;
+      unsyncedRafRef.current = requestAnimationFrame(stepGlide);
+    };
+
+    unsyncedRafRef.current = requestAnimationFrame(stepGlide);
+
+    return () => {
+      if (unsyncedRafRef.current !== null) {
+        cancelAnimationFrame(unsyncedRafRef.current);
+        unsyncedRafRef.current = null;
+      }
+    };
+  }, [
+    isSynced,
+    isLoading,
+    isInstrumental,
+    lines,
+    hasActiveSession,
+    audioAdjustedTime,
+    duration,
+    isUnsyncedManualPaused,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (userScrollTimeoutRef.current) {
+        clearTimeout(userScrollTimeoutRef.current);
+      }
+      if (unsyncedResumeTimerRef.current) {
+        clearTimeout(unsyncedResumeTimerRef.current);
+      }
+      if (unsyncedRafRef.current !== null) {
+        cancelAnimationFrame(unsyncedRafRef.current);
+      }
+    };
+  }, []);
+
+  const handleUnsyncedWheel = useCallback((e: React.WheelEvent) => {
+    e.stopPropagation();
+    unsyncedManualPauseUntilRef.current = Date.now() + 4000;
+    setIsUnsyncedManualPaused(true);
+    if (unsyncedRafRef.current !== null) {
+      cancelAnimationFrame(unsyncedRafRef.current);
+      unsyncedRafRef.current = null;
+    }
+    if (unsyncedResumeTimerRef.current) {
+      clearTimeout(unsyncedResumeTimerRef.current);
+    }
+    unsyncedResumeTimerRef.current = setTimeout(() => {
+      unsyncedManualPauseUntilRef.current = 0;
+      setIsUnsyncedManualPaused(false);
+    }, 4000);
+  }, []);
+
   // Spring Physics Auto-centering: Calculates exact center position for active lyric line
   useLayoutEffect(() => {
     if (!isSynced) return;
@@ -326,19 +436,25 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = memo(({
     );
   }
 
-  // Unsynchronized (plain) lyrics view
+  // Unsynchronized (plain) lyrics view with proportional smooth auto-scroll
   if (!isSynced) {
     return (
       <div
+        ref={unsyncedScrollRef}
         data-tauri-drag-region="false"
-        onWheel={(e) => e.stopPropagation()}
-        className="flex-1 min-h-0 overflow-y-auto no-scrollbar pointer-events-auto flex flex-col p-3 gap-2.5 select-text"
+        onWheel={handleUnsyncedWheel}
+        className="flex-1 min-h-0 overflow-y-auto no-scrollbar pointer-events-auto flex flex-col px-3 pb-5 pt-0 gap-2.5 select-text relative"
       >
-        <div className="flex items-center gap-1.5 pb-1 border-b border-white/[0.06] text-zinc-500 text-[9.5px] uppercase font-semibold tracking-wider">
-          <span>Plain Lyrics (Unsynchronized)</span>
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 pt-2.5 pb-1.5 bg-[#000000]/95 backdrop-blur-sm border-b border-white/[0.06]">
+          <span className="px-1.5 py-[1px] rounded-full border border-white/[0.14] bg-white/[0.06] text-[8.5px] font-mono uppercase tracking-wider text-white/70">
+            Unsynced
+          </span>
+          <span className="text-[9px] font-mono text-zinc-500">
+            {isUnsyncedManualPaused ? 'Manual scroll · 4s' : duration > 0 ? 'Auto-scroll' : 'Plain Lyrics'}
+          </span>
         </div>
         {lines.map((line) => (
-          <p key={line.id} className="text-[12px] text-zinc-400 leading-relaxed font-medium hover:text-white transition-colors antialiased">
+          <p key={line.id} className="text-[12px] text-zinc-300/90 leading-relaxed font-medium hover:text-white transition-colors antialiased">
             {line.text}
           </p>
         ))}

@@ -13,6 +13,7 @@ mod native_audio;
 mod spotify_oauth;
 mod system_hardware;
 mod system_stats;
+mod update_monitor;
 
 static SHORTCUT_ALT_SPACE_REGISTERED: AtomicBool = AtomicBool::new(false);
 
@@ -370,8 +371,17 @@ fn apply_win32_window_styles(_window: &tauri::WebviewWindow) {}
 pub fn run() {
     tauri::Builder::default()
         .manage(system_stats::SystemStatsState::new())
+        .manage(update_monitor::UpdateMonitorState::default())
         .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_process::init())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Focused(true) = event {
+                let app_handle = window.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    update_monitor::run_silent_update_check(&app_handle, false).await;
+                });
+            }
+        })
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 // Apply Win32 NOACTIVATE and TOOLWINDOW styles, stripping WS_EX_TRANSPARENT
@@ -493,6 +503,9 @@ pub fn run() {
             // Start Windows Hardware Telemetry Daemon (Power, Display, CapsLock, WASAPI)
             system_hardware::start_hardware_telemetry_daemon(app.handle().clone());
 
+            // Start Lightweight ETag Background Update Notifier (5s after launch, focus/wake, and 45m interval)
+            update_monitor::spawn_background_update_monitor(app.handle().clone());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -558,6 +571,10 @@ pub fn run() {
             set_autostart_enabled,
             check_app_update,
             install_app_update,
+            update_monitor::get_update_notification_status,
+            update_monitor::trigger_background_update_check,
+            update_monitor::dismiss_update_badge,
+            update_monitor::clear_update_notification,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CASA application");

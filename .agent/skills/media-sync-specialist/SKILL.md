@@ -15,3 +15,6 @@ description: Spesialis Spotify Web API, sub-navigasi Player | Playlists & pop-up
 4. **Studio-Duration Dominant Lyric Scoring (`lyricsService.ts`):**
    - Normalisasi durasi ke detik; beri bobot `+15000` bila selisih durasi $\le 1.5$ detik dan penalti `-20000` bila $> 3$ detik.
    - Antara kandidat berdurasi identik, cocokan atribut (`Explicit`/`Clean`) serta penalti kandidat yang baris pertamanya terlambat ekstrim ($> 20$ detik) agar LRC versi MV tidak terpilih.
+5. **Single Clock Source & Unsynced Auto-Scroll (`playbackClock.ts`, `LyricsPanel.tsx`):**
+   - Gunakan `resolvePlaybackPositionMs`, `computeLyricAdjustedTimeMs` (`75 ms` companion, `0 ms` native), dan `computeSyncedLyricIndex` (`50 ms` hysteresis) secara identik di `useLyricsSync` (Mode 6) dan `IdlePillView` (Idle), serta re-anchor clock saat transisi mode dan perubahan Playing/Paused.
+   - Untuk lirik *unsynced* tanpa timestamp, tampilkan badge **`Unsynced`** dengan gulir proporsional halus (`computeUnsyncedScrollProgress`, margin intro/outro ±9%) yang otomatis jeda 4 detik saat *mouse wheel* digulir manual.

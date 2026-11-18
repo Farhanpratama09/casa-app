@@ -21,6 +21,8 @@ import { useSystemTelemetry } from '../../hooks/useSystemTelemetry';
 import { useDropZoneStore } from '../../stores/useDropZoneStore';
 import { BatteryPill } from '../system/BatteryPill';
 import { CasaCompanionAvatar } from '../companion/CasaCompanionAvatar';
+import { useUpdateNotification } from '../../hooks/useUpdateNotification';
+import { useSettingsStore } from '../../stores/useSettingsStore';
 
 export interface Mode6TopNavProps {
   currentMode: IslandMode;
@@ -103,6 +105,9 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
   const { hudAlert: rawHudAlert } = useSystemHardware();
   const { stats: systemStats } = useSystemTelemetry(false);
   const dropZoneCount = useDropZoneStore((s) => s.items.length);
+  const { badgeVisible: hasUpdateBadge, latestVersion: availableUpdateVersion } =
+    useUpdateNotification();
+  const { settings, palette } = useSettingsStore();
   const isControlCenterTab = currentMode === 'expanded_control';
   const showHeaderBattery = systemStats.battery.has_battery && !isControlCenterTab;
   const hudAlert =
@@ -248,11 +253,31 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
             playChimeCue('tap');
             void openDesktopSettingsWindow();
           }}
-          className="w-[22px] h-[22px] rounded-full bg-white/[0.06] hover:bg-white/[0.16] border border-white/[0.08] text-white/60 hover:text-white flex items-center justify-center transition-all active:scale-90 cursor-pointer shrink-0"
-          title="Buka Pengaturan CASA"
-          aria-label="Pengaturan CASA"
+          className="relative w-[22px] h-[22px] rounded-full bg-white/[0.06] hover:bg-white/[0.16] border border-white/[0.08] text-white/60 hover:text-white flex items-center justify-center transition-all active:scale-90 cursor-pointer shrink-0"
+          title={
+            hasUpdateBadge && availableUpdateVersion
+              ? `Pembaruan v${availableUpdateVersion} tersedia — Klik untuk membuka Pengaturan CASA`
+              : 'Buka Pengaturan CASA'
+          }
+          aria-label={
+            hasUpdateBadge && availableUpdateVersion
+              ? `Pengaturan CASA (Pembaruan v${availableUpdateVersion} tersedia)`
+              : 'Pengaturan CASA'
+          }
         >
           <Settings className="w-3 h-3" />
+          {hasUpdateBadge && (
+            <span
+              data-update-badge="true"
+              style={{
+                backgroundColor: settings.theme === 'monochrome' ? '#FFFFFF' : palette.timer,
+                color: '#000000',
+              }}
+              className="absolute -top-1 -right-1 min-w-[13px] h-[13px] px-[3px] rounded-full border border-black font-mono text-[8px] font-bold leading-none flex items-center justify-center pointer-events-none select-none shadow-sm"
+            >
+              1
+            </span>
+          )}
         </button>
         <button
           type="button"

@@ -601,6 +601,14 @@ export interface AppUpdateCheckResult {
   message: string;
 }
 
+export interface UpdateNotificationStatus {
+  currentVersion: string;
+  latestVersion: string | null;
+  releaseUrl: string | null;
+  updateAvailable: boolean;
+  badgeVisible: boolean;
+}
+
 export async function alignWindowTop(align: 'left' | 'center' | 'right'): Promise<void> {
   if (!isTauriEnv) return;
   try {
@@ -647,7 +655,7 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
 export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   if (!isTauriEnv) {
     return {
-      currentVersion: '2.0.3',
+      currentVersion: '2.0.4',
       available: false,
       version: null,
       body: null,
@@ -657,6 +665,56 @@ export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
     };
   }
   return await invoke<AppUpdateCheckResult>('check_app_update');
+}
+
+export async function getUpdateNotificationStatus(): Promise<UpdateNotificationStatus> {
+  if (!isTauriEnv) {
+    return {
+      currentVersion: '2.0.4',
+      latestVersion: null,
+      releaseUrl: null,
+      updateAvailable: false,
+      badgeVisible: false,
+    };
+  }
+  try {
+    return await invoke<UpdateNotificationStatus>('get_update_notification_status');
+  } catch {
+    return {
+      currentVersion: '2.0.4',
+      latestVersion: null,
+      releaseUrl: null,
+      updateAvailable: false,
+      badgeVisible: false,
+    };
+  }
+}
+
+export async function triggerBackgroundUpdateCheck(): Promise<void> {
+  if (!isTauriEnv) return;
+  try {
+    await invoke('trigger_background_update_check');
+  } catch {
+    // Silent swallow for offline or transient errors
+  }
+}
+
+export async function dismissUpdateBadge(): Promise<UpdateNotificationStatus | null> {
+  if (!isTauriEnv) return null;
+  try {
+    return await invoke<UpdateNotificationStatus>('dismiss_update_badge');
+  } catch {
+    return null;
+  }
+}
+
+export async function clearUpdateNotification(): Promise<UpdateNotificationStatus | null> {
+  if (!isTauriEnv) return null;
+  try {
+    return await invoke<UpdateNotificationStatus>('clear_update_notification');
+  } catch {
+    return null;
+  }
 }
 
 export async function installAppUpdate(): Promise<void> {

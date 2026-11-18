@@ -1,4 +1,4 @@
-# Product Requirements Document (PRD) — CASA `v2.0.3`
+# Product Requirements Document (PRD) — CASA `v2.0.4`
 
 **CASA — Dynamic Rabbit Island for Windows** (`com.farhanpratama.casa`)  
 Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + Rust + React 19 + TypeScript + Vite)  
@@ -8,7 +8,7 @@ Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + R
 
 ## 1. Identitas & Filosofi Produk
 - **Nama Produk:** CASA (*Dynamic Rabbit Island for Windows*)
-- **Versi Acuan:** `2.0.3` (tersinkron di [package.json](../package.json), [Cargo.toml](../src-tauri/Cargo.toml), [tauri.conf.json](../src-tauri/tauri.conf.json), sidebar Settings, dan [docs/index.html](./index.html))
+- **Versi Acuan:** `2.0.4` (tersinkron di [package.json](../package.json), [Cargo.toml](../src-tauri/Cargo.toml), [tauri.conf.json](../src-tauri/tauri.conf.json), sidebar Settings, dan [docs/index.html](./index.html))
 - **Konsep Inti:** Kapsul *top-flush Dynamic Island* berlatar OLED hitam murni (`#000000`) di tepi atas monitor Windows 10/11 yang hening (*non-intrusive*, `WS_EX_NOACTIVATE`), menyatukan pemutar musik & lirik sinkron milidetik, *Focus Timer & To-Do Ring*, kontrol cepat sistem, *Drag & Drop Shelf*, dan ekspresi maskot **Obsidian Bunny** (`× ♥`).
 
 ---
@@ -24,7 +24,8 @@ Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + R
   - Konteks non-playlist (Search / Artist / CASA Player) wajib mengirim `{ uris: [clickedUri, ...nextUris] }` tanpa `offset`.
   - Saat berpindah lagu/konteks, state `queue` lama segera diinvalidasi (`request counter` / `AbortController`).
 - **Hybrid Media & Lifecycle State:** Menggabungkan Windows GSMTC (`src-tauri/src/media/gsmtc.rs`) dan Spotify Web API (`src/utils/spotifyService.ts`). Jika `Spotify.exe` mati dan tidak ada sesi media aktif lain, seluruh state media wajib di-reset total (`title: ""`, `is_playing: false`).
-- **High-Precision Synced Lyrics Engine (`lyricsService.ts`):** Scoring LRCLIB memprioritaskan kecocokan durasi studio ($\pm 1.5$ detik -> `+15000`, selisih $> 3$ detik -> `-20000`) dan menghindari LRC MV yang terlambat masuk vokal.
+- **High-Precision Synced Lyrics Engine & Proportional Unsynced Scroll (`lyricsService.ts`, `playbackClock.ts`):** Scoring LRCLIB memprioritaskan kecocokan durasi studio ($\pm 1.5$ detik -> `+15000`, selisih $> 3$ detik -> `-20000`) dan menghindari LRC MV yang terlambat masuk vokal; satu interpolator `playbackClock` tunggal menyelaraskan lirik Mode 6 dan Idle (`reanchorMediaPlaybackClock`), sementara lirik polos menampilkan badge `Unsynced` bergulir proporsional dengan jeda *wheel* 4 detik.
+- **Timer → To-Do Auto-Check & Guard:** Saat timer terhubung ke tugas selesai (`isAlarmRinging`), banner menampilkan **`Selesai`** (mencentang tugas + mematikan alarm + reset preset), **`+5m`**, dan **`Dismiss`** (menjaga status tugas tetap belum selesai); mencentang/menghapus tugas lebih dulu otomatis melepas tautan timer.
 
 ### 2.2 Sistem Tema Adaptif & Kepatuhan Monokrom Murni
 - **Sumber Kebenaran Tema:** `CASA_THEME_PALETTES` pada [useSettingsStore.ts](../src/stores/useSettingsStore.ts) (`useSyncExternalStore` + `localStorage.casa_settings_v1`):
@@ -33,7 +34,7 @@ Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + R
   3. **`colorblind` (Okabe-Ito):** Palet ramah deuteranopia/protanopia.
 
 ### 2.3 Jendela Settings, `Quit CASA` & System Tray
-- **Settings Window (`DesktopSettingsWindow.tsx`):** Menyediakan 4 tab (*Appearance & Themes*, *Island & Behavior*, *Timer & Audio*, *System & Updates*) dengan kartu pratinjau *live notch*, *swatches* tema OLED anti-slop, manajemen *Launch at Startup*, *Global Shortcut `Alt+Space`*, dan panel **OTA Signed Auto-Updater**.
+- **Settings Window (`DesktopSettingsWindow.tsx`):** Menyediakan 4 tab (*Appearance & Themes*, *Island & Behavior*, *Timer & Audio*, *System & Updates*) dengan kartu pratinjau *live notch*, *swatches* tema OLED anti-slop, manajemen *Launch at Startup*, *Global Shortcut `Alt+Space`*, indikator notifikasi badge `1` real-time dari pengecekan senyap `ETag` GitHub Releases (`update_monitor.rs`), dan panel **OTA Signed Auto-Updater**.
 - **Tombol `Quit CASA` di Sidebar Settings:** Memanggil command IPC `quit_app` (`tauriBridge.ts` -> `src-tauri/src/lib.rs`) yang wajib mengeksekusi `app.global_shortcut().unregister_all()` sebelum `app.exit(0)` agar proses aplikasi dan shortcut OS bersih seketika.
 - **System Tray Menu (Bahasa Inggris Seragam):**
   - `Show / Hide CASA` (`toggle_visibility`)

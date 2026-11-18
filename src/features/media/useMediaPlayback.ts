@@ -3,6 +3,7 @@ import { useSkillStore } from '../../skills/store';
 import { MediaSkillState, MusicSubPanel } from './types';
 import {
   computeInterpolatedPositionMs,
+  LYRIC_COMPANION_LEAD_MS,
   reconcilePlaybackClockSnapshot,
   markPlaybackManualSeekLock,
 } from './playbackClock';
@@ -148,10 +149,11 @@ export function useMediaPlayback() {
       } else {
         markUserInitiatedPlayback();
         const lastPosMs =
-          getLastKnownPositionMs() ||
           (mediaState?.playbackClock
             ? computeInterpolatedPositionMs(mediaState.playbackClock)
-            : Math.round((mediaState?.song?.currentTime ?? 0) * 1000));
+            : 0) ||
+          getLastKnownPositionMs() ||
+          Math.round((mediaState?.song?.currentTime ?? 0) * 1000);
 
         const trackUri = (mediaState.song as any)?.uri || normalizeTrackUri((mediaState.song as any)?.id);
 
@@ -511,12 +513,13 @@ export function useMediaPlayback() {
     }
 
     updateState((prev) => {
+      const leadOffsetSec = prev.playbackSource === 'native' ? 0 : LYRIC_COMPANION_LEAD_MS / 1000;
       const liveSec = prev.playbackClock
         ? computeInterpolatedPositionMs(prev.playbackClock) / 1000
         : prev.song.currentTime;
       const active =
         result.lines && result.lines.length > 0 && result.isSynced
-          ? getActiveLyrics(result.lines, liveSec, 0.35, result.offsetSeconds || 0)
+          ? getActiveLyrics(result.lines, liveSec, leadOffsetSec, result.offsetSeconds || 0)
           : { prev: '', current: '', next: '' };
 
       return {

@@ -1,4 +1,4 @@
-# CASA — Dynamic Rabbit Island for Windows (`v2.0.3`)
+# CASA — Dynamic Rabbit Island for Windows (`v2.0.4`)
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-white.svg?style=flat-square)
 ![Platform: Windows 10/11 x64](https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-09090b.svg?style=flat-square)
@@ -11,21 +11,22 @@
 
 ---
 
-## Fitur Utama (`v2.0.3`)
+## Fitur Utama (`v2.0.4`)
 
 - **Musik & Lirik Sinkron Milidetik (`Player | Playlists` + `QUEUE`):**
   - Integrasi Windows GSMTC + Spotify Web API (`OAuth loopback :8888`) + pencarian audio native.
   - Sub-navigasi ringkas **`Player | Playlists`**, satelit drawer kiri pencarian lagu + `Save to Playlist`, dan satelit pop-up kanan ber-header **`QUEUE`**.
-  - Scoring lirik LRCLIB presisi durasi studio ($\pm 1.5$ detik) dan mode kompak *Idle Lyric Minimize*.
-- **Focus Pomodoro & To-Do Ring:**
+  - Scoring lirik LRCLIB presisi durasi studio ($\pm 1.5$ detik), satu *playback clock* terpadu untuk *Mode 6* dan *Idle Lyric Minimize*, serta *proportional auto-scroll* berindikator `Unsynced` untuk lirik polos.
+- **Focus Pomodoro & To-Do Ring (`Timer → To-Do Auto-Check`):**
   - *U-shape perimeter progress stroke* sepanjang tepi kapsul + mode *Dual-Idle* (Musik × Timer fokus simultan) dan alarm kustom hingga 15 detik.
+  - Banner waktu habis pada tugas tertaut menawarkan aksi **`Selesai`** (mencentang To-Do otomatis), **`+5m`**, dan **`Dismiss`** (mereset timer tanpa mencentang tugas), lengkap dengan proteksi *stale reference*.
 - **Control Center, Hardware HUD & Drop Zone Shelf:**
   - Slider Volume WASAPI & Display Brightness WMI real-time lengkap dengan HUD kapsul atas.
   - Toggle cepat **Wi-Fi**, daftar perangkat **Bluetooth + persentase baterai**, **Circular Battery Ring SVG**, pembacaan CPU/RAM live (`sysinfo`), serta **Drop Zone** *drag-and-drop* berkas sementara.
 - **Tema Adaptif OLED & Ergonomi Windows:**
   - Pilihan tema **`Default`**, **`Monochrome` (Stealth OLED 100% bebas aksen warna statis)**, dan **`Colorblind` (Okabe-Ito)**.
   - Jendela `Settings` mandiri dengan pratinjau kapsul langsung, global shortcut `Alt + Space`, `4px` *Smart-Tuck* di aplikasi *fullscreen*, system tray berbahasa Inggris (`Show / Hide CASA`, `Gaming Mode: Auto`, `Quit CASA`), serta tombol **`Quit CASA`** pada sidebar Settings.
-  - Pembaruan OTA bertanda tangan kriptografi Minisign (`latest.json` + `.sig`).
+  - Pembaruan OTA bertanda tangan kriptografi Minisign (`latest.json` + `.sig`) dengan background ETag notifier (badge angka `1` pada ikon Settings).
 
 ---
 

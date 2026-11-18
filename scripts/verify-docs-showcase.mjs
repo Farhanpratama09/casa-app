@@ -765,7 +765,7 @@ async function main() {
         typeof postedReviewBody?.elapsed_ms === 'number' &&
         Number.isFinite(postedReviewBody.elapsed_ms) &&
         postedReviewBody.elapsed_ms >= 0 &&
-        postedReviewBody?.app_version === 'v2.0.3',
+        postedReviewBody?.app_version === 'v2.0.4',
       `Supabase apikey-only fetch, Play Store summary (${liveMockAudit.avgScore}), Creator reply, 5★ filter & submit-review verified`
     );
 

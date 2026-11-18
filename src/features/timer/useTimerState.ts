@@ -4,6 +4,7 @@ import { TimerState, TimerMode } from './types';
 import { TodoItem } from '../../types/island';
 import {
   computeRemainingSecondsUntil,
+  dismissAndResetTimerState,
   MAX_TIMER_MINUTES,
   stopAndResetTimerState,
 } from './timerUtils';
@@ -104,18 +105,46 @@ export function useTimerState() {
 
   const dismissAlarm = useCallback(() => {
     stopAlarmChime();
-    updateState((prev) => {
-      const resetSecs = prev.presetTotalSeconds || prev.totalSeconds || 25 * 60;
-      return {
-        ...prev,
-        isActive: false,
-        isPaused: true,
-        isAlarmRinging: false,
-        totalSeconds: resetSecs,
-        remainingSeconds: resetSecs,
-      };
-    });
+    updateState((prev) => dismissAndResetTimerState(prev, false));
   }, [updateState]);
+
+  /**
+   * Stops the alarm chime, marks the linked To-Do item complete (unpinned),
+   * releases the task link, and restores the timer preset.
+   */
+  const completeFocusedTodoAndDismiss = useCallback(
+    (explicitTaskId?: string | null) => {
+      stopAlarmChime();
+      const snapshot = useSkillStore.getState();
+      const currentTodos: TodoItem[] = snapshot.skillStates['core.todo']?.todos || [];
+      const timerFocusedId = (snapshot.skillStates['core.timer'] as TimerState | undefined)
+        ?.focusedTaskId;
+      const targetId =
+        explicitTaskId ||
+        (timerFocusedId && currentTodos.some((t) => !t.completed && t.id === timerFocusedId)
+          ? timerFocusedId
+          : currentTodos.find((t) => !t.completed && t.isPinned)?.id) ||
+        null;
+
+      if (targetId) {
+        updateSkillState('core.todo', (prevTodo: { todos?: TodoItem[] } | undefined) => {
+          const existing = prevTodo?.todos || [];
+          if (!existing.some((t) => t.id === targetId && !t.completed)) {
+            return prevTodo;
+          }
+          return {
+            ...prevTodo,
+            todos: existing.map((t) =>
+              t.id === targetId ? { ...t, completed: true, isPinned: false } : t
+            ),
+          };
+        });
+      }
+
+      updateState((prev) => dismissAndResetTimerState(prev, true));
+    },
+    [updateSkillState, updateState]
+  );
 
   const setFocusedTaskId = useCallback(
     (taskId: string | null) => {
@@ -225,6 +254,7 @@ export function useTimerState() {
     selectPreset,
     addFiveMinutes,
     dismissAlarm,
+    completeFocusedTodoAndDismiss,
     setFocusedTaskId,
     toggleFocusTask,
     adjustMinutes,

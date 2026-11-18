@@ -5,6 +5,7 @@ import { TimerState } from '../../types/island';
 import { TimerCardView } from '../../components/views/TimerCardView';
 import { playAlarmNoticeOnce, startAlarmChime } from '../../utils/alarmChime';
 import { getSettingsSnapshot } from '../../stores/useSettingsStore';
+import { useSkillStore } from '../store';
 import { TimerExpandedView } from '../../features/timer/TimerExpandedView';
 import { TimerPillSlot } from '../../features/timer/TimerPillSlot';
 import { formatDurationClock } from '../../features/timer/timerUtils';
@@ -51,6 +52,15 @@ export const timerSkill: CasaSkill<TimerState> = {
       const state = getState();
       if (!state.isActive || state.isPaused || state.isAlarmRinging) return;
 
+      const resolveValidFocusedTaskId = (focusedId?: string | null): string | null => {
+        if (!focusedId) return null;
+        const todos = useSkillStore.getState().skillStates['core.todo']?.todos;
+        if (!Array.isArray(todos)) return null;
+        return todos.some((t: { id: string; completed: boolean }) => t.id === focusedId && !t.completed)
+          ? focusedId
+          : null;
+      };
+
       if (state.remainingSeconds <= 1) {
         if (getSettingsSnapshot().autoStartNextCycle) {
           playAlarmNoticeOnce();
@@ -69,6 +79,7 @@ export const timerSkill: CasaSkill<TimerState> = {
               presetTotalSeconds: focusPreset,
               currentCycle:
                 nextMode === 'focus' ? prev.currentCycle + 1 : prev.currentCycle,
+              focusedTaskId: resolveValidFocusedTaskId(prev.focusedTaskId),
               isActive: true,
               isPaused: false,
               isAlarmRinging: false,
@@ -81,6 +92,7 @@ export const timerSkill: CasaSkill<TimerState> = {
             remainingSeconds: 0,
             isPaused: true,
             isAlarmRinging: true,
+            focusedTaskId: resolveValidFocusedTaskId(prev.focusedTaskId),
             presetTotalSeconds: prev.presetTotalSeconds || prev.totalSeconds || 25 * 60,
           }));
         }
@@ -88,6 +100,7 @@ export const timerSkill: CasaSkill<TimerState> = {
         setState((prev: TimerState) => ({
           ...prev,
           remainingSeconds: Math.max(0, prev.remainingSeconds - 1),
+          focusedTaskId: prev.focusedTaskId ? resolveValidFocusedTaskId(prev.focusedTaskId) : null,
         }));
       }
     }, 1000);

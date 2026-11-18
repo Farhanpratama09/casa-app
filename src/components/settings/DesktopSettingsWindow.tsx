@@ -48,6 +48,7 @@ import {
   syncActiveAlarmVolume,
 } from '../../utils/alarmChime';
 import { useMusicAffinityStore } from '../../hooks/useMusicAffinity';
+import { useUpdateNotification } from '../../hooks/useUpdateNotification';
 import {
   AppUpdateCheckResult,
   getAutostartEnabled,
@@ -428,6 +429,7 @@ const LiveNotchPreviewCard: React.FC<{
 
 export const DesktopSettingsWindow: React.FC = () => {
   const { settings, palette } = useSettingsStore();
+  const updateNotification = useUpdateNotification();
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('appearance');
 
   // Audio custom alarm states
@@ -587,9 +589,10 @@ export const DesktopSettingsWindow: React.FC = () => {
 
   const handleCheckUpdates = async () => {
     playChimeCue('tap');
+    void updateNotification.dismissBadge();
     if (!isTauriRuntime()) {
       setUpdateResult({
-        currentVersion: '2.0.3',
+        currentVersion: '2.0.4',
         available: false,
         version: null,
         body: null,
@@ -619,14 +622,15 @@ export const DesktopSettingsWindow: React.FC = () => {
           message: `Pembaruan v${update.version} tersedia dan terverifikasi tanda tangan digital.`,
         });
       } else {
+        void updateNotification.clearNotification();
         setUpdateResult({
-          currentVersion: '2.0.3',
+          currentVersion: '2.0.4',
           available: false,
           version: null,
           body: null,
           date: null,
           statusKind: 'up-to-date',
-          message: 'CASA sudah menggunakan versi terbaru (v2.0.3).',
+          message: 'CASA sudah menggunakan versi terbaru (v2.0.4).',
         });
       }
     } catch (err) {
@@ -642,7 +646,7 @@ export const DesktopSettingsWindow: React.FC = () => {
         lower.includes('network');
 
       setUpdateResult({
-        currentVersion: '2.0.3',
+        currentVersion: '2.0.4',
         available: false,
         version: null,
         body: msg,
@@ -676,8 +680,9 @@ export const DesktopSettingsWindow: React.FC = () => {
       }
 
       if (!update) {
+        void updateNotification.clearNotification();
         setUpdateResult({
-          currentVersion: '2.0.3',
+          currentVersion: '2.0.4',
           available: false,
           version: null,
           body: null,
@@ -719,7 +724,7 @@ export const DesktopSettingsWindow: React.FC = () => {
       await relaunch();
     } catch (err) {
       setUpdateResult((prev) => ({
-        currentVersion: prev?.currentVersion ?? '2.0.3',
+        currentVersion: prev?.currentVersion ?? '2.0.4',
         available: prev?.available ?? false,
         version: prev?.version ?? null,
         body: null,
@@ -818,7 +823,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                   CASA
                 </span>
                 <span className="px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.10] text-[10px] font-mono text-white/75">
-                  v2.0.3
+                  v2.0.4
                 </span>
               </div>
               <div className="text-[10px] font-mono text-white/40 mt-0.5 truncate">
@@ -852,7 +857,25 @@ export const DesktopSettingsWindow: React.FC = () => {
                       />
                     )}
                     <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-white' : 'text-white/45'}`} />
-                    <span className="truncate">{item.label}</span>
+                    <span className="truncate flex-1">{item.label}</span>
+                    {item.id === 'system' && updateNotification.badgeVisible && (
+                      <span
+                        data-settings-sidebar-update-badge="true"
+                        style={{
+                          backgroundColor:
+                            settings.theme === 'monochrome' ? '#FFFFFF' : palette.timer,
+                          color: '#000000',
+                        }}
+                        className="px-1.5 py-[1px] rounded-full text-[9px] font-mono font-bold leading-none shrink-0"
+                        title={
+                          updateNotification.latestVersion
+                            ? `Pembaruan v${updateNotification.latestVersion} tersedia`
+                            : 'Pembaruan tersedia'
+                        }
+                      >
+                        1
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -1312,13 +1335,33 @@ export const DesktopSettingsWindow: React.FC = () => {
                   <div className="py-4 space-y-3">
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[13px] font-semibold text-white">
-                            CASA v{updateResult?.currentVersion ?? '2.0.3'}
+                            CASA v{updateResult?.currentVersion ?? '2.0.4'}
                           </span>
                           <span className="text-[10px] font-mono text-white/45 px-1.5 py-0.5 rounded border border-white/[0.08] bg-[#08080A]">
                             Signed Updater
                           </span>
+                          {!updateResult &&
+                            updateNotification.updateAvailable &&
+                            updateNotification.latestVersion && (
+                              <span
+                                data-update-available-hint="true"
+                                style={{
+                                  borderColor:
+                                    settings.theme === 'monochrome'
+                                      ? 'rgba(255,255,255,0.35)'
+                                      : palette.timer,
+                                  color:
+                                    settings.theme === 'monochrome'
+                                      ? '#FFFFFF'
+                                      : palette.timer,
+                                }}
+                                className="px-2 py-0.5 rounded-full border bg-[#08080A] text-[10px] font-mono font-semibold"
+                              >
+                                Pembaruan v{updateNotification.latestVersion} tersedia
+                              </span>
+                            )}
                         </div>
                         <div className="text-[11.5px] text-white/75 font-medium mt-1">
                           Companion &amp; Ambient System Assistant
@@ -1349,12 +1392,32 @@ export const DesktopSettingsWindow: React.FC = () => {
                         type="button"
                         disabled={isCheckingUpdate || isInstallingUpdate}
                         onClick={() => void handleCheckUpdates()}
+                        style={
+                          updateNotification.badgeVisible
+                            ? {
+                                borderColor:
+                                  settings.theme === 'monochrome'
+                                    ? 'rgba(255,255,255,0.42)'
+                                    : palette.timer,
+                              }
+                            : undefined
+                        }
                         className="px-3 py-1.5 rounded-lg bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.14] text-[11.5px] font-medium text-white flex items-center gap-1.5 cursor-pointer disabled:opacity-45 shrink-0"
                       >
                         <RefreshCw
                           className={`w-3.5 h-3.5 ${isCheckingUpdate ? 'animate-spin' : ''}`}
                         />
-                        {isCheckingUpdate ? 'Memeriksa...' : 'Check Updates'}
+                        <span>{isCheckingUpdate ? 'Memeriksa...' : 'Check Updates'}</span>
+                        {updateNotification.badgeVisible && (
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              backgroundColor:
+                                settings.theme === 'monochrome' ? '#FFFFFF' : palette.timer,
+                            }}
+                            className="w-1.5 h-1.5 rounded-full shrink-0"
+                          />
+                        )}
                       </button>
                     </div>
 
