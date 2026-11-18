@@ -1749,12 +1749,18 @@
   const DL_CACHE_TTL_MS = 15 * 60 * 1000;
   const DL_COOLDOWN_MS = 6000;
 
-  function applyReleaseMetadata(count, exeUrl, exeSize) {
+  function applyReleaseMetadata(count, exeUrl, exeSize, exeVersion) {
     if (exeUrl && isSafeGitHubUrl(exeUrl) && el.primaryDownloadBtn) {
       el.primaryDownloadBtn.href = exeUrl;
     }
     if (exeSize && el.downloadSizeText) {
-      el.downloadSizeText.textContent = `NSIS Setup · ${exeSize}`;
+      const versionTag =
+        typeof exeVersion === 'string' && exeVersion.trim()
+          ? exeVersion.trim().startsWith('v')
+            ? exeVersion.trim()
+            : `v${exeVersion.trim()}`
+          : 'v2.0.3';
+      el.downloadSizeText.textContent = `${versionTag} · NSIS Setup (.exe) · ${exeSize}`;
     }
     if (el.downloadCountText) {
       if (Number.isFinite(count) && count >= 0) {
@@ -1781,7 +1787,7 @@
       }
       isCooldown = true;
       const labelNode = el.primaryDownloadLabel || btn.querySelector('span') || btn;
-      const originalText = labelNode.textContent || 'Download CASA v2.0.3 for Windows (.exe)';
+      const originalText = labelNode.textContent || 'Download CASA for Windows';
       btn.setAttribute('aria-disabled', 'true');
       btn.classList.add('is-cooldown');
       labelNode.textContent = 'Memulai unduhan...';
@@ -1808,7 +1814,12 @@
           Date.now() - cached.cachedAt < DL_CACHE_TTL_MS &&
           typeof cached.count === 'number'
         ) {
-          applyReleaseMetadata(cached.count, cached.exeUrl || null, cached.exeSize || null);
+          applyReleaseMetadata(
+            cached.count,
+            cached.exeUrl || null,
+            cached.exeSize || null,
+            cached.exeVersion || null
+          );
           return;
         }
       }
@@ -1848,7 +1859,9 @@
 
       let exeUrl = null;
       let exeSize = null;
+      let exeVersion = null;
       if (v2Release && Array.isArray(v2Release.assets)) {
+        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.0.3';
         const exeAsset = v2Release.assets.find(
           (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
         );
@@ -1858,7 +1871,7 @@
         }
       }
 
-      applyReleaseMetadata(totalInstallerDownloads, exeUrl, exeSize);
+      applyReleaseMetadata(totalInstallerDownloads, exeUrl, exeSize, exeVersion);
 
       try {
         window.localStorage.setItem(
@@ -1867,6 +1880,7 @@
             count: totalInstallerDownloads,
             exeUrl,
             exeSize,
+            exeVersion,
             cachedAt: Date.now(),
           })
         );

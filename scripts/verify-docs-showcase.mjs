@@ -170,7 +170,10 @@ async function main() {
       const downloadSection = document.getElementById('download');
       const primaryBtn = document.getElementById('primary-download-btn');
       const hasPrimaryExe = Boolean(primaryBtn);
+      const primaryLabelText =
+        document.getElementById('primary-download-label')?.textContent?.trim() || '';
       const primaryHref = primaryBtn?.getAttribute('href') || '';
+      const dlSizeText = document.getElementById('download-size-text')?.textContent?.trim() || '';
       const dlCountEl = document.getElementById('download-count-text');
       const dlCountText = dlCountEl?.textContent?.trim() || '';
       const dlCountHidden = dlCountEl?.hidden === true;
@@ -187,7 +190,9 @@ async function main() {
         hasConcaveShoulders,
         capsuleHeight,
         hasPrimaryExe,
+        primaryLabelText,
         primaryHref,
+        dlSizeText,
         dlCountText,
         dlCountHidden,
         dlCachedCount,
@@ -212,12 +217,14 @@ async function main() {
     );
     check(
       layoutAudit.hasPrimaryExe &&
+        layoutAudit.primaryLabelText === 'Download CASA for Windows' &&
+        layoutAudit.dlSizeText.startsWith('v2.0.3 · NSIS Setup (.exe) ·') &&
         layoutAudit.primaryHref.includes('CASA_2.0.3_x64-setup.exe') &&
         layoutAudit.shaClosedInitially &&
         layoutAudit.shaSummaryText === 'Verify SHA-256 checksum' &&
         /^[0-9A-F]{64}$/.test(layoutAudit.shaText) &&
         (!expectedExeSha || layoutAudit.shaText === expectedExeSha),
-      `Download section links CASA_2.0.3_x64-setup.exe + collapsed SHA-256 valid (${layoutAudit.shaText.slice(0, 12)}...)`
+      `Download CTA "${layoutAudit.primaryLabelText}" + metadata "${layoutAudit.dlSizeText}" + SHA-256 valid (${layoutAudit.shaText.slice(0, 12)}...)`
     );
     check(
       !layoutAudit.dlCountHidden &&
