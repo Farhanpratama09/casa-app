@@ -124,6 +124,7 @@ Deno.serve(async (req: Request) => {
   });
 
   if (spamCheck.action === 'silent_drop') {
+    console.info(`[submit-review] silent_drop reason=${spamCheck.reason || 'unknown'}`);
     // Return fake 200 without storing to DB or notifying Telegram
     return jsonResponse({ ok: true }, 200, corsHeaders);
   }
@@ -154,6 +155,7 @@ Deno.serve(async (req: Request) => {
     }
   );
   if (!ipCountResp.ok) {
+    console.error(`[submit-review] rate-limit check failed status=${ipCountResp.status}`);
     return jsonResponse(
       { ok: false, error: 'Gagal memeriksa batas pengiriman sementara.' },
       503,
@@ -204,6 +206,7 @@ Deno.serve(async (req: Request) => {
     body: JSON.stringify({ ip_hash: ipHash }),
   });
   if (!rateInsert.ok) {
+    console.error(`[submit-review] rate-limit insert failed status=${rateInsert.status}`);
     return jsonResponse(
       { ok: false, error: 'Layanan ulasan sedang sibuk. Coba lagi sebentar.' },
       503,
@@ -226,6 +229,7 @@ Deno.serve(async (req: Request) => {
   });
 
   if (!insertResp.ok) {
+    console.error(`[submit-review] casa_reviews insert failed status=${insertResp.status}`);
     return jsonResponse(
       { ok: false, error: 'Gagal menyimpan ulasan. Silakan coba lagi.' },
       500,

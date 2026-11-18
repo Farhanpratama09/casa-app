@@ -2006,6 +2006,7 @@
       hasMore: false,
       isSubmitting: false,
       formStartPerf: performance.now(),
+      formStartWall: Date.now(),
     };
 
     const starButtons = el.reviewStarPicker
@@ -2347,6 +2348,14 @@
         setStatusMessage('Mengirim ulasan ke antrean moderasi...');
 
         try {
+          const perfDelta = performance.now() - reviewState.formStartPerf;
+          const wallDelta = Date.now() - reviewState.formStartWall;
+          const rawElapsed = Math.max(
+            Number.isFinite(perfDelta) ? perfDelta : 0,
+            Number.isFinite(wallDelta) ? wallDelta : 0
+          );
+          const elapsedMs = rawElapsed > 0 ? Math.round(rawElapsed) : 0;
+
           const resp = await supabaseRequest('functions/v1/submit-review', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2355,7 +2364,7 @@
               rating,
               comment,
               website_hp: websiteHp,
-              elapsed_ms: Math.round(performance.now() - reviewState.formStartPerf),
+              elapsed_ms: elapsedMs,
               app_version: 'v2.0.3',
             }),
           });
@@ -2374,6 +2383,7 @@
           el.reviewForm.reset();
           reviewState.selectedRating = 0;
           reviewState.formStartPerf = performance.now();
+          reviewState.formStartWall = Date.now();
           syncStarPickerUI();
           syncCharCount();
           setStatusMessage(

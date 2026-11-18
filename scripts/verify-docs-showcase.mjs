@@ -599,6 +599,11 @@ async function main() {
         ratingDescText: document.getElementById('review-rating-desc')?.textContent?.trim() || '',
         charCountText: document.getElementById('rev-char-count')?.textContent?.trim() || '',
         hpOffscreen: (hpRect?.left ?? 0) < -100,
+        hpHardened:
+          document.getElementById('rev-website-hp')?.getAttribute('autocomplete') === 'new-password' &&
+          document.getElementById('rev-website-hp')?.getAttribute('tabindex') === '-1' &&
+          document.getElementById('rev-website-hp')?.parentElement?.getAttribute('aria-hidden') === 'true' &&
+          !/website/i.test(document.querySelector('label[for="rev-website-hp"]')?.textContent || ''),
         discussionsHref: document.getElementById('github-discussions-link')?.getAttribute('href') || '',
         emptyVisible: document.getElementById('reviews-empty')?.hidden === false,
       };
@@ -615,6 +620,7 @@ async function main() {
         reviewsStaticAudit.ratingDescText.startsWith('4/5') &&
         reviewsStaticAudit.charCountText === '18/500' &&
         reviewsStaticAudit.hpOffscreen &&
+        reviewsStaticAudit.hpHardened &&
         reviewsStaticAudit.discussionsHref === 'https://github.com/Farhanpratama09/casa-app/discussions' &&
         reviewsStaticAudit.emptyVisible,
       'Ratings & Reviews UI, CSP (exact Supabase origin, frame-src none, no Giscus), & interactive star/char counter verified'
@@ -757,6 +763,8 @@ async function main() {
         postedReviewBody?.rating === 5 &&
         postedReviewBody?.author_name === 'Tariq Z.' &&
         typeof postedReviewBody?.elapsed_ms === 'number' &&
+        Number.isFinite(postedReviewBody.elapsed_ms) &&
+        postedReviewBody.elapsed_ms >= 0 &&
         postedReviewBody?.app_version === 'v2.0.3',
       `Supabase apikey-only fetch, Play Store summary (${liveMockAudit.avgScore}), Creator reply, 5★ filter & submit-review verified`
     );
