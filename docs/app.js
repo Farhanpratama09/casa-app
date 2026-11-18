@@ -12,7 +12,7 @@
 
   // Supabase public review backend (isi `SUPABASE_PUBLISHABLE_KEY` dengan kunci `sb_publishable_...` dari Dashboard)
   const SUPABASE_URL = 'https://ivlyujaafwqziogajjtk.supabase.co';
-  const SUPABASE_PUBLISHABLE_KEY = '';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable__TDUvXJeCptks3hvpETwNw_h64fdeOd';
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const SMALL_RING_C = 31.42; // 2 * PI * 5
