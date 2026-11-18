@@ -10,7 +10,8 @@ Instruksi wajib bagi setiap agen AI dan kontributor yang bekerja di repositori `
 3. **Navigasi & Komunitas Web:**
    - Pertahankan **Clean Path Routing tanpa `#`** (`/casa-app/`, `/casa-app/playground`, `/casa-app/arsitektur`, `/casa-app/unduh`, `/casa-app/feedback`) lewat History API + [docs/404.html](./docs/404.html).
    - Pertahankan *Live Download Counter* (menjumlahkan aset `.exe` + `.msi` saja, cache `localStorage` 15 menit) dan tombol unduh dengan *cooldown* 6 detik.
-   - Section *Community & Discussions* (`#feedback`) menggunakan **Giscus** (`Farhanpratama09/casa-app`, kategori `General`). **Strict CSP:** meta tag CSP di `docs/index.html` wajib mengizinkan `https://giscus.app` pada `script-src`, `style-src`, `frame-src`, dan `connect-src` tanpa menambahkan `'unsafe-inline'` ke `script-src`.
+   - Section **Ratings & Reviews** (`#feedback`) menggunakan arsitektur ala Play Store berbasis **Supabase (`casa_reviews_public` / `casa_review_stats` views) + moderasi 1-klik & balasan `Creator` via Telegram Webhook** (disertai satu tautan ke [GitHub Discussions](https://github.com/Farhanpratama09/casa-app/discussions)). **Strict CSP:** meta tag CSP di `docs/index.html` wajib mengunci `script-src 'self'`, `frame-src 'none'`, `form-action 'self'`, serta `connect-src 'self' https://api.github.com https://ivlyujaafwqziogajjtk.supabase.co` tanpa `'unsafe-inline'` di `script-src`.
+   - **Kompatibilitas Key Supabase (`sb_publishable_`):** Permintaan `fetch` dari `docs/app.js` ke PostgREST/Edge Function hanya mengirim header `apikey` (dilarang mengirimnya ke `Authorization: Bearer`), dan dilarang menaruh `Secret key` / `service_role` / `TELEGRAM_BOT_TOKEN` di repositori.
 
 ---
 
@@ -39,6 +40,7 @@ npx tsc --noEmit
 npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
 node scripts/verify-docs-showcase.mjs
+node scripts/verify-reviews-security.mjs
 ```
 
 ---

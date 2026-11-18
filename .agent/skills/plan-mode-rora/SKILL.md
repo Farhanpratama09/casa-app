@@ -19,5 +19,5 @@ triggers:
 ## 2. Hukum Mutlak Mode Plan
 1. **STRICT READ-ONLY:** Dilarang keras memanggil tool edit, write, patch, atau mengubah berkas proyek sebelum ada otorisasi tertulis dari pengguna.
 2. **Berpijak pada Realitas Sistem (Ground Truth):** Selidiki langsung file sumber aktual (`src-tauri/src/lib.rs`, `src-tauri/src/media/gsmtc.rs`, `src-tauri/src/hitbox.rs`, `src/components/CasaIsland.tsx`, `src/components/views/mode6/Mode6MusicLayout.tsx`, `src/components/views/mode6/Mode6ControlCenterView.tsx`, `src/components/settings/DesktopSettingsWindow.tsx`, `docs/index.html`, `docs/app.js`) dan sertakan nomor baris presisi.
-3. **Audit Paritas & Keamanan:** Pastikan cetak biru memeriksa paritas 1:1 antara `src/` dan `docs/` (termasuk Giscus CSP & tema Monokrom Murni tanpa color-leak), serta kepatuhan larangan eksposur kredensial/secret.
+3. **Audit Paritas & Keamanan:** Pastikan cetak biru memeriksa paritas 1:1 antara `src/` dan `docs/` (termasuk strict Supabase CSP, `apikey`-only public fetch, view `casa_reviews_public` tanpa kolom PII, & tema Monokrom Murni tanpa color-leak), serta kepatuhan larangan eksposur kredensial/secret.
 4. **Keluaran Laporan:** Berikan laporan temuan empiris, analisis akar masalah, cetak biru (blueprint) perbaikan, dan strategi validasi dengan gate wajib (`tsc`, `vite build`, `cargo check`, `verify-docs-showcase.mjs`).

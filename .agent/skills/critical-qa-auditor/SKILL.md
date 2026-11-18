@@ -20,7 +20,7 @@ triggers:
 Setiap kali melakukan perbaikan logika (pencarian lirik, seleksi artis, antrean lagu, tema monokrom, atau web showcase):
 1. **Jalankan Skrip Simulasi & E2E Nyata:**
    - Gunakan `scripts/verify-*.{ts,js,mjs}` atau skrip verifikasi sementara di `<Artifact Directory>/scratch/` untuk menguji invariant logika.
-   - Untuk perubahan UI desktop (`src/`) maupun web (`docs/`), **WAJIB** menjalankan `node scripts/verify-docs-showcase.mjs` (Desktop 1280×800 & Mobile 390×844, `pageErrors=0`, `csp=0`, verifikasi Giscus, counter `.exe+.msi`, cooldown 6s).
+   - Untuk perubahan UI desktop (`src/`) maupun web (`docs/`), **WAJIB** menjalankan `node scripts/verify-docs-showcase.mjs` (Desktop 1280×800 & Mobile 390×844, `pageErrors=0`, `csp=0`, verifikasi Play Store Reviews & Supabase `apikey`-only flow, counter `.exe+.msi`, cooldown 6s) dan `node scripts/verify-reviews-security.mjs` bila menyentuh backend ulasan.
 2. **Uji Diskualifikasi & Kasus Ekstrem:**
    - Verifikasi kegagalan / penalti terpicu untuk kandidat salah, tidak ada kebocoran warna statis saat tema `monochrome` aktif, serta `Alt+Space` dan tombol `Quit CASA` teruji bersih.
 

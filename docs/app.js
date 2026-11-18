@@ -9,7 +9,10 @@
   const REPO_OWNER = 'Farhanpratama09';
   const REPO_NAME = 'casa-app';
   const RELEASES_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases`;
-  const RELEASES_PAGE_URL = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases`;
+
+  // Supabase public review backend (isi `SUPABASE_PUBLISHABLE_KEY` dengan kunci `sb_publishable_...` dari Dashboard)
+  const SUPABASE_URL = 'https://ivlyujaafwqziogajjtk.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY = '';
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const SMALL_RING_C = 31.42; // 2 * PI * 5
@@ -271,6 +274,28 @@
     downloadCountText: $('download-count-text'),
     copyShaBtn: $('copy-sha-btn'),
     shaValueExe: $('sha-value-exe'),
+
+    // Ratings & Reviews (Play Store Style)
+    reviewsAvgScore: $('reviews-avg-score'),
+    reviewsAvgStars: $('reviews-avg-stars'),
+    reviewsTotalCount: $('reviews-total-count'),
+    reviewsSummaryHint: $('reviews-summary-hint'),
+    reviewsBars: $('reviews-bars'),
+    reviewForm: $('review-form'),
+    reviewStarPicker: $('review-star-picker'),
+    reviewRatingDesc: $('review-rating-desc'),
+    revName: $('rev-name'),
+    revComment: $('rev-comment'),
+    revCharCount: $('rev-char-count'),
+    revWebsiteHp: $('rev-website-hp'),
+    revSubmitBtn: $('rev-submit-btn'),
+    revStatus: $('rev-status'),
+    reviewsFilterBar: $('reviews-filter-bar'),
+    reviewsSortSelect: $('reviews-sort-select'),
+    reviewsList: $('reviews-list'),
+    reviewsEmpty: $('reviews-empty'),
+    reviewsMoreWrap: $('reviews-more-wrap'),
+    reviewsLoadMoreBtn: $('reviews-load-more'),
   };
 
   function createSvgNode(tag, attrs) {
@@ -1907,11 +1932,475 @@
     });
   }
 
+  const RATING_LABELS = {
+    1: '1/5 — Sangat Kurang',
+    2: '2/5 — Perlu Perbaikan',
+    3: '3/5 — Cukup Bagus',
+    4: '4/5 — Sangat Bagus',
+    5: '5/5 — Luar Biasa!',
+  };
+  const REVIEWS_PAGE_SIZE = 6;
+
+  function renderMonochromeStars(container, ratingVal, size = 14) {
+    if (!container) return;
+    clearNode(container);
+    const fullCount = Math.round(Math.max(0, Math.min(5, Number(ratingVal) || 0)));
+    for (let i = 1; i <= 5; i++) {
+      const svg = createSvgNode('svg', {
+        viewBox: '0 0 24 24',
+        width: size,
+        height: size,
+        'aria-hidden': 'true',
+      });
+      const path = createSvgNode('path', {
+        d: 'M12 2.5l2.86 5.79 6.39.93-4.62 4.5 1.09 6.36L12 17.08l-5.72 3 1.09-6.36-4.62-4.5 6.39-.93L12 2.5z',
+        fill: i <= fullCount ? '#ffffff' : 'rgba(255, 255, 255, 0.16)',
+      });
+      svg.appendChild(path);
+      container.appendChild(svg);
+    }
+  }
+
+  function formatReviewDate(isoStr) {
+    if (!isoStr) return '';
+    try {
+      const d = new Date(isoStr);
+      if (Number.isNaN(d.getTime())) return '';
+      return d.toLocaleDateString('id-ID', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+    } catch (_err) {
+      return '';
+    }
+  }
+
+  function hasSupabaseConfig() {
+    return (
+      typeof SUPABASE_URL === 'string' &&
+      SUPABASE_URL.startsWith('https://') &&
+      typeof SUPABASE_PUBLISHABLE_KEY === 'string' &&
+      SUPABASE_PUBLISHABLE_KEY.trim().length > 0
+    );
+  }
+
+  async function supabaseRequest(pathAndQuery, init = {}) {
+    const base = SUPABASE_URL.replace(/\/+$/, '');
+    const headers = {
+      apikey: SUPABASE_PUBLISHABLE_KEY.trim(),
+      ...(init.headers || {}),
+    };
+    return await fetch(`${base}/${pathAndQuery}`, {
+      ...init,
+      headers,
+    });
+  }
+
+  function initReviewsHub() {
+    const reviewState = {
+      selectedRating: 0,
+      filterRating: 'all',
+      sortBy: 'newest',
+      offset: 0,
+      hasMore: false,
+      isSubmitting: false,
+      formStartPerf: performance.now(),
+    };
+
+    const starButtons = el.reviewStarPicker
+      ? Array.from(el.reviewStarPicker.querySelectorAll('[data-star-value]'))
+      : [];
+    const filterButtons = el.reviewsFilterBar
+      ? Array.from(el.reviewsFilterBar.querySelectorAll('[data-filter-rating]'))
+      : [];
+
+    const setStatusMessage = (msg, isError = false) => {
+      if (!el.revStatus) return;
+      el.revStatus.textContent = msg;
+      el.revStatus.setAttribute('data-tone', isError ? 'error' : 'neutral');
+    };
+
+    const syncStarPickerUI = (previewRating = 0) => {
+      const displayVal = previewRating || reviewState.selectedRating;
+      starButtons.forEach((btn) => {
+        const val = Number(btn.getAttribute('data-star-value') || 0);
+        btn.classList.toggle('active', val <= displayVal);
+        btn.setAttribute('aria-checked', val === reviewState.selectedRating ? 'true' : 'false');
+      });
+      if (el.reviewRatingDesc) {
+        el.reviewRatingDesc.textContent = displayVal
+          ? RATING_LABELS[displayVal] || `${displayVal}/5`
+          : 'Pilih rating (1–5)';
+      }
+    };
+
+    const syncCharCount = () => {
+      if (!el.revComment || !el.revCharCount) return;
+      const len = el.revComment.value.length;
+      el.revCharCount.textContent = `${len}/500`;
+    };
+
+    const renderSummaryStats = (rawStats) => {
+      const stats = rawStats || {
+        total_reviews: 0,
+        avg_rating: 0,
+        count_5: 0,
+        count_4: 0,
+        count_3: 0,
+        count_2: 0,
+        count_1: 0,
+      };
+      const total = Math.max(0, Number(stats.total_reviews) || 0);
+      const avg = total > 0 ? Number(stats.avg_rating) || 0 : 0;
+
+      if (el.reviewsAvgScore) {
+        el.reviewsAvgScore.textContent = avg.toFixed(1);
+      }
+      if (el.reviewsAvgStars) {
+        el.reviewsAvgStars.setAttribute('aria-label', `Rating rata-rata ${avg.toFixed(1)} dari 5`);
+        renderMonochromeStars(el.reviewsAvgStars, avg, 15);
+      }
+      if (el.reviewsTotalCount) {
+        el.reviewsTotalCount.textContent = `${total.toLocaleString('en-US')} ulasan`;
+      }
+      if (el.reviewsSummaryHint) {
+        el.reviewsSummaryHint.textContent =
+          total === 0
+            ? 'Belum ada ulasan terpublikasi'
+            : total < 3
+            ? 'Sampel awal — ulasan pertama'
+            : 'Terverifikasi oleh moderator';
+      }
+
+      [5, 4, 3, 2, 1].forEach((star) => {
+        const count = Math.max(0, Number(stats[`count_${star}`]) || 0);
+        const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+        const fillEl = el.reviewsBars?.querySelector(`[data-bar-fill="${star}"]`);
+        const countEl = el.reviewsBars?.querySelector(`[data-bar-count="${star}"]`);
+        const trackEl = fillEl?.parentElement;
+        if (fillEl) fillEl.style.width = `${pct}%`;
+        if (countEl) countEl.textContent = String(count);
+        if (trackEl) {
+          trackEl.setAttribute('aria-label', `Distribusi ${star} bintang: ${count}`);
+        }
+      });
+    };
+
+    const buildReviewCardNode = (item) => {
+      const article = document.createElement('article');
+      article.className = 'review-item';
+
+      const head = document.createElement('div');
+      head.className = 'review-item-head';
+
+      const authorGroup = document.createElement('div');
+      authorGroup.className = 'review-author-group';
+
+      const authorEl = document.createElement('span');
+      authorEl.className = 'review-author-name';
+      authorEl.textContent = item.author_name || 'Pengguna';
+
+      const versionEl = document.createElement('span');
+      versionEl.className = 'review-version-badge';
+      versionEl.textContent = item.app_version || 'v2.0.3';
+
+      const starsWrap = document.createElement('span');
+      starsWrap.className = 'reviews-stars-row';
+      starsWrap.setAttribute('aria-label', `${item.rating || 5} dari 5 bintang`);
+      renderMonochromeStars(starsWrap, item.rating || 5, 12);
+
+      authorGroup.appendChild(authorEl);
+      authorGroup.appendChild(starsWrap);
+      authorGroup.appendChild(versionEl);
+
+      const dateEl = document.createElement('time');
+      dateEl.className = 'review-date';
+      dateEl.textContent = formatReviewDate(item.created_at);
+
+      head.appendChild(authorGroup);
+      head.appendChild(dateEl);
+
+      const bodyEl = document.createElement('p');
+      bodyEl.className = 'review-comment-text';
+      bodyEl.textContent = item.comment || '';
+
+      article.appendChild(head);
+      article.appendChild(bodyEl);
+
+      if (item.creator_reply && String(item.creator_reply).trim()) {
+        const replyBox = document.createElement('div');
+        replyBox.className = 'creator-reply-box';
+
+        const replyHead = document.createElement('div');
+        replyHead.className = 'creator-reply-head';
+
+        const badge = document.createElement('span');
+        badge.className = 'creator-badge';
+        badge.textContent = 'Creator';
+
+        const replyDate = document.createElement('time');
+        replyDate.className = 'review-date';
+        replyDate.textContent = formatReviewDate(item.replied_at);
+
+        replyHead.appendChild(badge);
+        replyHead.appendChild(replyDate);
+
+        const replyText = document.createElement('p');
+        replyText.className = 'creator-reply-text';
+        replyText.textContent = item.creator_reply;
+
+        replyBox.appendChild(replyHead);
+        replyBox.appendChild(replyText);
+        article.appendChild(replyBox);
+      }
+
+      return article;
+    };
+
+    const showEmptyState = (message) => {
+      if (!el.reviewsEmpty) return;
+      el.reviewsEmpty.textContent = message;
+      el.reviewsEmpty.hidden = false;
+    };
+
+    const hideEmptyState = () => {
+      if (!el.reviewsEmpty) return;
+      el.reviewsEmpty.hidden = true;
+      el.reviewsEmpty.textContent = '';
+    };
+
+    const fetchReviewsFeed = async (append = false) => {
+      if (!el.reviewsList) return;
+      if (!append) {
+        reviewState.offset = 0;
+        clearNode(el.reviewsList);
+      }
+
+      if (!hasSupabaseConfig()) {
+        if (el.reviewsMoreWrap) el.reviewsMoreWrap.hidden = true;
+        showEmptyState(
+          'Belum ada ulasan terpublikasi (siap terhubung setelah Publishable Key diisi di docs/app.js).'
+        );
+        return;
+      }
+
+      const sortExpr =
+        reviewState.sortBy === 'highest'
+          ? 'rating.desc,created_at.desc'
+          : reviewState.sortBy === 'lowest'
+          ? 'rating.asc,created_at.desc'
+          : 'created_at.desc';
+
+      const params = [
+        'select=id,author_name,rating,comment,app_version,creator_reply,replied_at,created_at',
+        `order=${encodeURIComponent(sortExpr)}`,
+        `limit=${REVIEWS_PAGE_SIZE + 1}`,
+        `offset=${reviewState.offset}`,
+      ];
+      if (reviewState.filterRating !== 'all') {
+        params.push(`rating=eq.${encodeURIComponent(reviewState.filterRating)}`);
+      }
+
+      try {
+        const resp = await supabaseRequest(`rest/v1/casa_reviews_public?${params.join('&')}`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const rows = await resp.json();
+        const list = Array.isArray(rows) ? rows : [];
+        reviewState.hasMore = list.length > REVIEWS_PAGE_SIZE;
+        const pageItems = list.slice(0, REVIEWS_PAGE_SIZE);
+        reviewState.offset += pageItems.length;
+
+        pageItems.forEach((item) => {
+          el.reviewsList.appendChild(buildReviewCardNode(item));
+        });
+
+        if (el.reviewsList.children.length === 0) {
+          showEmptyState(
+            reviewState.filterRating === 'all'
+              ? 'Belum ada ulasan disetujui. Jadilah yang pertama menulis ulasan!'
+              : `Belum ada ulasan untuk filter ${reviewState.filterRating} ★.`
+          );
+        } else {
+          hideEmptyState();
+        }
+
+        if (el.reviewsMoreWrap) {
+          el.reviewsMoreWrap.hidden = !reviewState.hasMore;
+        }
+      } catch (_err) {
+        if (el.reviewsList.children.length === 0) {
+          showEmptyState('Ulasan sedang tidak tersedia sementara waktu.');
+        }
+        if (el.reviewsMoreWrap) el.reviewsMoreWrap.hidden = true;
+      }
+    };
+
+    const fetchSummaryStats = async () => {
+      if (!hasSupabaseConfig()) {
+        renderSummaryStats(null);
+        return;
+      }
+      try {
+        const resp = await supabaseRequest('rest/v1/casa_review_stats?select=*');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const rows = await resp.json();
+        renderSummaryStats(Array.isArray(rows) && rows[0] ? rows[0] : null);
+      } catch (_err) {
+        renderSummaryStats(null);
+      }
+    };
+
+    // Wire Star Picker (Click + Hover + Arrow Keys)
+    starButtons.forEach((btn) => {
+      const val = Number(btn.getAttribute('data-star-value') || 0);
+      btn.addEventListener('click', () => {
+        reviewState.selectedRating = val;
+        syncStarPickerUI();
+      });
+      btn.addEventListener('mouseenter', () => syncStarPickerUI(val));
+      btn.addEventListener('mouseleave', () => syncStarPickerUI());
+      btn.addEventListener('keydown', (ev) => {
+        if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') {
+          ev.preventDefault();
+          const next = Math.min(5, (reviewState.selectedRating || val) + 1);
+          reviewState.selectedRating = next;
+          syncStarPickerUI();
+          starButtons[next - 1]?.focus();
+        } else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') {
+          ev.preventDefault();
+          const prev = Math.max(1, (reviewState.selectedRating || val) - 1);
+          reviewState.selectedRating = prev;
+          syncStarPickerUI();
+          starButtons[prev - 1]?.focus();
+        }
+      });
+    });
+
+    if (el.revComment) {
+      el.revComment.addEventListener('input', syncCharCount);
+      syncCharCount();
+    }
+
+    // Wire Filter Pills & Sort Dropdown
+    filterButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const nextFilter = btn.getAttribute('data-filter-rating') || 'all';
+        reviewState.filterRating = nextFilter;
+        filterButtons.forEach((b) => {
+          b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
+        });
+        void fetchReviewsFeed(false);
+      });
+    });
+
+    if (el.reviewsSortSelect) {
+      el.reviewsSortSelect.addEventListener('change', () => {
+        reviewState.sortBy = el.reviewsSortSelect.value || 'newest';
+        void fetchReviewsFeed(false);
+      });
+    }
+
+    if (el.reviewsLoadMoreBtn) {
+      el.reviewsLoadMoreBtn.addEventListener('click', () => {
+        void fetchReviewsFeed(true);
+      });
+    }
+
+    // Wire Review Form Submit
+    if (el.reviewForm) {
+      el.reviewForm.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        if (reviewState.isSubmitting) return;
+
+        const rating = reviewState.selectedRating;
+        const authorName = (el.revName?.value || '').trim();
+        const comment = (el.revComment?.value || '').trim();
+        const websiteHp = el.revWebsiteHp?.value || '';
+
+        if (rating < 1 || rating > 5) {
+          setStatusMessage('Pilih rating 1 sampai 5 bintang terlebih dahulu.', true);
+          starButtons[0]?.focus();
+          return;
+        }
+        if (!authorName || authorName.length > 40) {
+          setStatusMessage('Nama wajib diisi (maksimal 40 karakter).', true);
+          el.revName?.focus();
+          return;
+        }
+        if (comment.length < 3 || comment.length > 500) {
+          setStatusMessage('Tulis ulasan singkat (3–500 karakter).', true);
+          el.revComment?.focus();
+          return;
+        }
+
+        if (!hasSupabaseConfig()) {
+          setStatusMessage(
+            'Layanan ulasan belum aktif (Publishable Key Supabase belum dikonfigurasi).',
+            true
+          );
+          return;
+        }
+
+        reviewState.isSubmitting = true;
+        if (el.revSubmitBtn) el.revSubmitBtn.disabled = true;
+        setStatusMessage('Mengirim ulasan ke antrean moderasi...');
+
+        try {
+          const resp = await supabaseRequest('functions/v1/submit-review', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              author_name: authorName,
+              rating,
+              comment,
+              website_hp: websiteHp,
+              elapsed_ms: Math.round(performance.now() - reviewState.formStartPerf),
+              app_version: 'v2.0.3',
+            }),
+          });
+
+          const result = await resp.json().catch(() => ({}));
+          if (!resp.ok) {
+            setStatusMessage(
+              typeof result.error === 'string'
+                ? result.error
+                : 'Gagal mengirim ulasan. Silakan coba lagi nanti.',
+              true
+            );
+            return;
+          }
+
+          el.reviewForm.reset();
+          reviewState.selectedRating = 0;
+          reviewState.formStartPerf = performance.now();
+          syncStarPickerUI();
+          syncCharCount();
+          setStatusMessage(
+            'Terima kasih! Ulasan kamu sedang ditinjau moderator sebelum tayang.'
+          );
+        } catch (_err) {
+          setStatusMessage(
+            'Koneksi gagal saat mengirim ulasan. Pastikan perangkat online lalu coba lagi.',
+            true
+          );
+        } finally {
+          reviewState.isSubmitting = false;
+          if (el.revSubmitBtn) el.revSubmitBtn.disabled = false;
+        }
+      });
+    }
+
+    syncStarPickerUI();
+    void Promise.all([fetchSummaryStats(), fetchReviewsFeed(false)]);
+  }
+
   // Boot
   initCleanNavigation();
   initVirtualMonitorControls();
   initCopyHash();
   initDownloadButtonCooldown();
+  initReviewsHub();
   syncUI();
   void initSmartReleaseHub();
 })();

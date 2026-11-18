@@ -54,10 +54,15 @@ Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + R
 - **Navigasi Clean Path Tanpa `#`:** Menggunakan `History API` (`pushState` / `replaceState`) untuk `/casa-app/`, `/casa-app/playground`, `/casa-app/arsitektur`, `/casa-app/unduh`, `/casa-app/feedback` (+ alias `/casa-app/discussions`) disertai pemulihan SPA lewat [404.html](./404.html).
 - **Smart Download Counter & Cooldown:**
   - `initSmartReleaseHub()` mengambil statistik dari GitHub Releases API, menjumlahkan khusus biner installer (`.exe` dan `.msi`; mengecualikan `.sig` & `latest.json`), menyimpannya pada `localStorage` (`casa_dl_count_cache`) selama **15 menit** (`DL_CACHE_TTL_MS`), dan sembunyi anggun bila offline.
-  - Tombol unduh `#primary-download-btn` menerapkan **cooldown 6 detik** (`DL_COOLDOWN_MS = 6000`, label `"Memulai unduhan..."`, memblokir klik ganda cepat).
-- **Community & Discussions via Giscus:**
-  - Section `#feedback` menanamkan widget **Giscus** (`https://giscus.app/client.js`, repo `Farhanpratama09/casa-app`, `data-repo-id="R_kgDOVfEztQ"`, kategori `General` `DIC_kwDOVfEztc4DLWUK`, `data-mapping="specific"`, `data-term="CASA Community & Discussions"`, tema `transparent_dark`) beserta tautan cepat GitHub Discussions & Bug Issue.
-  - **Content Security Policy (CSP) di `docs/index.html`:** Wajib mengizinkan `https://giscus.app` pada direktif **`script-src`**, **`style-src`**, **`frame-src`**, dan **`connect-src`** (`img-src` menyertakan `https://avatars.githubusercontent.com`), tanpa mengizinkan `'unsafe-inline'` pada `script-src`.
+  - Tombol unduh utama `#primary-download-btn` berlabel ringkas **`Download CASA for Windows`**, dengan versi dan ukuran pada subteks monospace `#download-size-text` (`v2.0.3 · NSIS Setup (.exe) · 4.43 MB`), serta **cooldown 6 detik** (`DL_COOLDOWN_MS = 6000`).
+- **Ratings & Reviews Ala Play Store (`#feedback`, Supabase + Telegram Moderation):**
+  - Bagian `#feedback` menampilkan ringkasan skor rata-rata & 5 progress bar distribusi bintang, filter rating (`All`, `5 ★`..`1 ★`) + sort (`Newest`, `Highest`, `Lowest`), form tulis ulasan tanpa login (star picker `1–5`, Name max 40 char, Review `3–500` char, honeypot `website_hp`, `elapsed_ms`), dan balasan resmi **`Creator`**, disertai satu tautan ke **GitHub Discussions** (`https://github.com/Farhanpratama09/casa-app/discussions`).
+  - **Arsitektur Database & Keamanan (`supabase/`):**
+    - Tabel `casa_reviews` (`pending | approved | rejected`) & `review_rate_limits` terkunci ketat oleh RLS dari akses `anon`. Publik hanya membaca view **`casa_reviews_public`** dan **`casa_review_stats`**.
+    - Frontend mengirim `SUPABASE_PUBLISHABLE_KEY` (`sb_publishable_...`) **hanya melalui header `apikey`** (tanpa `Authorization: Bearer`).
+    - Edge Function **`submit-review`** memvalidasi anti-spam NFKC/zero-width/word-boundary (`spam.ts`), *honeypot* + `elapsed_ms < 2500` *silent drop*, penolakan sopan bila berisi URL, *rate limit* per HMAC-SHA256 `/64` IP (`2/jam`) dan batas global (`25/jam`), lalu mengirim kartu moderasi ke Telegram Admin (`[ ✅ Approve ]`, `[ 🗑️ Tolak ]`).
+    - Edge Function **`telegram-webhook`** memverifikasi `X-Telegram-Bot-Api-Secret-Token` (*constant-time*, *fail-closed*) serta `from.id` + `chat.id`, menangani soft-reject `'rejected'`, dan menyimpan Telegram `Reply` menjadi `creator_reply` (auto-approve).
+  - **Content Security Policy (CSP) di `docs/index.html`:** Wajib mengunci `script-src 'self'`, `frame-src 'none'`, `form-action 'self'`, `img-src 'self' data:`, dan `connect-src 'self' https://api.github.com https://ivlyujaafwqziogajjtk.supabase.co` tanpa `'unsafe-inline'` pada `script-src`.
 
 ---
 

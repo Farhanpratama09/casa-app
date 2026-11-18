@@ -1,6 +1,6 @@
 ---
 name: app-security-guard
-description: Pengawal keamanan IPC Tauri, CSP aplikasi/web showcase (Giscus), hygiene Git (.env*/keys), dan larangan eksposur kredensial.
+description: Pengawal keamanan IPC Tauri, CSP aplikasi/web showcase (Supabase + Telegram), hygiene Git (.env*/keys), dan larangan eksposur kredensial.
 ---
 # ROLE: Application Security, CSP & Credential Guard
 
@@ -13,5 +13,6 @@ description: Pengawal keamanan IPC Tauri, CSP aplikasi/web showcase (Giscus), hy
 3. **Strict Tauri & Web Showcase CSP:**
    - Di `src-tauri/capabilities/default.json`, batasi izin hanya pada window `["main", "settings"]` dengan hak akses minimum (drag, global-shortcut, autostart, process, updater, ignore-cursor).
    - Di `src-tauri/tauri.conf.json`, pertahankan `script-src 'self'` dan domain media/API terverifikasi.
-   - Di `docs/index.html` (Web Showcase + **Giscus**), CSP wajib mengizinkan `https://giscus.app` hanya pada `script-src`, `style-src`, `frame-src`, dan `connect-src` (`img-src` mengizinkan `https://avatars.githubusercontent.com`), tanpa `'unsafe-inline'` pada `script-src`, serta sanitasi DOM bebas `innerHTML`.
+   - Di `docs/index.html` (Web Showcase + **Ratings & Reviews**), CSP wajib mengunci `script-src 'self'`, `frame-src 'none'`, `form-action 'self'`, serta `connect-src` khusus ke `https://api.github.com` dan `https://ivlyujaafwqziogajjtk.supabase.co` tanpa `'unsafe-inline'` pada `script-src`, serta sanitasi DOM bebas `innerHTML`.
+   - Di Supabase (`supabase/`): baca publik hanya via view **`casa_reviews_public`** & **`casa_review_stats`** (tabel dasar `casa_reviews` & `review_rate_limits` tertutup bagi `anon`), klien `docs/app.js` hanya memakai header **`apikey`** (`sb_publishable_...`, tanpa `Authorization: Bearer`), Edge Function `telegram-webhook` wajib *constant-time* `X-Telegram-Bot-Api-Secret-Token` + validasi `from.id` & `chat.id`, dan IP di-hash dengan **HMAC-SHA256 (`IP_HASH_SALT`)** (`/64` untuk IPv6).
 4. **Sanitasi Proses:** Peluncuran biner eksternal (`spotify_win32.rs`, `drop_zone.rs`) wajib memakai path tervalidasi atau Shell API aman tanpa argumen shell terinjeksi.

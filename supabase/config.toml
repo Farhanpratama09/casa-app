@@ -1,0 +1,10 @@
+# Supabase Project Edge Function Configuration
+# Both public endpoints are invoked without user JWTs:
+# - submit-review receives public showcase submissions (sb_publishable_ apikey + anti-spam + rate-limit)
+# - telegram-webhook is invoked directly by Telegram Bot API (verified via X-Telegram-Bot-Api-Secret-Token)
+
+[functions.submit-review]
+verify_jwt = false
+
+[functions.telegram-webhook]
+verify_jwt = false

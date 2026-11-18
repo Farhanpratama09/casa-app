@@ -18,6 +18,9 @@ dist-ssr/
 # Tauri / Rust
 src-tauri/target/
 
+# Supabase local temp state
+supabase/.temp/
+
 # Editor directories
 .vscode/*
 !.vscode/extensions.json

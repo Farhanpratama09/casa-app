@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta
     http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' https://giscus.app; style-src 'self' https://fonts.googleapis.com https://giscus.app; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://avatars.githubusercontent.com; frame-src 'self' https://giscus.app; connect-src 'self' https://api.github.com https://giscus.app; base-uri 'self'; object-src 'none'; form-action 'self' https://github.com;"
+    content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; connect-src 'self' https://api.github.com https://ivlyujaafwqziogajjtk.supabase.co; base-uri 'self'; object-src 'none'; form-action 'self';"
   />
   <meta name="theme-color" content="#000000" />
   <title>CASA — Dynamic Rabbit Island for Windows</title>
@@ -77,7 +77,7 @@
         <a href="/casa-app/playground" data-route="playground" data-scroll-target="playground">Playground</a>
         <a href="/casa-app/arsitektur" data-route="arsitektur" data-scroll-target="architecture">Arsitektur</a>
         <a href="/casa-app/unduh" data-route="unduh" data-scroll-target="download">Unduh</a>
-        <a href="/casa-app/feedback" data-route="feedback" data-scroll-target="feedback">Feedback</a>
+        <a href="/casa-app/feedback" data-route="feedback" data-scroll-target="feedback">Reviews</a>
       </nav>
 
       <a
@@ -889,59 +889,221 @@
     </section>
 
     <!-- ====================================================================
-         COMMUNITY & DISCUSSIONS (GISCUS / GITHUB DISCUSSIONS)
+         RATINGS & REVIEWS (PLAY STORE STYLE · SUPABASE + TELEGRAM MODERATION)
          ==================================================================== -->
     <section id="feedback" class="section-block">
       <div class="container">
-        <div class="discussions-header-row">
+        <div class="reviews-header-row">
           <div>
-            <span class="section-eyebrow">Community &amp; Discussions</span>
-            <h2 class="section-title">Community &amp; Discussions</h2>
+            <span class="section-eyebrow">Community Feedback</span>
+            <h2 class="section-title">Ratings &amp; Reviews</h2>
             <p class="section-desc">
-              Diskusikan ide fitur, laporkan kendala DPI multi-monitor Windows, atau bagikan konfigurasi CASA milikmu langsung melalui GitHub Discussions terintegrasi (Giscus).
+              Ulasan pengguna Windows tanpa perlu login — dimoderasi secara langsung sebelum tayang. Untuk laporan bug berlampiran log, silakan buka diskusi teknis.
             </p>
           </div>
 
-          <div class="discussions-quick-links">
+          <div class="reviews-header-actions">
             <a
               href="https://github.com/Farhanpratama09/casa-app/discussions"
               target="_blank"
               rel="noopener noreferrer"
               class="btn-secondary"
+              id="github-discussions-link"
             >
               <span>GitHub Discussions ↗</span>
-            </a>
-            <a
-              href="https://github.com/Farhanpratama09/casa-app/issues/new"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="btn-secondary"
-            >
-              <span>Laporkan Bug Issue ↗</span>
             </a>
           </div>
         </div>
 
-        <div class="oled-card giscus-card" id="giscus-card">
-          <div class="giscus" id="giscus-container"></div>
-          <script
-            src="https://giscus.app/client.js"
-            data-repo="Farhanpratama09/casa-app"
-            data-repo-id="R_kgDOVfEztQ"
-            data-category="General"
-            data-category-id="DIC_kwDOVfEztc4DLWUK"
-            data-mapping="specific"
-            data-term="CASA Community &amp; Discussions"
-            data-strict="0"
-            data-reactions-enabled="1"
-            data-emit-metadata="0"
-            data-input-position="top"
-            data-theme="transparent_dark"
-            data-lang="id"
-            data-loading="lazy"
-            crossorigin="anonymous"
-            async
-          ></script>
+        <!-- Summary Score & Distribution + Write Review Card -->
+        <div class="reviews-top-grid">
+          <div class="oled-card reviews-summary-card" id="reviews-summary-card">
+            <div class="reviews-summary-layout">
+              <div class="reviews-score-col">
+                <div class="reviews-avg-score tabular" id="reviews-avg-score">0.0</div>
+                <div class="reviews-stars-row" id="reviews-avg-stars" aria-label="Rating rata-rata 0 dari 5"></div>
+                <div class="reviews-total-count tabular" id="reviews-total-count">0 ulasan</div>
+                <p class="reviews-summary-hint" id="reviews-summary-hint">Belum ada ulasan</p>
+              </div>
+
+              <div class="reviews-bars-col" id="reviews-bars" aria-label="Distribusi rating">
+                <div class="rating-bar-row" data-star-row="5">
+                  <span class="rating-bar-label tabular">5</span>
+                  <div class="rating-bar-track" role="img" aria-label="Distribusi 5 bintang: 0">
+                    <div class="rating-bar-fill" data-bar-fill="5"></div>
+                  </div>
+                  <span class="rating-bar-count tabular" data-bar-count="5">0</span>
+                </div>
+                <div class="rating-bar-row" data-star-row="4">
+                  <span class="rating-bar-label tabular">4</span>
+                  <div class="rating-bar-track" role="img" aria-label="Distribusi 4 bintang: 0">
+                    <div class="rating-bar-fill" data-bar-fill="4"></div>
+                  </div>
+                  <span class="rating-bar-count tabular" data-bar-count="4">0</span>
+                </div>
+                <div class="rating-bar-row" data-star-row="3">
+                  <span class="rating-bar-label tabular">3</span>
+                  <div class="rating-bar-track" role="img" aria-label="Distribusi 3 bintang: 0">
+                    <div class="rating-bar-fill" data-bar-fill="3"></div>
+                  </div>
+                  <span class="rating-bar-count tabular" data-bar-count="3">0</span>
+                </div>
+                <div class="rating-bar-row" data-star-row="2">
+                  <span class="rating-bar-label tabular">2</span>
+                  <div class="rating-bar-track" role="img" aria-label="Distribusi 2 bintang: 0">
+                    <div class="rating-bar-fill" data-bar-fill="2"></div>
+                  </div>
+                  <span class="rating-bar-count tabular" data-bar-count="2">0</span>
+                </div>
+                <div class="rating-bar-row" data-star-row="1">
+                  <span class="rating-bar-label tabular">1</span>
+                  <div class="rating-bar-track" role="img" aria-label="Distribusi 1 bintang: 0">
+                    <div class="rating-bar-fill" data-bar-fill="1"></div>
+                  </div>
+                  <span class="rating-bar-count tabular" data-bar-count="1">0</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="oled-card review-form-card" id="review-form-card">
+            <form id="review-form" class="review-form" novalidate>
+              <div class="review-picker-row">
+                <div
+                  class="review-star-picker"
+                  id="review-star-picker"
+                  role="radiogroup"
+                  aria-label="Pilih rating bintang"
+                >
+                  <button
+                    type="button"
+                    class="star-pick-btn"
+                    role="radio"
+                    aria-checked="false"
+                    aria-label="1 bintang"
+                    data-star-value="1"
+                  >★</button>
+                  <button
+                    type="button"
+                    class="star-pick-btn"
+                    role="radio"
+                    aria-checked="false"
+                    aria-label="2 bintang"
+                    data-star-value="2"
+                  >★</button>
+                  <button
+                    type="button"
+                    class="star-pick-btn"
+                    role="radio"
+                    aria-checked="false"
+                    aria-label="3 bintang"
+                    data-star-value="3"
+                  >★</button>
+                  <button
+                    type="button"
+                    class="star-pick-btn"
+                    role="radio"
+                    aria-checked="false"
+                    aria-label="4 bintang"
+                    data-star-value="4"
+                  >★</button>
+                  <button
+                    type="button"
+                    class="star-pick-btn"
+                    role="radio"
+                    aria-checked="false"
+                    aria-label="5 bintang"
+                    data-star-value="5"
+                  >★</button>
+                </div>
+                <span class="review-rating-desc tabular" id="review-rating-desc">Pilih rating (1–5)</span>
+              </div>
+
+              <div class="review-field-group">
+                <label for="rev-name" class="review-field-label">Name</label>
+                <input
+                  id="rev-name"
+                  name="author_name"
+                  type="text"
+                  maxlength="40"
+                  required
+                  autocomplete="name"
+                  class="review-input"
+                  placeholder="cth. Raka · Windows 11"
+                />
+              </div>
+
+              <div class="review-field-group">
+                <div class="review-label-row">
+                  <label for="rev-comment" class="review-field-label">Review</label>
+                  <span class="review-char-count tabular" id="rev-char-count">0/500</span>
+                </div>
+                <textarea
+                  id="rev-comment"
+                  name="comment"
+                  required
+                  maxlength="500"
+                  class="review-textarea"
+                  placeholder="Ceritakan pengalamanmu memakai CASA di Windows..."
+                ></textarea>
+              </div>
+
+              <!-- Invisible bot honeypot trap -->
+              <div class="hp-trap" aria-hidden="true">
+                <label for="rev-website-hp">Website</label>
+                <input
+                  id="rev-website-hp"
+                  name="website_hp"
+                  type="text"
+                  tabindex="-1"
+                  autocomplete="off"
+                />
+              </div>
+
+              <div class="review-submit-row">
+                <button type="submit" id="rev-submit-btn" class="btn-primary">
+                  <span>Kirim Ulasan</span>
+                </button>
+                <p id="rev-status" class="review-status" role="status" aria-live="polite"></p>
+              </div>
+
+              <p class="review-privacy-note">
+                Privasi: Alamat IP disamarkan (HMAC-SHA256) khusus untuk anti-spam &amp; disimpan maks. 48 jam. Ulasan tayang setelah disetujui moderator.
+              </p>
+            </form>
+          </div>
+        </div>
+
+        <!-- Filter & Reviews Feed -->
+        <div class="oled-card reviews-feed-card" id="reviews-feed-card">
+          <div class="reviews-toolbar">
+            <div class="reviews-filter-bar" id="reviews-filter-bar" role="group" aria-label="Filter bintang ulasan">
+              <button type="button" class="reviews-filter-pill" data-filter-rating="all" aria-pressed="true">All</button>
+              <button type="button" class="reviews-filter-pill" data-filter-rating="5" aria-pressed="false">5 ★</button>
+              <button type="button" class="reviews-filter-pill" data-filter-rating="4" aria-pressed="false">4 ★</button>
+              <button type="button" class="reviews-filter-pill" data-filter-rating="3" aria-pressed="false">3 ★</button>
+              <button type="button" class="reviews-filter-pill" data-filter-rating="2" aria-pressed="false">2 ★</button>
+              <button type="button" class="reviews-filter-pill" data-filter-rating="1" aria-pressed="false">1 ★</button>
+            </div>
+
+            <div class="reviews-sort-wrap">
+              <label for="reviews-sort-select" class="reviews-sort-label">Urutkan</label>
+              <select id="reviews-sort-select" class="reviews-sort-select">
+                <option value="newest">Newest</option>
+                <option value="highest">Highest</option>
+                <option value="lowest">Lowest</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="reviews-list" id="reviews-list"></div>
+          <p class="reviews-empty" id="reviews-empty" hidden></p>
+
+          <div class="reviews-more-wrap" id="reviews-more-wrap" hidden>
+            <button type="button" id="reviews-load-more" class="btn-secondary">
+              <span>Muat lebih banyak</span>
+            </button>
+          </div>
         </div>
       </div>
     </section>

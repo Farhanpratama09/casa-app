@@ -69,8 +69,8 @@ npm run tauri build
 
 ## Arsitektur & Komunitas
 
-- Dokumentasi teknis lengkap: [CASA_CONTEXT.md](./CASA_CONTEXT.md) · [docs/PRD.md](./docs/PRD.md) · [AGENTS.md](./AGENTS.md)
-- Diskusi & laporan bug: [GitHub Discussions](https://github.com/Farhanpratama09/casa-app/discussions) atau langsung melalui widget **Giscus** pada bagian *Community & Discussions* di [farhanpratama09.github.io/casa-app/feedback](https://farhanpratama09.github.io/casa-app/feedback).
+- Dokumentasi teknis lengkap: [CASA_CONTEXT.md](./CASA_CONTEXT.md) · [docs/PRD.md](./docs/PRD.md) · [AGENTS.md](./AGENTS.md) · [supabase/README.md](./supabase/README.md)
+- Ulasan pengguna & diskusi: Tulis ulasan langsung (tanpa login) di bagian **Ratings & Reviews** pada [farhanpratama09.github.io/casa-app/feedback](https://farhanpratama09.github.io/casa-app/feedback), atau buka diskusi teknis di [GitHub Discussions](https://github.com/Farhanpratama09/casa-app/discussions).
 
 ## Lisensi
 

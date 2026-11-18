@@ -16,9 +16,9 @@
 | Frontend | React 19, TypeScript 5.7 (`strict`), Vite 6 (dev `127.0.0.1:1420`), Tailwind 3.4, framer-motion 12, zustand 5, lucide-react |
 | Backend | Rust (edition 2021), Tauri 2.2 (`tray-icon`, `protocol-asset`), `tauri-plugin-{drag,global-shortcut,autostart,process,updater}`, tokio, reqwest 0.13, sysinfo 0.33, serde |
 | Windows API | `windows` 0.62 (`Media_Control`, `Storage_Streams`, `Devices_Radios/Bluetooth`, `Win32_Media_Audio`, Wi-Fi/Power/WMI) + `windows-sys` 0.59 (`SetWindowPos`, `GetWindowLongPtrW`, `Toolhelp`) |
-| Eksternal | LRCLIB (`lrclib.net/api/search`); Spotify Web API (`spotify_oauth.rs` loopback `127.0.0.1:8888`); YouTube native resolve; GitHub Releases API (`latest.json` OTA + Giscus di web showcase) |
-| Web Showcase | `docs/` (HTML/CSS/JS statis zero-dependency + Widget **Giscus** + E2E Puppeteer `scripts/verify-docs-showcase.mjs`) |
-| Cek wajib | `npx tsc --noEmit`, `npm run build`, `cargo check --manifest-path src-tauri/Cargo.toml`, `node scripts/verify-docs-showcase.mjs` |
+| Eksternal | LRCLIB (`lrclib.net/api/search`); Spotify Web API (`spotify_oauth.rs` loopback `127.0.0.1:8888`); YouTube native resolve; GitHub Releases API (`latest.json` OTA); Supabase (`casa_reviews` + Edge Functions) & Telegram Bot API |
+| Web Showcase | `docs/` (HTML/CSS/JS statis zero-dependency + Play Store-style **Ratings & Reviews** + E2E Puppeteer `scripts/verify-docs-showcase.mjs`) |
+| Cek wajib | `npx tsc --noEmit`, `npm run build`, `cargo check --manifest-path src-tauri/Cargo.toml`, `node scripts/verify-docs-showcase.mjs`, `node scripts/verify-reviews-security.mjs` |
 
 > **Status Keamanan:** Kredensial `SPOTIFY_CLIENT_SECRET` lama telah dibersihkan dari kode (`''` di `src/utils/spotifyService.ts`) dan seluruh histori objek Git (`git gc --prune=now`). `.gitignore` memblokir `.env*`, `*.key`, `*.pem`, `node_modules/`, dan `src-tauri/target/`.
 
@@ -35,15 +35,21 @@ asaverse/
 ├─ .env.example              ← template SPOTIFY_* & VITE_SPOTIFY_* (.env* terblokir Git)
 ├─ .agent/skills/*/SKILL.md  ← domain guardrails & SOP spesialis CASA
 ├─ docs/                     ← Web Showcase 1:1 (farhanpratama09.github.io/casa-app/)
-│  ├─ index.html             ← Pure Monochrome OLED showcase, SHA-256 download, Giscus + CSP
-│  ├─ app.js                 ← Virtual Monitor parity simulator, clean path router, release hub & cooldown
-│  ├─ styles.css             ← Pure OLED theme + native Mode 6 capsule styling
+│  ├─ index.html             ← Pure Monochrome OLED showcase, SHA-256 download, Play Store Reviews & strict CSP
+│  ├─ app.js                 ← Virtual Monitor parity simulator, clean path router, release hub & Supabase reviews
+│  ├─ styles.css             ← Pure OLED theme + native Mode 6 capsule & Play Store reviews styling
 │  ├─ 404.html               ← Clean SPA sub-route restoration (/playground, /arsitektur, /unduh, /feedback)
 │  ├─ favicon.svg            ← Obsidian Bunny icon (`× ♥`)
 │  ├─ PRD.md                 ← Product Requirements Document v2.0.3
 │  └─ sasha-character-spec.md
+├─ supabase/                 ← Backend moderasi ulasan publik (`ivlyujaafwqziogajjtk.supabase.co`)
+│  ├─ config.toml            ← `verify_jwt = false` untuk `submit-review` & `telegram-webhook`
+│  ├─ README.md              ← Panduan migrasi, PowerShell secret setup aman & moderasi Telegram
+│  ├─ migrations/001_casa_reviews.sql ← `casa_reviews`, `review_rate_limits`, views `casa_reviews_public` & `casa_review_stats`
+│  └─ functions/             ← `_shared/helpers.ts`, `submit-review/{index,spam}.ts`, `telegram-webhook/index.ts`
 ├─ scripts/
-│  ├─ verify-docs-showcase.mjs        ← E2E Puppeteer parity Desktop (1280x800) & Mobile (390x844) + CSP/Giscus
+│  ├─ verify-docs-showcase.mjs        ← E2E Puppeteer parity Desktop (1280x800) & Mobile (390x844) + CSP & Reviews
+│  ├─ verify-reviews-security.mjs     ← Unit test Node untuk anti-spam NFKC/word-boundary, IPv6 /64 HMAC & webhook crypto
 │  ├─ verify-search-playlist-flow.mjs ← Verifikasi Search Drawer & Playlist popover flow
 │  └─ verify-*.{ts,js}                ← Logic test suite (lyrics, queue, browser sanitizer, time-sync, hitbox)
 ├─ src-tauri/
@@ -116,7 +122,7 @@ asaverse/
 - **Sub-Navigasi:** Hanya **`Player | Playlists`** (tab `Queue` redundan dihapus); daftar antrean diakses melalui tombol toggle pod kanan ber-header **`QUEUE`**.
 - **Pure Monochrome Fidelity:** Saat `settings.theme === 'monochrome'`, seluruh elemen (`BatteryPill`, ikon `Speaker` / `Headphones` / `Bluetooth`, cincin CPU/RAM/Focus, status Wi-Fi/BT) wajib membaca token dari `CASA_THEME_PALETTES` (`#FFFFFF` / zinc) tanpa kelas warna statis Tailwind (`text-emerald-*`, `text-green-*`, dll.).
 
-### 4.3 Web Showcase & Giscus (`docs/`)
+### 4.3 Web Showcase & Ratings/Reviews (`docs/` & `supabase/`)
 - **1:1 Parity Demo:** Simulasi interaktif di [docs/index.html](./docs/index.html) & [docs/app.js](./docs/app.js) mengikuti anatomi kapsul, intro `"Hi."`, Mode 6 `Player | Playlists` + `QUEUE`, Circular Battery Ring, Brightness HUD, Control Center, dan Drop Zone di aplikasi desktop.
-- **Download Hub:** Menjumlahkan `.exe` + `.msi` dari GitHub Releases API (cache `localStorage` 15 menit) dan cooldown klik tombol 6 detik.
-- **Community & Discussions:** Widget **Giscus** tertanam pada `#feedback` dengan CSP yang mengizinkan `https://giscus.app` pada `script-src`, `style-src`, `frame-src`, dan `connect-src`.
+- **Download Hub:** Menjumlahkan `.exe` + `.msi` dari GitHub Releases API (cache `localStorage` 15 menit) dan cooldown klik tombol 6 detik. Tombol utama berlabel `Download CASA for Windows` dengan metadata versi pada subteks `#download-size-text`.
+- **Ratings & Reviews (Play Store Style):** Bagian `#feedback` membaca view `casa_reviews_public` dan `casa_review_stats` menggunakan `SUPABASE_PUBLISHABLE_KEY` via header `apikey` saja (tanpa `Authorization: Bearer`), dengan pengiriman lewat Edge Function `submit-review` (anti-spam + HMAC `/64` IP rate limit) dan moderasi 1-klik / balasan `Creator` lewat `telegram-webhook`. CSP ketat mengunci `script-src 'self'`, `frame-src 'none'`, dan `connect-src 'self' https://api.github.com https://ivlyujaafwqziogajjtk.supabase.co`.

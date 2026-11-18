@@ -36,7 +36,7 @@ function check(cond, label, detail = '') {
   }
 }
 
-function startStaticServer(port = 5212) {
+function startStaticServer(port = 5212, { injectMockSupabaseKey = '' } = {}) {
   const server = http.createServer((req, res) => {
     const rawUrl = (req.url || '/').split('?')[0];
     // Support both `/casa-app/...` (GitHub Pages project subpath) and `/`
@@ -62,6 +62,14 @@ function startStaticServer(port = 5212) {
 
     const ext = path.extname(filePath).toLowerCase();
     res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    if (injectMockSupabaseKey && relPath === 'app.js') {
+      const src = fs.readFileSync(filePath, 'utf8').replace(
+        "const SUPABASE_PUBLISHABLE_KEY = '';",
+        `const SUPABASE_PUBLISHABLE_KEY = '${injectMockSupabaseKey}';`
+      );
+      res.end(src, 'utf8');
+      return;
+    }
     fs.createReadStream(filePath).pipe(res);
   });
 
@@ -569,29 +577,186 @@ async function main() {
       'Desktop 1280x800 zero horizontal overflow'
     );
 
-    // Giscus + CSP verification on Community & Discussions section
-    const giscusAudit = await page.evaluate(() => {
-      const cspMeta = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content') || '';
-      const giscusScript = document.querySelector('#giscus-card script[src="https://giscus.app/client.js"]');
+    // Ratings & Reviews DOM, empty fallback, interactive picker & strict CSP verification
+    await page.click('#review-star-picker button[data-star-value="4"]');
+    await page.type('#rev-comment', 'Clean OLED notch!!');
+    const reviewsStaticAudit = await page.evaluate(() => {
+      const cspMeta =
+        document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content') || '';
+      const hpRect = document.getElementById('rev-website-hp')?.parentElement?.getBoundingClientRect();
       return {
-        cspAllowsGiscusScript: /script-src[^;]*https:\/\/giscus\.app/.test(cspMeta),
-        cspAllowsGiscusFrame: /frame-src[^;]*https:\/\/giscus\.app/.test(cspMeta),
-        cspAllowsGiscusStyle: /style-src[^;]*https:\/\/giscus\.app/.test(cspMeta),
-        hasContainer: Boolean(document.querySelector('#feedback #giscus-container.giscus')),
-        repo: giscusScript?.getAttribute('data-repo') || '',
-        repoId: giscusScript?.getAttribute('data-repo-id') || '',
-        categoryId: giscusScript?.getAttribute('data-category-id') || '',
+        hasNoGiscus: !/giscus\.app/i.test(cspMeta) && !document.querySelector('script[src*="giscus"]'),
+        cspScriptSelfOnly:
+          /script-src\s+'self'\s*;/.test(cspMeta) && !/script-src[^;]*unsafe-inline/.test(cspMeta),
+        cspFrameNone: /frame-src\s+'none'/.test(cspMeta),
+        cspSupabaseExact: /connect-src[^;]*https:\/\/ivlyujaafwqziogajjtk\.supabase\.co/.test(cspMeta),
+        hasSummaryScore: document.getElementById('reviews-avg-score')?.textContent?.trim() === '0.0',
+        barRows: document.querySelectorAll('#reviews-bars [data-star-row]').length,
+        filterButtons: document.querySelectorAll('#reviews-filter-bar [data-filter-rating]').length,
+        sortOptions: document.querySelectorAll('#reviews-sort-select option').length,
+        ratingDescText: document.getElementById('review-rating-desc')?.textContent?.trim() || '',
+        charCountText: document.getElementById('rev-char-count')?.textContent?.trim() || '',
+        hpOffscreen: (hpRect?.left ?? 0) < -100,
+        discussionsHref: document.getElementById('github-discussions-link')?.getAttribute('href') || '',
+        emptyVisible: document.getElementById('reviews-empty')?.hidden === false,
       };
     });
     check(
-      giscusAudit.cspAllowsGiscusScript &&
-        giscusAudit.cspAllowsGiscusFrame &&
-        giscusAudit.cspAllowsGiscusStyle &&
-        giscusAudit.hasContainer &&
-        giscusAudit.repo === 'Farhanpratama09/casa-app' &&
-        giscusAudit.repoId === 'R_kgDOVfEztQ' &&
-        giscusAudit.categoryId === 'DIC_kwDOVfEztc4DLWUK',
-      `Community & Discussions Giscus + CSP verified (${giscusAudit.repo})`
+      reviewsStaticAudit.hasNoGiscus &&
+        reviewsStaticAudit.cspScriptSelfOnly &&
+        reviewsStaticAudit.cspFrameNone &&
+        reviewsStaticAudit.cspSupabaseExact &&
+        reviewsStaticAudit.hasSummaryScore &&
+        reviewsStaticAudit.barRows === 5 &&
+        reviewsStaticAudit.filterButtons === 6 &&
+        reviewsStaticAudit.sortOptions === 3 &&
+        reviewsStaticAudit.ratingDescText.startsWith('4/5') &&
+        reviewsStaticAudit.charCountText === '18/500' &&
+        reviewsStaticAudit.hpOffscreen &&
+        reviewsStaticAudit.discussionsHref === 'https://github.com/Farhanpratama09/casa-app/discussions' &&
+        reviewsStaticAudit.emptyVisible,
+      'Ratings & Reviews UI, CSP (exact Supabase origin, frame-src none, no Giscus), & interactive star/char counter verified'
+    );
+
+    // Mocked Supabase Live Mode Suite (apikey-only header compatibility, Creator reply, filter & submit-review)
+    const mockServer = await startStaticServer(5213, {
+      injectMockSupabaseKey: 'sb_publishable_e2e_mock_key',
+    });
+    const mockCtx = await browser.createBrowserContext();
+    const mockPage = await mockCtx.newPage();
+    await mockPage.setViewport({ width: 1280, height: 800 });
+    let headerSafetyOk = true;
+    let postedReviewBody = null;
+    const sampleReviews = [
+      {
+        id: 'rev-1',
+        author_name: 'Nadia K.',
+        rating: 5,
+        comment: 'Sangat bersih di OLED 240Hz, pop-up QUEUE instan!',
+        app_version: 'v2.0.3',
+        creator_reply: 'Terima kasih Nadia! Mode Monokrom OLED memang fokus utama v2.0.3.',
+        replied_at: '2026-11-18T10:00:00Z',
+        created_at: '2026-11-18T09:00:00Z',
+      },
+      {
+        id: 'rev-2',
+        author_name: 'Bima P.',
+        rating: 4,
+        comment: 'Smart-Tuck 4px aman saat main game fullscreen.',
+        app_version: 'v2.0.3',
+        creator_reply: null,
+        replied_at: null,
+        created_at: '2026-11-17T15:00:00Z',
+      },
+    ];
+    await mockPage.setRequestInterception(true);
+    mockPage.on('request', (req) => {
+      const url = req.url();
+      if (url.startsWith('https://api.github.com/')) {
+        req.respond({ status: 200, headers: { 'Access-Control-Allow-Origin': '*' }, body: '[]' });
+        return;
+      }
+      if (url.startsWith('https://ivlyujaafwqziogajjtk.supabase.co/')) {
+        if (req.method() === 'OPTIONS') {
+          req.respond({
+            status: 204,
+            headers: {
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Allow-Headers': 'content-type, apikey, x-client-info',
+              'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            },
+          });
+          return;
+        }
+        const hdrs = req.headers();
+        if (hdrs['apikey'] !== 'sb_publishable_e2e_mock_key' || Boolean(hdrs['authorization'])) {
+          headerSafetyOk = false;
+        }
+        if (url.includes('/rest/v1/casa_review_stats')) {
+          req.respond({
+            status: 200,
+            headers: { 'Access-Control-Allow-Origin': '*' },
+            contentType: 'application/json',
+            body: JSON.stringify([
+              {
+                total_reviews: 2,
+                avg_rating: 4.5,
+                count_5: 1,
+                count_4: 1,
+                count_3: 0,
+                count_2: 0,
+                count_1: 0,
+              },
+            ]),
+          });
+          return;
+        }
+        if (url.includes('/rest/v1/casa_reviews_public')) {
+          const filtered = url.includes('rating=eq.5')
+            ? sampleReviews.filter((r) => r.rating === 5)
+            : sampleReviews;
+          req.respond({
+            status: 200,
+            headers: { 'Access-Control-Allow-Origin': '*' },
+            contentType: 'application/json',
+            body: JSON.stringify(filtered),
+          });
+          return;
+        }
+        if (url.includes('/functions/v1/submit-review') && req.method() === 'POST') {
+          postedReviewBody = JSON.parse(req.postData() || '{}');
+          req.respond({
+            status: 201,
+            headers: { 'Access-Control-Allow-Origin': '*' },
+            contentType: 'application/json',
+            body: JSON.stringify({ ok: true, id: 'rev-mock-3', status: 'pending' }),
+          });
+          return;
+        }
+      }
+      req.continue();
+    });
+
+    await mockPage.goto('http://127.0.0.1:5213/casa-app/', { waitUntil: 'domcontentloaded' });
+    await mockPage.waitForFunction(
+      () => document.querySelectorAll('#reviews-list .review-item').length === 2,
+      { timeout: 4000 }
+    );
+    await mockPage.click('#reviews-filter-bar button[data-filter-rating="5"]');
+    await mockPage.waitForFunction(
+      () => document.querySelectorAll('#reviews-list .review-item').length === 1,
+      { timeout: 4000 }
+    );
+    await mockPage.click('#review-star-picker button[data-star-value="5"]');
+    await mockPage.type('#rev-name', 'Tariq Z.');
+    await mockPage.type('#rev-comment', 'Suka sekali dengan bar kontrol audio & circular battery!');
+    await mockPage.click('#rev-submit-btn');
+    await mockPage.waitForFunction(
+      () =>
+        (document.getElementById('rev-status')?.textContent || '').includes('ditinjau moderator'),
+      { timeout: 4000 }
+    );
+    const liveMockAudit = await mockPage.evaluate(() => ({
+      avgScore: document.getElementById('reviews-avg-score')?.textContent?.trim(),
+      totalText: document.getElementById('reviews-total-count')?.textContent?.trim(),
+      creatorBadge: document.querySelector('#reviews-list .creator-badge')?.textContent?.trim(),
+      filteredCount: document.querySelectorAll('#reviews-list .review-item').length,
+      statusMsg: document.getElementById('rev-status')?.textContent?.trim(),
+    }));
+    await mockCtx.close();
+    mockServer.close();
+
+    check(
+      headerSafetyOk &&
+        liveMockAudit.avgScore === '4.5' &&
+        liveMockAudit.totalText === '2 ulasan' &&
+        liveMockAudit.creatorBadge === 'Creator' &&
+        liveMockAudit.filteredCount === 1 &&
+        postedReviewBody?.rating === 5 &&
+        postedReviewBody?.author_name === 'Tariq Z.' &&
+        typeof postedReviewBody?.elapsed_ms === 'number' &&
+        postedReviewBody?.app_version === 'v2.0.3',
+      `Supabase apikey-only fetch, Play Store summary (${liveMockAudit.avgScore}), Creator reply, 5★ filter & submit-review verified`
     );
 
     check(
