@@ -40,7 +40,7 @@
     href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
     rel="stylesheet"
   />
-  <link rel="stylesheet" href="./styles.css?v=2.1.0" />
+  <link rel="stylesheet" href="./styles.css?v=2.1.0-2" />
 
   <script type="application/ld+json">
     {
@@ -252,8 +252,8 @@
                             viewBox="0 0 34 16"
                             aria-hidden="true"
                           ></svg>
-                          <span class="casa-prayer-title" id="vm-prayer-alert-title">Adzan Ashar</span>
-                          <span class="casa-prayer-time tabular" id="vm-prayer-alert-time">15:14</span>
+                          <span class="casa-prayer-title" id="vm-prayer-alert-title">Adzan Dzuhur</span>
+                          <span class="casa-prayer-time tabular" id="vm-prayer-alert-time">11:55</span>
                           <span class="casa-prayer-eq" aria-hidden="true">
                             <span class="casa-prayer-eq-bar"></span>
                             <span class="casa-prayer-eq-bar"></span>
@@ -388,8 +388,8 @@
                             viewBox="0 0 34 16"
                             aria-hidden="true"
                           ></svg>
-                          <strong id="vm-expanded-prayer-label">Adzan Ashar</strong>
-                          <span class="casa-prayer-time tabular">15:14</span>
+                          <strong id="vm-expanded-prayer-label">Adzan Dzuhur</strong>
+                          <span class="casa-prayer-time tabular" id="vm-expanded-prayer-time">11:55</span>
                           <span class="casa-prayer-eq" aria-hidden="true">
                             <span class="casa-prayer-eq-bar"></span>
                             <span class="casa-prayer-eq-bar"></span>
@@ -681,14 +681,15 @@
                                       <polyline points="21 3 21 9 15 9" />
                                     </svg>
                                   </button>
+                                  <span class="casa-ibadah-preview-pill tabular" id="vm-ibadah-preview-pill" title="Jam simulasi fase langit — klik kartu waktu sholat di bawah untuk preview">Preview 12:15</span>
                                 </div>
-                                <div class="casa-ibadah-meta tabular">Kemenag RI · Syafi&apos;i · UTC+07:00</div>
+                                <div class="casa-ibadah-meta tabular" id="vm-ibadah-meta">Kemenag RI · Syafi&apos;i · Klik waktu untuk preview fase langit</div>
                               </div>
                             </div>
                             <div class="casa-ibadah-right">
                               <div class="casa-ibadah-countdown-box">
                                 <div class="casa-ibadah-next-label" id="vm-ibadah-next-heading">ASHAR</div>
-                                <div class="casa-ibadah-countdown tabular" id="vm-ibadah-countdown">-01:42:18</div>
+                                <div class="casa-ibadah-countdown tabular" id="vm-ibadah-countdown">-02:59:00</div>
                               </div>
                             </div>
                           </div>
@@ -708,14 +709,14 @@
                                   <stop offset="90%" stop-color="#ffffff" stop-opacity="0.16" />
                                   <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
                                 </linearGradient>
-                                <linearGradient id="vm-passed-sky-grad" gradientUnits="userSpaceOnUse" x1="10" y1="48" x2="218" y2="15">
-                                  <stop id="vm-passed-grad-start" offset="0%" stop-color="#FDE68A" stop-opacity="0.34" />
-                                  <stop id="vm-passed-grad-end" offset="100%" stop-color="#FCD34D" stop-opacity="0.74" />
+                                <linearGradient id="vm-passed-sky-grad" gradientUnits="userSpaceOnUse" x1="10" y1="48" x2="170.3" y2="11.1">
+                                  <stop id="vm-passed-grad-start" offset="0%" stop-color="#FEF08A" stop-opacity="0.34" />
+                                  <stop id="vm-passed-grad-end" offset="100%" stop-color="#FFFBEB" stop-opacity="0.74" />
                                 </linearGradient>
-                                <linearGradient id="vm-comet-tail" gradientUnits="userSpaceOnUse" x1="128" y1="12" x2="218" y2="15">
-                                  <stop id="vm-comet-grad-start" offset="0%" stop-color="#FDE68A" stop-opacity="0" />
-                                  <stop id="vm-comet-grad-mid" offset="60%" stop-color="#FCD34D" stop-opacity="0.65" />
-                                  <stop id="vm-comet-grad-end" offset="100%" stop-color="#FCD34D" stop-opacity="1" />
+                                <linearGradient id="vm-comet-tail" gradientUnits="userSpaceOnUse" x1="80" y1="30" x2="170.3" y2="11.1">
+                                  <stop id="vm-comet-grad-start" offset="0%" stop-color="#FEF08A" stop-opacity="0" />
+                                  <stop id="vm-comet-grad-mid" offset="60%" stop-color="#FFFBEB" stop-opacity="0.65" />
+                                  <stop id="vm-comet-grad-end" offset="100%" stop-color="#FFFBEB" stop-opacity="1" />
                                 </linearGradient>
                                 <filter id="vm-orb-glow" x="-80%" y="-80%" width="260%" height="260%">
                                   <feGaussianBlur stdDeviation="2.6" result="blur" />
@@ -729,16 +730,18 @@
                               <line x1="4" y1="40" x2="528" y2="40" stroke="url(#vm-horizon-fade)" stroke-width="1" />
                               <!-- Remaining dashed trajectory -->
                               <path
-                                d="M 218,15 C 245,17 258,20 266,21 C 308,27 342,35 372.4,40 C 408,46 445,49 478.8,50 C 498,51 510,52 522,53"
+                                id="vm-ibadah-remaining-path"
+                                d="M 170.3,11.1 L 266,21 L 372.4,40 L 478.8,50 L 522,53"
                                 fill="none"
                                 stroke="rgba(255,255,255,0.18)"
                                 stroke-width="1.35"
                                 stroke-dasharray="3 3.5"
                                 stroke-linecap="round"
                               />
-                              <!-- Passed trajectory with clock-based sky phase gradient -->
+                              <!-- Passed trajectory with simulated clock-based sky phase gradient -->
                               <path
-                                d="M 10,48 C 28,46 40,43 53.2,40 C 92,27 122,11 159.6,11 C 184,11 202,13 218,15"
+                                id="vm-ibadah-passed-path"
+                                d="M 10,48 L 53.2,40 L 159.6,11 L 170.3,11.1"
                                 fill="none"
                                 stroke="url(#vm-passed-sky-grad)"
                                 stroke-width="1.65"
@@ -746,51 +749,52 @@
                               />
                               <!-- Shooting-star glowing tail -->
                               <path
-                                d="M 128,13 C 142,11 152,11 159.6,11 C 184,11 202,13 218,15"
+                                id="vm-ibadah-comet-path"
+                                d="M 80,30 L 159.6,11 L 170.3,11.1"
                                 fill="none"
                                 stroke="url(#vm-comet-tail)"
                                 stroke-width="2.4"
                                 stroke-linecap="round"
                                 filter="url(#vm-orb-glow)"
                               />
-                              <!-- 5 neutral white/silver prayer anchor dots -->
-                              <circle class="vm-prayer-dot" cx="53.2" cy="40" r="2.2" fill="#E4E4E7" fill-opacity="0.65" stroke="#E4E4E7" stroke-width="1.1" />
-                              <circle class="vm-prayer-dot" cx="159.6" cy="11" r="2.2" fill="#E4E4E7" fill-opacity="0.65" stroke="#E4E4E7" stroke-width="1.1" />
-                              <circle cx="266" cy="21" r="5.6" fill="none" stroke="#FFFFFF" stroke-opacity="0.32" stroke-width="1" />
-                              <circle class="vm-prayer-dot" cx="266" cy="21" r="3" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="1.2" />
-                              <circle class="vm-prayer-dot" cx="372.4" cy="40" r="2.1" fill="#000000" stroke="rgba(255,255,255,0.34)" stroke-width="1.1" />
-                              <circle class="vm-prayer-dot" cx="478.8" cy="50" r="2.1" fill="#000000" stroke="rgba(255,255,255,0.34)" stroke-width="1.1" />
-                              <!-- Dynamic 13x13 celestial icon (driven by local clock hour) with solid #000000 r=8 backing circle -->
+                              <!-- 5 neutral white/silver prayer anchor dots + next halo -->
+                              <circle id="vm-ibadah-next-halo" cx="266" cy="21" r="5.6" fill="none" stroke="#FFFFFF" stroke-opacity="0.32" stroke-width="1" />
+                              <circle class="vm-prayer-dot" data-dot-index="0" cx="53.2" cy="40" r="2.2" fill="#E4E4E7" fill-opacity="0.65" stroke="#E4E4E7" stroke-width="1.1" />
+                              <circle class="vm-prayer-dot" data-dot-index="1" cx="159.6" cy="11" r="2.2" fill="#E4E4E7" fill-opacity="0.65" stroke="#E4E4E7" stroke-width="1.1" />
+                              <circle class="vm-prayer-dot" data-dot-index="2" cx="266" cy="21" r="3" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="1.2" />
+                              <circle class="vm-prayer-dot" data-dot-index="3" cx="372.4" cy="40" r="2.1" fill="#000000" stroke="rgba(255,255,255,0.34)" stroke-width="1.1" />
+                              <circle class="vm-prayer-dot" data-dot-index="4" cx="478.8" cy="50" r="2.1" fill="#000000" stroke="rgba(255,255,255,0.34)" stroke-width="1.1" />
+                              <!-- Dynamic 13x13 celestial icon (driven by simulated showcase clock) with solid #000000 r=8 backing circle -->
                               <g id="vm-ibadah-celestial-orb" data-celestial-phase="sun">
-                                <circle id="vm-ibadah-orb-glow" cx="218" cy="15" r="9.5" fill="rgba(252, 211, 77, 0.34)" filter="url(#vm-orb-glow)" />
-                                <circle cx="218" cy="15" r="8" fill="#000000" />
-                                <g id="vm-ibadah-orb-glyph" transform="translate(211.5, 8.5)"></g>
+                                <circle id="vm-ibadah-orb-glow" cx="170.3" cy="11.1" r="9.5" fill="rgba(255, 251, 235, 0.36)" filter="url(#vm-orb-glow)" />
+                                <circle id="vm-ibadah-orb-backing" cx="170.3" cy="11.1" r="8" fill="#000000" />
+                                <g id="vm-ibadah-orb-glyph" transform="translate(163.8, 4.6)"></g>
                               </g>
                             </svg>
                           </div>
 
-                          <div class="casa-ibadah-grid" id="vm-ibadah-grid">
-                            <div class="casa-ibadah-col passed">
+                          <div class="casa-ibadah-grid" id="vm-ibadah-grid" role="group" aria-label="Preview fase langit 5 waktu sholat">
+                            <button type="button" class="casa-ibadah-col passed" data-prayer-preview="subuh" aria-pressed="false" title="Klik untuk preview fase langit Subuh (~05:15)">
                               <span class="casa-ibadah-name">Subuh</span>
-                              <span class="casa-ibadah-time tabular">04:36</span>
-                            </div>
-                            <div class="casa-ibadah-col passed">
+                              <span class="casa-ibadah-time tabular">04:28</span>
+                            </button>
+                            <button type="button" class="casa-ibadah-col passed" data-prayer-preview="dzuhur" data-preview-active="true" aria-pressed="true" title="Klik untuk preview fase langit Dzuhur (~12:15)">
                               <span class="casa-ibadah-name">Dzuhur</span>
                               <span class="casa-ibadah-time tabular">11:55</span>
-                            </div>
-                            <div class="casa-ibadah-col next">
+                            </button>
+                            <button type="button" class="casa-ibadah-col next" data-prayer-preview="ashar" aria-pressed="false" title="Klik untuk preview fase langit Ashar (~15:30)">
                               <span class="casa-ibadah-name">Ashar</span>
                               <span class="casa-ibadah-time tabular">15:14</span>
                               <span class="casa-ibadah-next-tag">NEXT</span>
-                            </div>
-                            <div class="casa-ibadah-col">
+                            </button>
+                            <button type="button" class="casa-ibadah-col" data-prayer-preview="maghrib" aria-pressed="false" title="Klik untuk preview fase langit Maghrib (~17:40)">
                               <span class="casa-ibadah-name">Maghrib</span>
-                              <span class="casa-ibadah-time tabular">17:58</span>
-                            </div>
-                            <div class="casa-ibadah-col">
+                              <span class="casa-ibadah-time tabular">17:30</span>
+                            </button>
+                            <button type="button" class="casa-ibadah-col" data-prayer-preview="isya" aria-pressed="false" title="Klik untuk preview fase langit Isya (~19:20)">
                               <span class="casa-ibadah-name">Isya</span>
-                              <span class="casa-ibadah-time tabular">19:09</span>
-                            </div>
+                              <span class="casa-ibadah-time tabular">18:52</span>
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -951,7 +955,7 @@
                       <span class="vm-panel-tag tabular" id="vm-ibadah-status-tag">Tab Ibadah Aktif (5 Tab)</span>
                     </div>
                     <p class="vm-focus-hint">
-                      Opt-in di Settings (default OFF). Saat T-0 di mode Idle/Smart-Tuck, kapsul muncul ringkas dengan mata ✦ ☾, efek getar mikro, soundwave monokrom, hoverExpandLocked penuh, dan tombol Stop. Saat Mode 6 terbuka di tab lain, banner tipis muncul tanpa memaksa pindah tab.
+                      Opt-in di Settings (default OFF). Klik salah satu dari 5 kartu waktu sholat pada tab Ibadah di atas untuk melihat preview perubahan kurva, ikon matahari/bulan, dan gradasi warna langit secara instan. Tombol Banner Mode 6 memunculkan notifikasi tipis di atas tab aktif mana pun tanpa memaksa pindah tab.
                     </p>
                     <div class="vm-inline-controls">
                       <button type="button" id="vm-ibadah-toggle-btn" class="vm-action-btn">
@@ -1332,6 +1336,6 @@
     </div>
   </footer>
 
-  <script src="./app.js?v=2.1.0" defer></script>
+  <script src="./app.js?v=2.1.0-2" defer></script>
 </body>
 </html>

@@ -96,14 +96,76 @@
     { id: 'file-mix', name: 'mix-playlist.url', ext: 'URL', meta: 'URL · Web' },
   ];
 
+  // 5 interactive prayer schedule phases for the Web Showcase (simulated clock — independent of visitor browser time)
+  const DEMO_PRAYERS = [
+    {
+      key: 'subuh',
+      label: 'Subuh',
+      upper: 'SUBUH',
+      time: '04:28',
+      minutes: 4 * 60 + 28,
+      previewMinutes: 5 * 60 + 15,
+      previewTimeLabel: '05:15',
+      anchor: { x: 53.2, y: 40 },
+    },
+    {
+      key: 'dzuhur',
+      label: 'Dzuhur',
+      upper: 'DZUHUR',
+      time: '11:55',
+      minutes: 11 * 60 + 55,
+      previewMinutes: 12 * 60 + 15,
+      previewTimeLabel: '12:15',
+      anchor: { x: 159.6, y: 11 },
+    },
+    {
+      key: 'ashar',
+      label: 'Ashar',
+      upper: 'ASHAR',
+      time: '15:14',
+      minutes: 15 * 60 + 14,
+      previewMinutes: 15 * 60 + 30,
+      previewTimeLabel: '15:30',
+      anchor: { x: 266.0, y: 21 },
+    },
+    {
+      key: 'maghrib',
+      label: 'Maghrib',
+      upper: 'MAGHRIB',
+      time: '17:30',
+      minutes: 17 * 60 + 30,
+      previewMinutes: 17 * 60 + 40,
+      previewTimeLabel: '17:40',
+      anchor: { x: 372.4, y: 40 },
+    },
+    {
+      key: 'isya',
+      label: 'Isya',
+      upper: 'ISYA',
+      time: '18:52',
+      minutes: 18 * 60 + 52,
+      previewMinutes: 19 * 60 + 20,
+      previewTimeLabel: '19:20',
+      anchor: { x: 478.8, y: 50 },
+    },
+  ];
+
+  const CURVE_CONTROL_POINTS = [
+    { x: 10, y: 48 },
+    ...DEMO_PRAYERS.map((p) => p.anchor),
+    { x: 522, y: 53 },
+  ];
+
   const state = {
     mode: 'resting', // 'resting' | 'lyrics' | 'todo' | 'hud' | 'dropzone' | 'ibadah'
+    expandedTab: 'control', // 'music' | 'todo' | 'control' | 'dropzone' | 'ibadah'
     capsuleState: 'idle', // 'idle' | 'expanded'
     isRestingSleep: false,
     expression: 'idle', // 'idle' | 'music' | 'focus' | 'dual_active' | 'prayer'
     ibadahEnabled: false,
+    ibadahPreviewKey: 'dzuhur', // 'subuh' | 'dzuhur' | 'ashar' | 'maghrib' | 'isya'
     prayerAlertActive: false,
-    prayerCountdownSeconds: 1 * 3600 + 42 * 60 + 18,
+    prayerCountdownSeconds: (15 * 60 + 14 - (12 * 60 + 15)) * 60,
     idleLyricMinimized: false,
     musicSubTab: 'player', // 'player' | 'playlists'
     isLyricsOpen: true,
@@ -154,6 +216,8 @@
     hudDetail: $('casa-hud-detail'),
     prayerPill: $('casa-prayer-pill'),
     prayerEyes: $('vm-prayer-eyes'),
+    prayerAlertTitle: $('vm-prayer-alert-title'),
+    prayerAlertTime: $('vm-prayer-alert-time'),
     prayerStopBtn: $('vm-prayer-stop-btn'),
     activePill: $('casa-active-pill'),
     eyes: $('vm-notch-eyes'),
@@ -184,6 +248,8 @@
     collapseBtn: $('vm-notch-collapse-btn'),
     expandedPrayerBanner: $('vm-expanded-prayer-banner'),
     expandedPrayerEyes: $('vm-expanded-prayer-eyes'),
+    expandedPrayerLabel: $('vm-expanded-prayer-label'),
+    expandedPrayerTime: $('vm-expanded-prayer-time'),
     expandedPrayerStopBtn: $('vm-expanded-prayer-stop-btn'),
 
     expMusic: $('vm-exp-music'),
@@ -191,10 +257,22 @@
     expControl: $('vm-exp-control'),
     expDropzone: $('vm-exp-dropzone'),
     expIbadah: $('vm-exp-ibadah'),
+    ibadahNextHeading: $('vm-ibadah-next-heading'),
     ibadahCountdown: $('vm-ibadah-countdown'),
+    ibadahPreviewPill: $('vm-ibadah-preview-pill'),
     ibadahRefreshBtn: $('vm-ibadah-refresh-btn'),
+    ibadahGrid: $('vm-ibadah-grid'),
+    ibadahPrayerButtons: Array.from(document.querySelectorAll('#vm-ibadah-grid [data-prayer-preview]')),
+    ibadahPrayerDots: Array.from(document.querySelectorAll('#vm-ibadah-curve-svg .vm-prayer-dot')),
+    ibadahNextHalo: $('vm-ibadah-next-halo'),
+    ibadahPassedGrad: $('vm-passed-sky-grad'),
+    ibadahCometGrad: $('vm-comet-tail'),
+    ibadahRemainingPath: $('vm-ibadah-remaining-path'),
+    ibadahPassedPath: $('vm-ibadah-passed-path'),
+    ibadahCometPath: $('vm-ibadah-comet-path'),
     ibadahCelestialOrb: $('vm-ibadah-celestial-orb'),
     ibadahOrbGlow: $('vm-ibadah-orb-glow'),
+    ibadahOrbBacking: $('vm-ibadah-orb-backing'),
     ibadahOrbGlyph: $('vm-ibadah-orb-glyph'),
     passedGradStart: $('vm-passed-grad-start'),
     passedGradEnd: $('vm-passed-grad-end'),
@@ -470,6 +548,7 @@
     [0.0, [148, 163, 184]],
     [4.5, [148, 163, 184]],
     [5.0, [203, 213, 225]],
+    [5.25, [235, 224, 184]],
     [6.5, [253, 230, 138]],
     [7.0, [253, 230, 138]],
     [10.5, [254, 240, 138]],
@@ -510,10 +589,103 @@
     );
   }
 
-  function syncIbadahClockSkyVisual(now) {
+  function evalCatmullRom(p0, p1, p2, p3, t) {
+    const t2 = t * t;
+    const t3 = t2 * t;
+    return {
+      x:
+        0.5 *
+        (2 * p1.x +
+          (-p0.x + p2.x) * t +
+          (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+          (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+      y:
+        0.5 *
+        (2 * p1.y +
+          (-p0.y + p2.y) * t +
+          (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+          (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+    };
+  }
+
+  function sampleSplinePoint(u) {
+    const maxSeg = CURVE_CONTROL_POINTS.length - 1;
+    const clamped = Math.max(0, Math.min(maxSeg, u));
+    const segIdx = Math.min(maxSeg - 1, Math.floor(clamped));
+    const localT = clamped - segIdx;
+    const p0 = CURVE_CONTROL_POINTS[Math.max(0, segIdx - 1)];
+    const p1 = CURVE_CONTROL_POINTS[segIdx];
+    const p2 = CURVE_CONTROL_POINTS[Math.min(maxSeg, segIdx + 1)];
+    const p3 = CURVE_CONTROL_POINTS[Math.min(maxSeg, segIdx + 2)];
+    return evalCatmullRom(p0, p1, p2, p3, localT);
+  }
+
+  function buildPathFromRange(uStart, uEnd, steps = 40) {
+    if (uEnd <= uStart) return '';
+    const count = Math.max(2, steps);
+    const parts = [];
+    for (let i = 0; i <= count; i += 1) {
+      const u = uStart + ((uEnd - uStart) * i) / count;
+      const pt = sampleSplinePoint(u);
+      parts.push(`${i === 0 ? 'M' : 'L'} ${pt.x.toFixed(1)},${pt.y.toFixed(1)}`);
+    }
+    return parts.join(' ');
+  }
+
+  function computeDemoProgressU(simMinutes) {
+    const t0 = DEMO_PRAYERS[0].minutes;
+    const t4 = DEMO_PRAYERS[4].minutes;
+    if (simMinutes <= t0) {
+      const ratio = Math.max(0, Math.min(1, 1 - (t0 - simMinutes) / 240));
+      return 0.15 + ratio * 0.85;
+    }
+    for (let i = 0; i < 4; i += 1) {
+      const a = DEMO_PRAYERS[i].minutes;
+      const b = DEMO_PRAYERS[i + 1].minutes;
+      if (simMinutes >= a && simMinutes <= b) {
+        const frac = Math.max(0, Math.min(1, (simMinutes - a) / Math.max(1, b - a)));
+        return 1 + i + frac;
+      }
+    }
+    const nightRatio = Math.max(0, Math.min(1, (simMinutes - t4) / 95));
+    return 5 + nightRatio * 0.85;
+  }
+
+  function getActiveDemoPrayerIndex() {
+    const idx = DEMO_PRAYERS.findIndex((p) => p.key === state.ibadahPreviewKey);
+    return idx >= 0 ? idx : 1;
+  }
+
+  function computeDemoCountdownSeconds(activeIdx) {
+    const active = DEMO_PRAYERS[activeIdx] || DEMO_PRAYERS[1];
+    const nextIdx = (activeIdx + 1) % DEMO_PRAYERS.length;
+    const next = DEMO_PRAYERS[nextIdx];
+    const diffMin =
+      nextIdx === 0
+        ? 24 * 60 - active.previewMinutes + next.minutes
+        : Math.max(1, next.minutes - active.previewMinutes);
+    return diffMin * 60;
+  }
+
+  function selectIbadahPreviewPhase(prayerKey) {
+    const idx = DEMO_PRAYERS.findIndex((p) => p.key === prayerKey);
+    if (idx < 0) return;
+    state.ibadahPreviewKey = DEMO_PRAYERS[idx].key;
+    state.prayerCountdownSeconds = computeDemoCountdownSeconds(idx);
+    syncCapsuleUI();
+  }
+
+  function syncIbadahShowcasePhase() {
     if (!el.expIbadah || !el.ibadahOrbGlyph) return;
-    const d = now || new Date();
-    const hourFloat = d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+
+    const activeIdx = getActiveDemoPrayerIndex();
+    const activePrayer = DEMO_PRAYERS[activeIdx];
+    const nextIdx = (activeIdx + 1) % DEMO_PRAYERS.length;
+    const nextPrayer = DEMO_PRAYERS[nextIdx];
+
+    // Pure simulated showcase clock (never dependent on visitor's browser local time)
+    const simMinutes = activePrayer.previewMinutes;
+    const hourFloat = simMinutes / 60;
     const phase =
       hourFloat < 5.0 || hourFloat >= 18.0
         ? 'moon'
@@ -522,24 +694,142 @@
         : hourFloat < 15.75
         ? 'sun'
         : 'sunset';
+
     const activeRgb = sampleSkyRgbByHour(hourFloat);
-    const startRgb = sampleSkyRgbByHour(hourFloat - 2.0);
+    const startRgb =
+      phase === 'moon' ? [148, 163, 184] : sampleSkyRgbByHour(hourFloat - 2.0);
     const activeHex = rgbToHex(activeRgb);
     const startHex = rgbToHex(startRgb);
     const [r, g, b] = activeRgb;
 
+    // 1. Sync sky CSS variables & preview pill / next heading / alert text
     el.expIbadah.style.setProperty('--vm-ibadah-sky', activeHex);
     el.expIbadah.style.setProperty('--vm-ibadah-sky-bg', `rgba(${r}, ${g}, ${b}, 0.08)`);
     el.expIbadah.style.setProperty('--vm-ibadah-sky-border', `rgba(${r}, ${g}, ${b}, 0.55)`);
+    el.expIbadah.setAttribute('data-preview-prayer', activePrayer.key);
+
+    if (el.ibadahNextHeading) el.ibadahNextHeading.textContent = nextPrayer.upper;
+    if (el.ibadahPreviewPill) {
+      el.ibadahPreviewPill.textContent = `Preview ${activePrayer.previewTimeLabel}`;
+    }
+    const alertLabel = `Adzan ${activePrayer.label}`;
+    if (el.prayerAlertTitle) el.prayerAlertTitle.textContent = alertLabel;
+    if (el.prayerAlertTime) el.prayerAlertTime.textContent = activePrayer.time;
+    if (el.expandedPrayerLabel) el.expandedPrayerLabel.textContent = alertLabel;
+    if (el.expandedPrayerTime) el.expandedPrayerTime.textContent = activePrayer.time;
+
+    // 2. Recompute Catmull-Rom parabolic curve paths & celestial orb position
+    const u = computeDemoProgressU(simMinutes);
+    const orbPt = sampleSplinePoint(u);
+    const cometStartU = Math.max(0, u - 0.95);
+    const cometStartPt = sampleSplinePoint(cometStartU);
+    const startPt = CURVE_CONTROL_POINTS[0];
+    const maxU = CURVE_CONTROL_POINTS.length - 1;
+
+    if (el.ibadahPassedPath) {
+      el.ibadahPassedPath.setAttribute('d', buildPathFromRange(0, u, 36));
+    }
+    if (el.ibadahRemainingPath) {
+      el.ibadahRemainingPath.setAttribute('d', buildPathFromRange(u, maxU, 36));
+    }
+    if (el.ibadahCometPath) {
+      el.ibadahCometPath.setAttribute('d', buildPathFromRange(cometStartU, u, 18));
+    }
+    if (el.ibadahPassedGrad) {
+      el.ibadahPassedGrad.setAttribute('x1', startPt.x.toFixed(1));
+      el.ibadahPassedGrad.setAttribute('y1', startPt.y.toFixed(1));
+      el.ibadahPassedGrad.setAttribute('x2', orbPt.x.toFixed(1));
+      el.ibadahPassedGrad.setAttribute('y2', orbPt.y.toFixed(1));
+    }
+    if (el.ibadahCometGrad) {
+      el.ibadahCometGrad.setAttribute('x1', cometStartPt.x.toFixed(1));
+      el.ibadahCometGrad.setAttribute('y1', cometStartPt.y.toFixed(1));
+      el.ibadahCometGrad.setAttribute('x2', orbPt.x.toFixed(1));
+      el.ibadahCometGrad.setAttribute('y2', orbPt.y.toFixed(1));
+    }
 
     if (el.passedGradStart) el.passedGradStart.setAttribute('stop-color', startHex);
     if (el.passedGradEnd) el.passedGradEnd.setAttribute('stop-color', activeHex);
     if (el.cometGradStart) el.cometGradStart.setAttribute('stop-color', startHex);
     if (el.cometGradMid) el.cometGradMid.setAttribute('stop-color', activeHex);
     if (el.cometGradEnd) el.cometGradEnd.setAttribute('stop-color', activeHex);
-    if (el.ibadahOrbGlow) el.ibadahOrbGlow.setAttribute('fill', `rgba(${r}, ${g}, ${b}, 0.36)`);
-    if (el.ibadahCelestialOrb) el.ibadahCelestialOrb.setAttribute('data-celestial-phase', phase);
 
+    if (el.ibadahOrbGlow) {
+      el.ibadahOrbGlow.setAttribute('cx', orbPt.x.toFixed(1));
+      el.ibadahOrbGlow.setAttribute('cy', orbPt.y.toFixed(1));
+      el.ibadahOrbGlow.setAttribute('fill', `rgba(${r}, ${g}, ${b}, 0.36)`);
+    }
+    if (el.ibadahOrbBacking) {
+      el.ibadahOrbBacking.setAttribute('cx', orbPt.x.toFixed(1));
+      el.ibadahOrbBacking.setAttribute('cy', orbPt.y.toFixed(1));
+    }
+    if (el.ibadahOrbGlyph) {
+      el.ibadahOrbGlyph.setAttribute(
+        'transform',
+        `translate(${(orbPt.x - 6.5).toFixed(1)}, ${(orbPt.y - 6.5).toFixed(1)})`
+      );
+    }
+    if (el.ibadahCelestialOrb) {
+      el.ibadahCelestialOrb.setAttribute('data-celestial-phase', phase);
+      el.ibadahCelestialOrb.setAttribute('data-orb-x', orbPt.x.toFixed(1));
+    }
+
+    // 3. Keep 5 prayer anchor dots neutral monochrome (#E4E4E7 / #FFFFFF / #000000) & move next halo
+    if (el.ibadahNextHalo) {
+      el.ibadahNextHalo.setAttribute('cx', String(nextPrayer.anchor.x));
+      el.ibadahNextHalo.setAttribute('cy', String(nextPrayer.anchor.y));
+    }
+    el.ibadahPrayerDots.forEach((dotEl, idx) => {
+      const isNext = idx === nextIdx;
+      const isPassed = !isNext && (nextIdx === 0 || idx < nextIdx);
+      if (isNext) {
+        dotEl.setAttribute('r', '3');
+        dotEl.setAttribute('fill', '#FFFFFF');
+        dotEl.setAttribute('fill-opacity', '1');
+        dotEl.setAttribute('stroke', '#FFFFFF');
+        dotEl.setAttribute('stroke-width', '1.2');
+      } else if (isPassed) {
+        dotEl.setAttribute('r', '2.2');
+        dotEl.setAttribute('fill', '#E4E4E7');
+        dotEl.setAttribute('fill-opacity', '0.65');
+        dotEl.setAttribute('stroke', '#E4E4E7');
+        dotEl.setAttribute('stroke-width', '1.1');
+      } else {
+        dotEl.setAttribute('r', '2.1');
+        dotEl.setAttribute('fill', '#000000');
+        dotEl.setAttribute('fill-opacity', '1');
+        dotEl.setAttribute('stroke', 'rgba(255,255,255,0.34)');
+        dotEl.setAttribute('stroke-width', '1.1');
+      }
+    });
+
+    // 4. Sync 5 clickable prayer cards (active preview marker + single NEXT tag)
+    el.ibadahPrayerButtons.forEach((btn, idx) => {
+      const item = DEMO_PRAYERS[idx];
+      if (!item) return;
+      const isPreview = item.key === activePrayer.key;
+      const isNext = idx === nextIdx;
+      const isPassed = !isNext && (nextIdx === 0 || idx < nextIdx);
+
+      btn.classList.toggle('passed', isPassed);
+      btn.classList.toggle('next', isNext);
+      btn.setAttribute('data-preview-active', isPreview ? 'true' : 'false');
+      btn.setAttribute('aria-pressed', isPreview ? 'true' : 'false');
+
+      let tag = btn.querySelector('.casa-ibadah-next-tag');
+      if (isNext) {
+        if (!tag) {
+          tag = document.createElement('span');
+          tag.className = 'casa-ibadah-next-tag';
+          tag.textContent = 'NEXT';
+          btn.appendChild(tag);
+        }
+      } else if (tag) {
+        tag.remove();
+      }
+    });
+
+    // 5. Render 13x13 celestial glyph matching simulated phase
     clearNode(el.ibadahOrbGlyph);
     if (phase === 'sunrise') {
       el.ibadahOrbGlyph.appendChild(
@@ -650,6 +940,7 @@
     if (!el.monitor || !el.introOverlay) return;
 
     state.mode = 'resting';
+    state.expandedTab = 'control';
     state.capsuleState = 'idle';
     state.isRestingSleep = false;
     state.idleLyricMinimized = false;
@@ -1010,6 +1301,7 @@
 
   function openDropZoneTarget(expand) {
     if (expand) {
+      state.expandedTab = 'dropzone';
       state.capsuleState = 'expanded';
       if (el.capsule) el.capsule.setAttribute('data-drop-hover', 'true');
       syncCapsuleUI();
@@ -1022,6 +1314,7 @@
       state.droppedIds.push(fileId);
     }
     state.mode = 'dropzone';
+    state.expandedTab = 'dropzone';
     state.capsuleState = 'expanded';
     syncUI();
   }
@@ -1042,6 +1335,17 @@
   }
 
   function resolveMode6Variant() {
+    if (state.expandedTab === 'ibadah') {
+      return state.ibadahEnabled ? 'ibadah' : 'control';
+    }
+    if (
+      state.expandedTab === 'music' ||
+      state.expandedTab === 'todo' ||
+      state.expandedTab === 'control' ||
+      state.expandedTab === 'dropzone'
+    ) {
+      return state.expandedTab;
+    }
     if (state.mode === 'lyrics') return 'music';
     if (state.mode === 'todo') return 'todo';
     if (state.mode === 'ibadah' && state.ibadahEnabled) return 'ibadah';
@@ -1068,8 +1372,7 @@
       el.monitor.setAttribute('data-capsule-open', isExpanded ? 'true' : 'false');
     }
 
-    const showExpandedPrayerBanner =
-      isExpanded && state.prayerAlertActive && variant !== 'ibadah';
+    const showExpandedPrayerBanner = isExpanded && state.prayerAlertActive;
 
     if (el.capsule) {
       el.capsule.setAttribute('data-state', isExpanded ? 'expanded' : 'idle');
@@ -1207,7 +1510,7 @@
       const ss = String(sec % 60).padStart(2, '0');
       el.ibadahCountdown.textContent = `-${hh}:${mm}:${ss}`;
     }
-    syncIbadahClockSkyVisual(now);
+    syncIbadahShowcasePhase();
 
     // Mode 6 Music Player Metadata
     if (el.expAudioLabel) el.expAudioLabel.textContent = state.audioOutputLabel;
@@ -1328,19 +1631,25 @@
     state.idleLyricMinimized = false;
 
     if (nextMode === 'resting') {
+      state.expandedTab = 'control';
       state.capsuleState = 'idle';
     } else if (nextMode === 'lyrics') {
+      state.expandedTab = 'music';
       state.capsuleState = 'expanded';
       state.musicSubTab = 'player';
     } else if (nextMode === 'todo') {
+      state.expandedTab = 'todo';
       state.capsuleState = 'expanded';
     } else if (nextMode === 'hud') {
+      state.expandedTab = 'control';
       state.capsuleState = 'idle';
       showHudChip('volume', 'Volume', `${state.volume}%`, true);
     } else if (nextMode === 'dropzone') {
+      state.expandedTab = 'dropzone';
       state.capsuleState = 'expanded';
     } else if (nextMode === 'ibadah') {
       state.ibadahEnabled = true;
+      state.expandedTab = 'ibadah';
       state.prayerAlertActive = false;
       state.capsuleState = 'expanded';
     }
@@ -1550,14 +1859,27 @@
       btn.addEventListener('click', (ev) => {
         ev.stopPropagation();
         const tab = btn.getAttribute('data-m6-tab');
-        if (tab === 'music') switchMode('lyrics');
-        else if (tab === 'todo') switchMode('todo');
-        else if (tab === 'hud') {
-          state.mode = 'hud';
-          state.capsuleState = 'expanded';
-          syncUI();
-        } else if (tab === 'dropzone') switchMode('dropzone');
-        else if (tab === 'ibadah') switchMode('ibadah');
+        state.capsuleState = 'expanded';
+        state.isRestingSleep = false;
+        state.hudKind = '';
+        if (tab === 'music') {
+          state.expandedTab = 'music';
+          if (state.mode !== 'ibadah') state.mode = 'lyrics';
+        } else if (tab === 'todo') {
+          state.expandedTab = 'todo';
+          if (state.mode !== 'ibadah') state.mode = 'todo';
+        } else if (tab === 'hud') {
+          state.expandedTab = 'control';
+          if (state.mode !== 'ibadah') state.mode = 'hud';
+        } else if (tab === 'dropzone') {
+          state.expandedTab = 'dropzone';
+          if (state.mode !== 'ibadah') state.mode = 'dropzone';
+        } else if (tab === 'ibadah') {
+          state.ibadahEnabled = true;
+          state.expandedTab = 'ibadah';
+          if (state.mode !== 'ibadah') state.mode = 'ibadah';
+        }
+        syncUI();
       });
     });
 
@@ -1691,16 +2013,29 @@
       });
     }
 
-    // Pengingat Ibadah (v2.1.0 Opt-In + T-0 Simulation)
+    // Pengingat Ibadah (v2.1.0 Opt-In + Interactive 5-Prayer Preview + T-0 Simulation)
     if (el.ibadahToggleBtn) {
       el.ibadahToggleBtn.addEventListener('click', () => {
         state.ibadahEnabled = !state.ibadahEnabled;
         if (!state.ibadahEnabled) {
           state.prayerAlertActive = false;
+          if (state.expandedTab === 'ibadah') {
+            state.expandedTab = 'control';
+          }
+        } else if (state.mode === 'ibadah') {
+          state.expandedTab = 'ibadah';
         }
         syncUI();
       });
     }
+
+    el.ibadahPrayerButtons.forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const key = btn.getAttribute('data-prayer-preview');
+        if (key) selectIbadahPreviewPhase(key);
+      });
+    });
 
     if (el.simPrayerIdleBtn) {
       el.simPrayerIdleBtn.addEventListener('click', () => {
@@ -1717,8 +2052,9 @@
       el.simPrayerBannerBtn.addEventListener('click', () => {
         state.ibadahEnabled = true;
         state.prayerAlertActive = true;
-        state.mode = 'lyrics';
         state.capsuleState = 'expanded';
+        state.isRestingSleep = false;
+        state.hudKind = '';
         syncUI();
       });
     }
@@ -1748,6 +2084,7 @@
     const triggerIdleLyricMinimize = (ev) => {
       if (ev) ev.stopPropagation();
       state.mode = 'lyrics';
+      state.expandedTab = 'music';
       if (state.capsuleState === 'expanded') {
         state.idleLyricMinimized = true;
         state.capsuleState = 'idle';
@@ -1975,6 +2312,17 @@
       if (state.mode === 'todo' && state.focusTimerRunning) {
         state.focusSeconds = state.focusSeconds > 0 ? state.focusSeconds - 1 : 25 * 60;
         syncCapsuleUI();
+      } else if (state.capsuleState === 'expanded' && resolveMode6Variant() === 'ibadah') {
+        if (state.prayerCountdownSeconds > 0) {
+          state.prayerCountdownSeconds -= 1;
+          if (el.ibadahCountdown) {
+            const sec = state.prayerCountdownSeconds;
+            const hh = String(Math.floor(sec / 3600)).padStart(2, '0');
+            const mm = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+            const ss = String(sec % 60).padStart(2, '0');
+            el.ibadahCountdown.textContent = `-${hh}:${mm}:${ss}`;
+          }
+        }
       }
     }, 1000);
 

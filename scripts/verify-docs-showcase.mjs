@@ -506,37 +506,76 @@ async function main() {
       'Mode 5 (Drag & Drop): DropShelfCard & Copy Back to Desktop functional'
     );
 
-    // Mode 6: Pengingat Ibadah (v2.1.0 Opt-In 5th Tab, Parabolic Curve, T-0 ✦ ☾ Pill & Expanded Banner)
+    // Mode 6: Pengingat Ibadah (v2.1.0 Opt-In 5th Tab, Interactive 5-Phase Preview, T-0 ✦ ☾ Pill & Keep-Tab Banner)
     await page.click('button[data-vm-mode="ibadah"]');
     await new Promise((r) => setTimeout(r, 150));
-    const ibadahPanelAudit = await page.evaluate(() => {
-      const dots = Array.from(document.querySelectorAll('#vm-ibadah-curve-svg .vm-prayer-dot'));
-      const neutralDotFills = new Set(['#E4E4E7', '#FFFFFF', '#000000']);
-      const allDotsNeutral =
-        dots.length === 5 &&
-        dots.every((d) => neutralDotFills.has((d.getAttribute('fill') || '').toUpperCase()));
-      const orbGlyphChildren = document.getElementById('vm-ibadah-orb-glyph')?.children.length ?? 0;
-      const celestialPhase =
-        document.getElementById('vm-ibadah-celestial-orb')?.getAttribute('data-celestial-phase') || '';
-      return {
-        visibleTabs: document.querySelectorAll('.casa-m6-tab:not([hidden])').length,
-        ibadahOpen: document.getElementById('vm-exp-ibadah')?.hidden === false,
-        hasParabolicSvg: Boolean(document.getElementById('vm-ibadah-curve-svg')),
-        hasCelestialOrbIcon:
-          orbGlyphChildren > 0 && ['sunrise', 'sun', 'sunset', 'moon'].includes(celestialPhase),
-        allDotsNeutral,
-        hasRefreshNearCity: Boolean(
-          document.querySelector('.casa-ibadah-city-row #vm-ibadah-refresh-btn')
-        ),
-        nextHeadingText: document.getElementById('vm-ibadah-next-heading')?.textContent?.trim() || '',
-        prayerCols: document.querySelectorAll('#vm-ibadah-grid .casa-ibadah-col').length,
-        nextTagTexts: Array.from(document.querySelectorAll('#vm-ibadah-grid .casa-ibadah-next-tag')).map(
-          (el) => el.textContent?.trim() || ''
-        ),
-        gridText: document.getElementById('vm-ibadah-grid')?.textContent || '',
-        variant: document.getElementById('vm-notch-capsule')?.getAttribute('data-variant'),
-      };
-    });
+
+    const expectedPhases = [
+      { key: 'subuh', phase: 'sunrise', nextHeading: 'DZUHUR', pill: 'Preview 05:15', minX: 55, maxX: 110 },
+      { key: 'dzuhur', phase: 'sun', nextHeading: 'ASHAR', pill: 'Preview 12:15', minX: 162, maxX: 220, hex: '#fffbeb' },
+      { key: 'ashar', phase: 'sun', nextHeading: 'MAGHRIB', pill: 'Preview 15:30', minX: 268, maxX: 330, hex: '#fcd34d' },
+      { key: 'maghrib', phase: 'sunset', nextHeading: 'ISYA', pill: 'Preview 17:40', minX: 376, maxX: 440, hex: '#fb923c' },
+      { key: 'isya', phase: 'moon', nextHeading: 'SUBUH', pill: 'Preview 19:20', minX: 482, maxX: 525 },
+    ];
+    const phasePreviewResults = [];
+    for (const exp of expectedPhases) {
+      await page.click(`#vm-ibadah-grid button[data-prayer-preview="${exp.key}"]`);
+      await new Promise((r) => setTimeout(r, 60));
+      const snap = await page.evaluate((k) => {
+        const expEl = document.getElementById('vm-exp-ibadah');
+        const orbEl = document.getElementById('vm-ibadah-celestial-orb');
+        const btn = document.querySelector(`#vm-ibadah-grid button[data-prayer-preview="${k}"]`);
+        const dots = Array.from(document.querySelectorAll('#vm-ibadah-curve-svg .vm-prayer-dot'));
+        const neutralDotFills = new Set(['#E4E4E7', '#FFFFFF', '#000000']);
+        return {
+          key: k,
+          cursor: btn ? window.getComputedStyle(btn).cursor : '',
+          previewActive: btn?.getAttribute('data-preview-active') === 'true',
+          phase: orbEl?.getAttribute('data-celestial-phase') || '',
+          orbX: Number(orbEl?.getAttribute('data-orb-x') || 0),
+          orbGlyphChildren: document.getElementById('vm-ibadah-orb-glyph')?.children.length ?? 0,
+          nextHeading: document.getElementById('vm-ibadah-next-heading')?.textContent?.trim() || '',
+          previewPill: document.getElementById('vm-ibadah-preview-pill')?.textContent?.trim() || '',
+          skyHex: (expEl?.style.getPropertyValue('--vm-ibadah-sky') || '').trim().toLowerCase(),
+          allDotsNeutral:
+            dots.length === 5 &&
+            dots.every((d) => neutralDotFills.has((d.getAttribute('fill') || '').toUpperCase())),
+          nextTagTexts: Array.from(document.querySelectorAll('#vm-ibadah-grid .casa-ibadah-next-tag')).map(
+            (el) => el.textContent?.trim() || ''
+          ),
+          gridText: document.getElementById('vm-ibadah-grid')?.textContent || '',
+        };
+      }, exp.key);
+      const ok =
+        snap.cursor === 'pointer' &&
+        snap.previewActive &&
+        snap.phase === exp.phase &&
+        snap.orbGlyphChildren > 0 &&
+        snap.orbX >= exp.minX &&
+        snap.orbX <= exp.maxX &&
+        snap.nextHeading === exp.nextHeading &&
+        snap.previewPill === exp.pill &&
+        (!exp.hex || snap.skyHex === exp.hex) &&
+        snap.allDotsNeutral &&
+        snap.nextTagTexts.length === 1 &&
+        snap.nextTagTexts[0] === 'NEXT' &&
+        !/LEWAT|NANTI|BERIKUTNYA/i.test(snap.gridText);
+      phasePreviewResults.push({ ...snap, ok });
+    }
+    const allPhasePreviewsOk = phasePreviewResults.every((r) => r.ok);
+
+    const ibadahPanelAudit = await page.evaluate(() => ({
+      visibleTabs: document.querySelectorAll('.casa-m6-tab:not([hidden])').length,
+      ibadahOpen: document.getElementById('vm-exp-ibadah')?.hidden === false,
+      hasParabolicSvg: Boolean(document.getElementById('vm-ibadah-curve-svg')),
+      hasRefreshNearCity: Boolean(
+        document.querySelector('.casa-ibadah-city-row #vm-ibadah-refresh-btn')
+      ),
+      prayerCols: document.querySelectorAll('#vm-ibadah-grid button.casa-ibadah-col').length,
+      variant: document.getElementById('vm-notch-capsule')?.getAttribute('data-variant'),
+    }));
+
+    // T-0 Idle Pill (synced with last previewed prayer: Isya -> Adzan Isya)
     await page.click('#vm-sim-prayer-idle-btn');
     await new Promise((r) => setTimeout(r, 120));
     // Verify hoverExpandLocked: clicking non-button area of T-0 pill does NOT expand Mode 6
@@ -551,43 +590,74 @@ async function main() {
     }));
     await page.click('#vm-prayer-stop-btn');
     await new Promise((r) => setTimeout(r, 120));
+
+    // Banner Mode 6 Test A: triggered while on Ibadah tab -> MUST stay on Ibadah (NO forced jump to Musik)
     await page.click('#vm-sim-prayer-banner-btn');
     await new Promise((r) => setTimeout(r, 150));
-    const prayerBannerAudit = await page.evaluate(() => ({
+    const prayerBannerOnIbadahAudit = await page.evaluate(() => ({
       bannerVisible: document.getElementById('vm-expanded-prayer-banner')?.hidden === false,
-      stayedOnMusicTab: document.getElementById('vm-exp-music')?.hidden === false,
+      bannerLabel: document.getElementById('vm-expanded-prayer-label')?.textContent?.trim() || '',
+      stayedOnIbadahTab:
+        document.getElementById('vm-exp-ibadah')?.hidden === false &&
+        document.getElementById('vm-exp-music')?.hidden === true &&
+        document.getElementById('vm-notch-capsule')?.getAttribute('data-variant') === 'ibadah',
       expandedState: document.getElementById('vm-notch-capsule')?.getAttribute('data-state') === 'expanded',
     }));
     await page.click('#vm-expanded-prayer-stop-btn');
     await new Promise((r) => setTimeout(r, 100));
-    const afterBannerStopAudit = await page.evaluate(() => ({
+    const afterStopOnIbadahAudit = await page.evaluate(() => ({
       bannerHidden: document.getElementById('vm-expanded-prayer-banner')?.hidden === true,
+      stayedOnIbadahTab: document.getElementById('vm-exp-ibadah')?.hidden === false,
       stayedExpanded: document.getElementById('vm-notch-capsule')?.getAttribute('data-state') === 'expanded',
     }));
+
+    // Banner Mode 6 Test B: switch Mode 6 header to Focus & Tasks -> Banner MUST stay on Focus & Tasks (not Musik)
+    await page.click('.casa-m6-tab[data-m6-tab="todo"]');
+    await new Promise((r) => setTimeout(r, 120));
+    await page.click('#vm-sim-prayer-banner-btn');
+    await new Promise((r) => setTimeout(r, 150));
+    const prayerBannerOnTodoAudit = await page.evaluate(() => ({
+      bannerVisible: document.getElementById('vm-expanded-prayer-banner')?.hidden === false,
+      stayedOnTodoTab:
+        document.getElementById('vm-exp-focus')?.hidden === false &&
+        document.getElementById('vm-exp-music')?.hidden === true &&
+        document.getElementById('vm-notch-capsule')?.getAttribute('data-variant') === 'todo',
+    }));
+    await page.click('#vm-expanded-prayer-stop-btn');
+    await new Promise((r) => setTimeout(r, 100));
+    const afterStopOnTodoAudit = await page.evaluate(() => ({
+      bannerHidden: document.getElementById('vm-expanded-prayer-banner')?.hidden === true,
+      stayedOnTodoTab: document.getElementById('vm-exp-focus')?.hidden === false,
+      stayedExpanded: document.getElementById('vm-notch-capsule')?.getAttribute('data-state') === 'expanded',
+    }));
+
     check(
       ibadahPanelAudit.visibleTabs === 5 &&
         ibadahPanelAudit.ibadahOpen &&
         ibadahPanelAudit.hasParabolicSvg &&
-        ibadahPanelAudit.hasCelestialOrbIcon &&
-        ibadahPanelAudit.allDotsNeutral &&
         ibadahPanelAudit.hasRefreshNearCity &&
-        ibadahPanelAudit.nextHeadingText === 'ASHAR' &&
         ibadahPanelAudit.prayerCols === 5 &&
-        ibadahPanelAudit.nextTagTexts.length === 1 &&
-        ibadahPanelAudit.nextTagTexts[0] === 'NEXT' &&
-        !/LEWAT|NANTI|BERIKUTNYA/i.test(ibadahPanelAudit.gridText) &&
         ibadahPanelAudit.variant === 'ibadah' &&
+        allPhasePreviewsOk &&
         prayerIdleAudit.prayerPillVisible &&
         prayerIdleAudit.stayedIdle &&
-        prayerIdleAudit.titleText === 'Adzan Ashar' &&
+        prayerIdleAudit.titleText === 'Adzan Isya' &&
         prayerIdleAudit.hasStarCrescentEyes &&
         prayerIdleAudit.eqBars === 4 &&
-        prayerBannerAudit.bannerVisible &&
-        prayerBannerAudit.stayedOnMusicTab &&
-        prayerBannerAudit.expandedState &&
-        afterBannerStopAudit.bannerHidden &&
-        afterBannerStopAudit.stayedExpanded,
-      `Mode 6 (Pengingat Ibadah v2.1.0): 5 tabs, celestial icon + dynamic sky curve, Refresh near city, NEXT tag, T-0 pill (✦ ☾ + 4 eq + hoverExpandLocked) & expanded banner verified`
+        prayerBannerOnIbadahAudit.bannerVisible &&
+        prayerBannerOnIbadahAudit.bannerLabel === 'Adzan Isya' &&
+        prayerBannerOnIbadahAudit.stayedOnIbadahTab &&
+        prayerBannerOnIbadahAudit.expandedState &&
+        afterStopOnIbadahAudit.bannerHidden &&
+        afterStopOnIbadahAudit.stayedOnIbadahTab &&
+        afterStopOnIbadahAudit.stayedExpanded &&
+        prayerBannerOnTodoAudit.bannerVisible &&
+        prayerBannerOnTodoAudit.stayedOnTodoTab &&
+        afterStopOnTodoAudit.bannerHidden &&
+        afterStopOnTodoAudit.stayedOnTodoTab &&
+        afterStopOnTodoAudit.stayedExpanded,
+      `Mode 6 (Pengingat Ibadah v2.1.0): 5 clickable sky-phase previews (Subuh→Isya), T-0 pill (✦ ☾ + hoverExpandLocked) & non-switching Mode 6 banner (Ibadah + Focus & Tasks) verified`,
+      !allPhasePreviewsOk ? JSON.stringify(phasePreviewResults.filter((r) => !r.ok)) : ''
     );
 
     // Clean Path Routing Without `#` (/casa-app/<section>, popstate Back, Logo reset -> /casa-app/)
