@@ -56,7 +56,10 @@ import {
   syncActiveAlarmVolume,
 } from '../../utils/alarmChime';
 import { useMusicAffinityStore } from '../../hooks/useMusicAffinity';
-import { useUpdateNotification } from '../../hooks/useUpdateNotification';
+import {
+  requestSilentUpdateCheck,
+  useUpdateNotification,
+} from '../../hooks/useUpdateNotification';
 import { IbadahSettingsSection } from './IbadahSettingsSection';
 import {
   AppUpdateCheckResult,
@@ -553,6 +556,7 @@ export const DesktopSettingsWindow: React.FC = () => {
   useEffect(() => {
     if (activeSection !== 'system') return;
     let active = true;
+    requestSilentUpdateCheck(false);
 
     void getGlobalShortcutStatus().then((ok) => {
       if (active) setShortcutRegistered(ok);
@@ -639,7 +643,7 @@ export const DesktopSettingsWindow: React.FC = () => {
     void updateNotification.dismissBadge();
     if (!isTauriRuntime()) {
       setUpdateResult({
-        currentVersion: '2.1.1',
+        currentVersion: '2.1.2',
         available: false,
         version: null,
         body: null,
@@ -671,13 +675,13 @@ export const DesktopSettingsWindow: React.FC = () => {
       } else {
         void updateNotification.clearNotification();
         setUpdateResult({
-          currentVersion: '2.1.1',
+          currentVersion: '2.1.2',
           available: false,
           version: null,
           body: null,
           date: null,
           statusKind: 'up-to-date',
-          message: 'CASA sudah menggunakan versi terbaru (v2.1.1).',
+          message: 'CASA sudah menggunakan versi terbaru (v2.1.2).',
         });
       }
     } catch (err) {
@@ -693,7 +697,7 @@ export const DesktopSettingsWindow: React.FC = () => {
         lower.includes('network');
 
       setUpdateResult({
-        currentVersion: '2.1.1',
+        currentVersion: '2.1.2',
         available: false,
         version: null,
         body: msg,
@@ -729,7 +733,7 @@ export const DesktopSettingsWindow: React.FC = () => {
       if (!update) {
         void updateNotification.clearNotification();
         setUpdateResult({
-          currentVersion: '2.1.1',
+          currentVersion: '2.1.2',
           available: false,
           version: null,
           body: null,
@@ -771,7 +775,7 @@ export const DesktopSettingsWindow: React.FC = () => {
       await relaunch();
     } catch (err) {
       setUpdateResult((prev) => ({
-        currentVersion: prev?.currentVersion ?? '2.1.1',
+        currentVersion: prev?.currentVersion ?? '2.1.2',
         available: prev?.available ?? false,
         version: prev?.version ?? null,
         body: null,
@@ -870,7 +874,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                   CASA
                 </span>
                 <span className="px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.10] text-[10px] font-mono text-white/75">
-                  v2.1.1
+                  v2.1.2
                 </span>
               </div>
               <div className="text-[10px] font-mono text-white/40 mt-0.5 truncate">
@@ -1371,22 +1375,40 @@ export const DesktopSettingsWindow: React.FC = () => {
                           </span>
                         </div>
                         <p className="text-[11px] text-white/70 mt-1.5 leading-relaxed whitespace-pre-line max-h-[84px] overflow-y-auto oled-thin-scrollbar pr-1">
-                          {(updateResult?.body || updateNotification.releaseNotes || '').trim() ||
-                            'Versi terbaru CASA telah tersedia dengan tanda tangan digital Minisign.'}
+                          {updateResult?.available
+                            ? (updateResult.body || updateNotification.releaseNotes || '').trim() ||
+                              'Paket pembaruan CASA telah terverifikasi tanda tangan digital Minisign dan siap dipasang.'
+                            : 'Klik Check for Updates terlebih dahulu untuk memverifikasi paket pembaruan bertanda tangan digital Minisign sebelum memulai pemasangan.'}
                         </p>
                       </div>
 
-                      <button
-                        type="button"
-                        disabled={isInstallingUpdate}
-                        onClick={() => void handleInstallUpdate()}
-                        className="px-3 py-1.5 rounded-lg bg-white hover:bg-white/90 text-black text-[11px] font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0 transition-colors"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>
-                          {isInstallingUpdate ? 'Mengunduh...' : 'Download & Restart'}
-                        </span>
-                      </button>
+                      {updateResult?.available ? (
+                        <button
+                          type="button"
+                          disabled={isInstallingUpdate}
+                          onClick={() => void handleInstallUpdate()}
+                          className="px-3 py-1.5 rounded-lg bg-white hover:bg-white/90 text-black text-[11px] font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0 transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>
+                            {isInstallingUpdate ? 'Mengunduh...' : 'Download & Restart'}
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={isCheckingUpdate || isInstallingUpdate}
+                          onClick={() => void handleCheckUpdates()}
+                          className="px-3 py-1.5 rounded-lg bg-white hover:bg-white/90 text-black text-[11px] font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0 transition-colors"
+                        >
+                          <RefreshCw
+                            className={`w-3.5 h-3.5 ${isCheckingUpdate ? 'animate-spin' : ''}`}
+                          />
+                          <span>
+                            {isCheckingUpdate ? 'Memeriksa...' : 'Check for Updates'}
+                          </span>
+                        </button>
+                      )}
                     </div>
 
                     {installProgressText && (
@@ -1476,7 +1498,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[13px] font-semibold text-white">
-                            CASA v{updateResult?.currentVersion ?? '2.1.1'}
+                            CASA v{updateResult?.currentVersion ?? '2.1.2'}
                           </span>
                           <span className="text-[10px] font-mono text-white/45 px-1.5 py-0.5 rounded border border-white/[0.08] bg-[#08080A]">
                             Signed Updater
@@ -1546,7 +1568,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                         <RefreshCw
                           className={`w-3.5 h-3.5 ${isCheckingUpdate ? 'animate-spin' : ''}`}
                         />
-                        <span>{isCheckingUpdate ? 'Memeriksa...' : 'Check Updates'}</span>
+                        <span>{isCheckingUpdate ? 'Memeriksa...' : 'Check for Updates'}</span>
                         {updateNotification.badgeVisible && (
                           <span
                             aria-hidden="true"

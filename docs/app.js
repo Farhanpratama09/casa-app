@@ -452,13 +452,13 @@
       svgEl.appendChild(
         createSvgNode('path', {
           d: 'M 8.5,1.8 Q 8.9,7.4 14.5,8 Q 8.9,8.6 8.5,14.2 Q 8.1,8.6 2.5,8 Q 8.1,7.4 8.5,1.8 Z',
-          fill: '#ffffff',
+          fill: 'var(--vm-prayer-accent, #ffffff)',
         })
       );
       svgEl.appendChild(
         createSvgNode('path', {
           d: 'M 27.2,2.7 C 21.0,2.9 20.6,13.1 27.2,13.3 C 24.0,11.8 24.0,4.2 27.2,2.7 Z',
-          fill: '#ffffff',
+          fill: 'var(--vm-prayer-accent, #ffffff)',
         })
       );
       return;
@@ -703,10 +703,28 @@
     const [r, g, b] = activeRgb;
 
     // 1. Sync sky CSS variables & preview pill / next heading / alert text
+    const prayerThemeColors = {
+      subuh: { hex: '#FDE68A', rgb: [253, 230, 138] },
+      dzuhur: { hex: '#FFFBEB', rgb: [255, 251, 235] },
+      ashar: { hex: '#FCD34D', rgb: [252, 211, 77] },
+      maghrib: { hex: '#FB923C', rgb: [251, 146, 60] },
+      isya: { hex: '#93C5FD', rgb: [147, 197, 253] },
+    };
+    const t0Theme = prayerThemeColors[activePrayer.key] || { hex: activeHex, rgb: [r, g, b] };
+    const [pr, pg, pb] = t0Theme.rgb;
+
     el.expIbadah.style.setProperty('--vm-ibadah-sky', activeHex);
     el.expIbadah.style.setProperty('--vm-ibadah-sky-bg', `rgba(${r}, ${g}, ${b}, 0.08)`);
     el.expIbadah.style.setProperty('--vm-ibadah-sky-border', `rgba(${r}, ${g}, ${b}, 0.55)`);
     el.expIbadah.setAttribute('data-preview-prayer', activePrayer.key);
+
+    if (el.capsule) {
+      el.capsule.style.setProperty('--vm-prayer-accent', t0Theme.hex);
+      el.capsule.style.setProperty('--vm-prayer-glow', `rgba(${pr}, ${pg}, ${pb}, 0.44)`);
+      el.capsule.style.setProperty('--vm-prayer-outer-shadow', `rgba(${pr}, ${pg}, ${pb}, 0.32)`);
+      el.capsule.style.setProperty('--vm-prayer-border', `rgba(${pr}, ${pg}, ${pb}, 0.30)`);
+      el.capsule.style.setProperty('--vm-prayer-tint', `rgba(${pr}, ${pg}, ${pb}, 0.08)`);
+    }
 
     if (el.ibadahNextHeading) el.ibadahNextHeading.textContent = nextPrayer.upper;
     if (el.ibadahPreviewPill) {
@@ -1378,6 +1396,7 @@
       el.capsule.setAttribute('data-state', isExpanded ? 'expanded' : 'idle');
       el.capsule.setAttribute('data-variant', variant);
       el.capsule.setAttribute('data-five-tabs', state.ibadahEnabled ? 'true' : 'false');
+      el.capsule.setAttribute('data-prayer-alert', state.prayerAlertActive ? 'true' : 'false');
       el.capsule.setAttribute(
         'data-has-prayer-banner',
         showExpandedPrayerBanner ? 'true' : 'false'
@@ -1394,15 +1413,25 @@
     if (el.idleLayer) el.idleLayer.hidden = isExpanded;
     if (el.expandedLayer) el.expandedLayer.hidden = !isExpanded;
 
-    // Perimeter Open U-Shape Focus Timer Stroke (when To-Do & Focus active in Idle)
-    const showPerimeter = !isExpanded && !state.prayerAlertActive && state.mode === 'todo';
+    // Perimeter Open U-Shape Stroke (Prayer T-0 full breathing perimeter OR Focus Timer progress)
+    const showPrayerPerimeter = !isExpanded && state.prayerAlertActive;
+    const showFocusPerimeter = !isExpanded && !state.prayerAlertActive && state.mode === 'todo';
+    const showPerimeter = showPrayerPerimeter || showFocusPerimeter;
     if (el.perimeterSvg) {
       el.perimeterSvg.hidden = !showPerimeter;
+      el.perimeterSvg.setAttribute(
+        'data-perimeter-mode',
+        showPrayerPerimeter ? 'prayer' : 'focus'
+      );
     }
     if (el.perimeterPath) {
-      const done = state.todos.filter((t) => t.done).length;
-      const pct = Math.round((done / Math.max(1, state.todos.length)) * 100);
-      el.perimeterPath.style.strokeDashoffset = String(Math.max(5, 100 - pct));
+      if (showPrayerPerimeter) {
+        el.perimeterPath.style.strokeDashoffset = '0';
+      } else {
+        const done = state.todos.filter((t) => t.done).length;
+        const pct = Math.round((done / Math.max(1, state.todos.length)) * 100);
+        el.perimeterPath.style.strokeDashoffset = String(Math.max(5, 100 - pct));
+      }
     }
 
     // Idle Layers (Priority Prayer T-0 Pill > Compact × ♥ > HUD > Wide Feature Idle Bar)
@@ -2392,7 +2421,7 @@
           ? exeVersion.trim().startsWith('v')
             ? exeVersion.trim()
             : `v${exeVersion.trim()}`
-          : 'v2.1.1';
+          : 'v2.1.2';
       el.downloadSizeText.textContent = `${versionTag} · NSIS Setup (.exe) · ${exeSize}`;
     }
     if (el.downloadCountText) {
@@ -2494,7 +2523,7 @@
       let exeSize = null;
       let exeVersion = null;
       if (v2Release && Array.isArray(v2Release.assets)) {
-        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.1.1';
+        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.1.2';
         const exeAsset = v2Release.assets.find(
           (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
         );
@@ -2519,7 +2548,7 @@
         );
       } catch (_err) {}
     } catch (_err) {
-      // Keep static v2.1.1 fallback link & hide download count gracefully when offline/rate-limited
+      // Keep static v2.1.2 fallback link & hide download count gracefully when offline/rate-limited
     }
   }
 

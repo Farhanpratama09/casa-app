@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronUp,
@@ -21,7 +21,10 @@ import { useSystemTelemetry } from '../../hooks/useSystemTelemetry';
 import { useDropZoneStore } from '../../stores/useDropZoneStore';
 import { BatteryPill } from '../system/BatteryPill';
 import { CasaCompanionAvatar } from '../companion/CasaCompanionAvatar';
-import { useUpdateNotification } from '../../hooks/useUpdateNotification';
+import {
+  requestSilentUpdateCheck,
+  useUpdateNotification,
+} from '../../hooks/useUpdateNotification';
 import { useSettingsStore } from '../../stores/useSettingsStore';
 
 export interface Mode6TopNavProps {
@@ -114,6 +117,13 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
   const updateNotification = useUpdateNotification();
   const availableUpdateVersion = updateNotification.latestVersion;
   const { settings, palette } = useSettingsStore();
+  const updateAccent = settings.theme === 'monochrome' ? '#FFFFFF' : palette.timer;
+
+  // Trigger lightweight debounced update check whenever Mode 6 opens
+  // (compensates for WS_EX_NOACTIVATE preventing native window.focus events)
+  useEffect(() => {
+    requestSilentUpdateCheck(false);
+  }, []);
   const isControlCenterTab = currentMode === 'expanded_control';
   const showHeaderBattery = systemStats.battery.has_battery && !isControlCenterTab;
   const hudAlert =
@@ -255,52 +265,120 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
         {showHeaderBattery && (
           <BatteryPill battery={systemStats.battery} showPercentage={true} size={14} />
         )}
-        <button
-          type="button"
-          data-settings-btn="true"
-          onMouseDown={(e) => {
-            e.stopPropagation();
-          }}
-          onClick={(e) => {
-            e.stopPropagation();
-            playChimeCue('tap');
-            void openDesktopSettingsWindow(
-              updateNotification.updateAvailable ? 'system' : undefined
-            );
-          }}
-          className="relative w-[22px] h-[22px] rounded-full bg-white/[0.06] hover:bg-white/[0.16] border border-white/[0.08] text-white/60 hover:text-white flex items-center justify-center transition-all active:scale-90 cursor-pointer shrink-0"
-          title={
-            updateNotification.updateAvailable && availableUpdateVersion
-              ? `Update v${availableUpdateVersion} tersedia`
-              : 'Buka Pengaturan CASA'
-          }
-          aria-label={
-            updateNotification.updateAvailable && availableUpdateVersion
-              ? `Update v${availableUpdateVersion} tersedia — Pengaturan CASA`
-              : 'Pengaturan CASA'
-          }
-        >
-          <Settings className="w-3 h-3" />
-          {updateNotification.updateAvailable && (
-            <span
-              data-update-badge="true"
-              className="absolute -top-0.5 -right-0.5 flex h-[6px] w-[6px] pointer-events-none select-none"
-            >
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            data-settings-btn="true"
+            onMouseDown={(e) => {
+              e.stopPropagation();
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              playChimeCue('tap');
+              if (updateNotification.updateAvailable) {
+                void updateNotification.dismissBadge();
+                void openDesktopSettingsWindow('system');
+              } else {
+                void openDesktopSettingsWindow();
+              }
+            }}
+            style={
+              updateNotification.updateAvailable
+                ? {
+                    borderColor:
+                      settings.theme === 'monochrome'
+                        ? 'rgba(255,255,255,0.48)'
+                        : `${palette.timer}88`,
+                    color: '#FFFFFF',
+                  }
+                : undefined
+            }
+            className="relative w-[22px] h-[22px] rounded-full bg-white/[0.06] hover:bg-white/[0.16] border border-white/[0.08] text-white/60 hover:text-white flex items-center justify-center transition-all active:scale-90 cursor-pointer shrink-0"
+            title={
+              updateNotification.updateAvailable && availableUpdateVersion
+                ? `Update v${availableUpdateVersion} tersedia — Klik untuk cek pembaruan`
+                : 'Buka Pengaturan CASA'
+            }
+            aria-label={
+              updateNotification.updateAvailable && availableUpdateVersion
+                ? `Update v${availableUpdateVersion} tersedia — Pengaturan CASA`
+                : 'Pengaturan CASA'
+            }
+          >
+            <Settings className="w-3 h-3" />
+            {updateNotification.updateAvailable && (
               <span
-                style={{
-                  backgroundColor: settings.theme === 'monochrome' ? '#FFFFFF' : palette.timer,
-                }}
-                className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
-              />
-              <span
-                style={{
-                  backgroundColor: settings.theme === 'monochrome' ? '#FFFFFF' : palette.timer,
-                }}
-                className="relative inline-flex rounded-full h-[6px] w-[6px] ring-1 ring-black"
-              />
-            </span>
-          )}
-        </button>
+                data-update-badge="true"
+                className="absolute -top-0.5 -right-0.5 flex h-[6.5px] w-[6.5px] pointer-events-none select-none"
+              >
+                <span
+                  style={{ backgroundColor: updateAccent }}
+                  className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-80"
+                />
+                <span
+                  style={{ backgroundColor: updateAccent }}
+                  className="relative inline-flex rounded-full h-[6.5px] w-[6.5px] ring-1 ring-black"
+                />
+              </span>
+            )}
+          </button>
+
+          {/* Compact floating pop-up notification anchored directly under the Settings gear */}
+          <AnimatePresence>
+            {updateNotification.updateAvailable &&
+              updateNotification.badgeVisible &&
+              availableUpdateVersion && (
+                <motion.button
+                  key="mode6-gear-update-popup"
+                  type="button"
+                  data-update-popup="true"
+                  initial={{ opacity: 0, y: -4, scale: 0.94 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -3, scale: 0.95 }}
+                  transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    playChimeCue('tap');
+                    void updateNotification.dismissBadge();
+                    void openDesktopSettingsWindow('system');
+                  }}
+                  style={{
+                    borderColor:
+                      settings.theme === 'monochrome'
+                        ? 'rgba(255,255,255,0.34)'
+                        : `${palette.timer}66`,
+                    boxShadow: '0 8px 20px rgba(0, 0, 0, 0.85)',
+                  }}
+                  className="absolute top-[28px] -right-[16px] z-50 px-2.5 py-1.5 rounded-lg bg-[#0d0d10]/95 backdrop-blur-md border text-left cursor-pointer hover:bg-[#141419] active:scale-[0.98] transition-all whitespace-nowrap"
+                  title={`Buka System & Updates untuk memeriksa v${availableUpdateVersion}`}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      borderColor:
+                        settings.theme === 'monochrome'
+                          ? 'rgba(255,255,255,0.34)'
+                          : `${palette.timer}66`,
+                    }}
+                    className="absolute -top-[4px] right-[23px] w-2 h-2 rotate-45 bg-[#0d0d10] border-l border-t"
+                  />
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      style={{ backgroundColor: updateAccent }}
+                      className="w-1.5 h-1.5 rounded-full shrink-0"
+                    />
+                    <span className="text-[10px] font-semibold text-white leading-none">
+                      Update v{availableUpdateVersion}
+                    </span>
+                  </div>
+                  <div className="text-[9px] text-white/55 mt-0.5 leading-none">
+                    Klik untuk Check for Updates
+                  </div>
+                </motion.button>
+              )}
+          </AnimatePresence>
+        </div>
         <button
           type="button"
           data-collapse-btn="true"

@@ -1,4 +1,4 @@
-# CASA_CONTEXT.md — Single Source of Truth (`v2.1.1`)
+# CASA_CONTEXT.md — Single Source of Truth (`v2.1.2`)
 
 > Dibuat dari implementasi nyata pada `src/`, `src-tauri/`, dan `docs/` (bukan asumsi). Wajib diperbarui setiap kali kode atau arsitektur berubah.  
 > **CASA** — *Dynamic Rabbit Island for Windows* (`com.farhanpratama.casa`) · MIT License.
@@ -10,7 +10,7 @@
 | Aspek | Detail |
 |---|---|
 | Form factor | Window Tauri transparan, frameless, `alwaysOnTop`, `skipTaskbar`, `shadow:false`, dipusatkan di tepi atas monitor aktif |
-| Identifier / Versi | `com.farhanpratama.casa` / **`2.1.1`** (`tauri.conf.json`, `Cargo.toml`, `package.json`, `docs/`) |
+| Identifier / Versi | `com.farhanpratama.casa` / **`2.1.2`** (`tauri.conf.json`, `Cargo.toml`, `package.json`, `docs/`) |
 | Window utama | `1100×340` terkunci (kanvas logis 1100 px menghindari *DWM swapchain ResizeBuffers hitch*; hitbox dinamis via `WS_EX_TRANSPARENT` per `HitRect`) |
 | Settings window | Window sekunder `settings` (`DesktopSettingsWindow.tsx`) berarsitektur flat OLED 2-kolom (5 tab sidebar termasuk **`Ibadah & Lokasi`**) + tombol **`Quit CASA`** |
 | Frontend | React 19, TypeScript 5.7 (`strict`), Vite 6 (dev `127.0.0.1:1420`), Tailwind 3.4, framer-motion 12, zustand 5, lucide-react |
@@ -40,7 +40,7 @@ asaverse/
 │  ├─ styles.css             ← Pure OLED theme + native Mode 6 capsule & Play Store reviews styling
 │  ├─ 404.html               ← Clean SPA sub-route restoration (/playground, /arsitektur, /unduh, /feedback)
 │  ├─ favicon.svg            ← Obsidian Bunny icon (`× ♥`)
-│  ├─ PRD.md                 ← Product Requirements Document v2.1.1
+│  ├─ PRD.md                 ← Product Requirements Document v2.1.2
 │  └─ sasha-character-spec.md
 ├─ supabase/                 ← Backend moderasi ulasan publik (`ivlyujaafwqziogajjtk.supabase.co`)
 │  ├─ config.toml            ← `verify_jwt = false` untuk `submit-review` & `telegram-webhook`
@@ -54,7 +54,7 @@ asaverse/
 │  ├─ verify-search-playlist-flow.mjs ← Verifikasi Search Drawer & Playlist popover flow
 │  └─ verify-*.{ts,js}                ← Logic test suite (lyrics, queue, browser sanitizer, time-sync, hitbox)
 ├─ src-tauri/
-│  ├─ tauri.conf.json        ← v2.1.1, com.farhanpratama.casa, 1100x340, CSP, updater pubkey + endpoints
+│  ├─ tauri.conf.json        ← v2.1.2, com.farhanpratama.casa, 1100x340, CSP, updater pubkey + endpoints
 │  ├─ capabilities/default.json
 │  └─ src/
 │     ├─ main.rs / lib.rs    ← DPI window align (`position_window_top`), 50Hz hitbox, `Alt+Space`, tray EN, `quit_app`, updater
@@ -111,7 +111,7 @@ asaverse/
 
 ---
 
-## 4. Arsitektur Frontend & UX `v2.1.1` (`src/` & `docs/`)
+## 4. Arsitektur Frontend & UX `v2.1.2` (`src/` & `docs/`)
 
 ### 4.1 Dimensi Kapsul (`islandLayoutState.ts`)
 - **Smart-Tuck:** `120×4 px` (sensor hover `124×8 px`), cooldown pasca-fullscreen `450 ms`.

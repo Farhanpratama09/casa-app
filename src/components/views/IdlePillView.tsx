@@ -17,6 +17,7 @@ import {
 import { useSkillStore } from '../../skills/store';
 import { useTimerState } from '../../features/timer/useTimerState';
 import { stopPrayerAlert, usePrayerStore } from '../../features/ibadah/prayerStore';
+import { resolvePrayerVisualTheme } from '../../features/ibadah/prayerScheduleLogic';
 import { useDropZoneStore } from '../../stores/useDropZoneStore';
 import { TodoItem } from '../../types/island';
 import { useSystemHardware, SystemHudAlert } from '../../hooks/useSystemHardware';
@@ -331,7 +332,8 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
     setBrightness,
   } = useSystemHardware();
   const isKeepAwake = Boolean(telemetry.stay_awake);
-  const idlePillStyle = useSettingsStore().settings.idlePillStyle;
+  const { settings } = useSettingsStore();
+  const idlePillStyle = settings.idlePillStyle;
   const useClockPill = idlePillStyle === 'clock';
   const { stats: systemStats, isLoaded: systemStatsLoaded } = useSystemTelemetry(false);
   const [showBatteryTransient, setShowBatteryTransient] = useState(false);
@@ -654,7 +656,12 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
         isExpanded ? 'pointer-events-none' : ''
       }`}
     >
-      {activeModeKey === 'prayer-takeover' && activePrayerAlert ? (
+      {activeModeKey === 'prayer-takeover' && activePrayerAlert ? (() => {
+        const prayerTheme = resolvePrayerVisualTheme(
+          activePrayerAlert.prayerId,
+          settings.theme === 'monochrome'
+        );
+        return (
         /* PRIORITY BANNER TAKEOVER: Pengingat Ibadah T-0 (✦ ☾ + Adzan <Sholat> + Jam + Equalizer + Stop/Tutup) */
         <motion.div
           key={`mode-prayer-takeover-${activePrayerAlert.fireKey}`}
@@ -665,7 +672,13 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
             // hoverExpandLocked: klik area non-tombol TIDAK melebarkan Mode 6
             e.stopPropagation();
           }}
-          className="casa-prayer-t0-pill min-w-[248px] px-3 h-full rounded-[inherit] flex items-center justify-between gap-2.5 bg-[#000000] select-none cursor-default"
+          style={
+            {
+              '--casa-ibadah': prayerTheme.accent,
+              '--casa-ibadah-glow': prayerTheme.glow,
+            } as React.CSSProperties
+          }
+          className="casa-prayer-t0-pill min-w-[248px] px-3.5 h-full flex items-center justify-between gap-2.5 bg-transparent select-none cursor-default"
         >
           <div className="flex items-center gap-2 min-w-0">
             <CasaCompanionAvatar isPlaying={false} expression="prayer" />
@@ -677,7 +690,7 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
                 Adzan {activePrayerAlert.prayerLabel}
               </span>
               {activePrayerAlert.timeLabel && (
-                <span className="font-mono text-[10.5px] tabular-nums text-white/45 whitespace-nowrap">
+                <span className="font-mono text-[10.5px] tabular-nums text-white/50 whitespace-nowrap">
                   {activePrayerAlert.timeLabel}
                 </span>
               )}
@@ -717,7 +730,8 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
             {activePrayerAlert.audioMode === 'visual' ? 'Tutup' : 'Stop'}
           </button>
         </motion.div>
-      ) : activeModeKey === 'alarm-takeover' ? (
+        );
+      })() : activeModeKey === 'alarm-takeover' ? (
         /* PRIORITY BANNER TAKEOVER: Focus Timer "Time's Up!" (~360px OLED + Warm Amber) */
         <motion.div
           key="mode-alarm-takeover"

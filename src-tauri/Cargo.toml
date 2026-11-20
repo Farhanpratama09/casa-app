@@ -1,6 +1,6 @@
 [package]
 name = "casa"
-version = "2.1.1"
+version = "2.1.2"
 description = "CASA - Cyber Moon Rabbit Desktop Music Player"
 authors = ["Farhan Pratama"]
 edition = "2021"

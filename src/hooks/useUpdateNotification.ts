@@ -9,7 +9,7 @@ import {
 } from '../utils/tauriBridge';
 
 const DEFAULT_STATUS: UpdateNotificationStatus = {
-  currentVersion: '2.1.1',
+  currentVersion: '2.1.2',
   latestVersion: null,
   releaseUrl: null,
   releaseNotes: null,
@@ -46,11 +46,17 @@ function setStatus(next: UpdateNotificationStatus): void {
   listeners.forEach((cb) => cb());
 }
 
-function triggerDebouncedWakeCheck(): void {
+export function requestSilentUpdateCheck(force = false): void {
+  if (!isTauriRuntime()) return;
   const now = Date.now();
-  if (now - lastWakeTriggerAtMs < 180_000) return;
+  const minIntervalMs = force ? 15_000 : 45_000;
+  if (now - lastWakeTriggerAtMs < minIntervalMs) return;
   lastWakeTriggerAtMs = now;
-  void triggerBackgroundUpdateCheck(false);
+  void triggerBackgroundUpdateCheck(force);
+}
+
+function triggerDebouncedWakeCheck(): void {
+  requestSilentUpdateCheck(false);
 }
 
 function handleNetworkOnline(): void {

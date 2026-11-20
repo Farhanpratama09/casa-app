@@ -8,6 +8,7 @@ import {
   buildPrayerFireKey,
   evaluateDuePrayerDecision,
   pruneFiredPrayerMap,
+  resolvePrayerVisualTheme,
 } from '../src/features/ibadah/prayerScheduleLogic.ts';
 
 let passed = 0;
@@ -190,6 +191,29 @@ function run() {
       cleaned[validKey] === nowRef - 5000 &&
       cleaned['2026-11-10:fajr:123456'] === undefined,
     'Prunes legacy 2-segment unscoped fired keys and expired entries cleanly'
+  );
+
+  // 9. Per-prayer sky visual palette + Zero Color Leak in Pure Monochrome OLED
+  const subuhTheme = resolvePrayerVisualTheme('fajr', false);
+  const dzuhurTheme = resolvePrayerVisualTheme('dhuhr', false);
+  const asharTheme = resolvePrayerVisualTheme('asr', false);
+  const maghribTheme = resolvePrayerVisualTheme('maghrib', false);
+  const isyaTheme = resolvePrayerVisualTheme('isha', false);
+  check(
+    subuhTheme.accent === '#FDE68A' &&
+      dzuhurTheme.accent === '#FFFBEB' &&
+      asharTheme.accent === '#FCD34D' &&
+      maghribTheme.accent === '#FB923C' &&
+      isyaTheme.accent === '#93C5FD',
+    'Per-prayer sky colors map uniquely to Subuh, Dzuhur, Ashar, Maghrib, and Isya'
+  );
+
+  const monoThemes = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'].map((id) =>
+    resolvePrayerVisualTheme(id, true)
+  );
+  check(
+    monoThemes.every((theme) => theme.accent === '#FFFFFF' && theme.stroke === '#FFFFFF'),
+    'Pure Monochrome OLED strictly locks all 5 prayer T-0 strokes & accents to #FFFFFF (Zero Color Leak)'
   );
 
   console.log(`\n  PRAYER SCHEDULER UNIT TESTS: ${passed} passed, 0 failed\n`);

@@ -12,8 +12,8 @@ const GITHUB_RELEASES_PAGE_URL: &str =
     "https://github.com/Farhanpratama09/casa-app/releases/latest";
 const UPDATE_EVENT_NAME: &str = "casa://update-status";
 const STARTUP_CHECK_DELAY_SECS: u64 = 5;
-const PERIODIC_CHECK_INTERVAL_SECS: u64 = 45 * 60;
-const FOCUS_DEBOUNCE_SECS: u64 = 180;
+const PERIODIC_CHECK_INTERVAL_SECS: u64 = 15 * 60;
+const FOCUS_DEBOUNCE_SECS: u64 = 45;
 const FORCE_MIN_INTERVAL_SECS: u64 = 15;
 const HTTP_TIMEOUT_SECS: u64 = 8;
 
@@ -61,7 +61,7 @@ enum FetchOutcome {
 }
 
 struct UpdateMonitorInner {
-    etag: Option<String>,
+    github_api_etag: Option<String>,
     latest_version: Option<String>,
     release_url: Option<String>,
     release_notes: Option<String>,
@@ -87,7 +87,7 @@ impl Default for UpdateMonitorState {
 
         Self {
             inner: Arc::new(Mutex::new(UpdateMonitorInner {
-                etag: None,
+                github_api_etag: None,
                 latest_version: None,
                 release_url: None,
                 release_notes: None,
@@ -202,40 +202,24 @@ fn elapsed_since_last_check_secs(inner: &UpdateMonitorInner) -> Option<u64> {
     }
 }
 
-async fn fetch_latest_json_with_etag(
+async fn fetch_latest_json_fresh(
     client: &reqwest::Client,
     current_version: &str,
-    cached_etag: Option<&str>,
 ) -> FetchOutcome {
-    let mut request = client
+    // Always bypass stale redirect/CDN caches on the lightweight (~750B) latest.json manifest
+    let request = client
         .get(LATEST_JSON_ENDPOINT_URL)
         .header("User-Agent", format!("CASA-App/{current_version}"))
-        .header("Accept", "application/json");
-
-    if let Some(etag) = cached_etag {
-        if !etag.trim().is_empty() {
-            request = request.header("If-None-Match", etag);
-        }
-    }
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-cache");
 
     let Ok(response) = request.send().await else {
         return FetchOutcome::FailedOrSkipped;
     };
 
-    if response.status() == reqwest::StatusCode::NOT_MODIFIED {
-        return FetchOutcome::NotModified;
-    }
-
     if !response.status().is_success() {
         return FetchOutcome::FailedOrSkipped;
     }
-
-    let etag = response
-        .headers()
-        .get(reqwest::header::ETAG)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
 
     let Ok(manifest) = response.json::<LatestJsonManifest>().await else {
         return FetchOutcome::FailedOrSkipped;
@@ -246,7 +230,7 @@ async fn fetch_latest_json_with_etag(
     }
 
     FetchOutcome::Updated {
-        etag,
+        etag: None,
         tag_name: manifest.version,
         html_url: Some(GITHUB_RELEASES_PAGE_URL.to_string()),
         release_notes: manifest.notes.filter(|s| !s.trim().is_empty()),
@@ -259,22 +243,22 @@ async fn fetch_latest_json_with_etag(
 async fn fetch_latest_release_with_etag(
     client: &reqwest::Client,
     current_version: &str,
-    cached_etag: Option<&str>,
+    cached_github_etag: Option<&str>,
 ) -> FetchOutcome {
     // Primary: lightweight signed OTA `latest.json` endpoint (zero GitHub REST API rate-limit)
-    match fetch_latest_json_with_etag(client, current_version, cached_etag).await {
+    match fetch_latest_json_fresh(client, current_version).await {
         FetchOutcome::FailedOrSkipped => {}
         resolved => return resolved,
     }
 
-    // Secondary fallback: GitHub Releases latest API with ETag
+    // Secondary fallback: GitHub Releases latest API with isolated ETag
     let mut request = client
         .get(GITHUB_RELEASES_LATEST_URL)
         .header("User-Agent", format!("CASA-App/{current_version}"))
         .header("Accept", "application/vnd.github+json")
         .header("X-GitHub-Api-Version", "2022-11-28");
 
-    if let Some(etag) = cached_etag {
+    if let Some(etag) = cached_github_etag {
         if !etag.trim().is_empty() {
             request = request.header("If-None-Match", etag);
         }
@@ -336,7 +320,7 @@ pub async fn run_silent_update_check(app: &AppHandle, force: bool) {
             }
         }
         inner.is_checking = true;
-        (inner.client.clone(), inner.etag.clone())
+        (inner.client.clone(), inner.github_api_etag.clone())
     };
 
     let outcome =
@@ -360,7 +344,7 @@ pub async fn run_silent_update_check(app: &AppHandle, force: bool) {
                 is_prerelease,
             } => {
                 if let Some(new_etag) = etag {
-                    inner.etag = Some(new_etag);
+                    inner.github_api_etag = Some(new_etag);
                 }
 
                 if !is_draft && !is_prerelease {

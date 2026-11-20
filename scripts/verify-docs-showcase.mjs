@@ -13,7 +13,7 @@ import puppeteer from 'puppeteer-core';
 
 const DOCS_DIR = path.resolve('docs');
 const EXE_BUNDLE_PATH = path.resolve(
-  'src-tauri/target/release/bundle/nsis/CASA_2.1.1_x64-setup.exe'
+  'src-tauri/target/release/bundle/nsis/CASA_2.1.2_x64-setup.exe'
 );
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -130,18 +130,18 @@ async function main() {
           contentType: 'application/json',
           body: JSON.stringify([
             {
-              tag_name: 'v2.1.1',
+              tag_name: 'v2.1.2',
               assets: [
                 {
-                  name: 'CASA_2.1.1_x64-setup.exe',
-                  size: 6733504,
+                  name: 'CASA_2.1.2_x64-setup.exe',
+                  size: 6731920,
                   download_count: 8,
                   browser_download_url:
-                    'https://github.com/Farhanpratama09/casa-app/releases/download/v2.1.1/CASA_2.1.1_x64-setup.exe',
+                    'https://github.com/Farhanpratama09/casa-app/releases/download/v2.1.2/CASA_2.1.2_x64-setup.exe',
                 },
-                { name: 'CASA_2.1.1_x64-setup.exe.sig', size: 432, download_count: 90 },
-                { name: 'CASA_2.1.1_x64_en-US.msi', size: 8830976, download_count: 3 },
-                { name: 'CASA_2.1.1_x64_en-US.msi.sig', size: 432, download_count: 45 },
+                { name: 'CASA_2.1.2_x64-setup.exe.sig', size: 432, download_count: 90 },
+                { name: 'CASA_2.1.2_x64_en-US.msi', size: 8830976, download_count: 3 },
+                { name: 'CASA_2.1.2_x64_en-US.msi.sig', size: 432, download_count: 45 },
                 { name: 'latest.json', size: 913, download_count: 500 },
               ],
             },
@@ -228,8 +228,8 @@ async function main() {
     check(
       layoutAudit.hasPrimaryExe &&
         layoutAudit.primaryLabelText === 'Download CASA for Windows' &&
-        layoutAudit.dlSizeText.startsWith('v2.1.1 · NSIS Setup (.exe) ·') &&
-        layoutAudit.primaryHref.includes('CASA_2.1.1_x64-setup.exe') &&
+        layoutAudit.dlSizeText.startsWith('v2.1.2 · NSIS Setup (.exe) ·') &&
+        layoutAudit.primaryHref.includes('CASA_2.1.2_x64-setup.exe') &&
         layoutAudit.shaClosedInitially &&
         layoutAudit.shaSummaryText === 'Verify SHA-256 checksum' &&
         /^[0-9A-F]{64}$/.test(layoutAudit.shaText) &&

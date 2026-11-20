@@ -11,12 +11,14 @@ import { Mode6TopNav } from './views/Mode6TopNav';
 import { Mode6ControlCenterView } from './views/mode6/Mode6ControlCenterView';
 import { FocusHoverPeekCard } from './views/FocusHoverPeekCard';
 import { useSystemHardware } from '../hooks/useSystemHardware';
+import { useUpdateNotification } from '../hooks/useUpdateNotification';
 import { useTimerState } from '../features/timer/useTimerState';
 import { useTodoState } from '../features/todo/useTodoState';
 import { MediaExpandedView } from '../features/media/MediaExpandedView';
 import { TimerExpandedView } from '../features/timer/TimerExpandedView';
 import { TodoExpandedView } from '../features/todo/TodoExpandedView';
 import { IbadahExpandedView } from '../features/ibadah/IbadahExpandedView';
+import { resolvePrayerVisualTheme } from '../features/ibadah/prayerScheduleLogic';
 import {
   notifyPrayerSettingsChanged,
   setPrayerRuntimeFullscreenState,
@@ -134,8 +136,14 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   const isPriorityAlertRef = useRef<boolean>(isPriorityAlert);
   isPriorityAlertRef.current = isPriorityAlert;
   const { hudAlert, telemetry } = useSystemHardware();
+  // Keep global update-status listener alive even while Mode 6 is collapsed
+  useUpdateNotification();
   const isKeepAwake = Boolean(telemetry.stay_awake);
   const { settings } = useSettingsStore();
+  const activePrayerTheme = resolvePrayerVisualTheme(
+    visiblePrayerAlert?.prayerId,
+    settings.theme === 'monochrome'
+  );
   const isIbadahEnabled = settings.ibadah.enabled;
   const isIbadahEnabledRef = useRef<boolean>(isIbadahEnabled);
   isIbadahEnabledRef.current = isIbadahEnabled;
@@ -829,6 +837,13 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     !isPriorityAlert &&
     isTimerActive &&
     (idleTimerState?.totalSeconds ?? 0) > 0;
+  const isPrayerPerimeterVisible =
+    islandState === 'idle' &&
+    !isExpandedView &&
+    !hasHudAlert &&
+    isPrayerAlertVisible;
+  const needsPerimeterMeasurement =
+    isIdleTimerPerimeterVisible || isPrayerPerimeterVisible;
   const isIdleTimerPaused = Boolean(idleTimerState?.isPaused);
   const idleTimerRemainingPct =
     idleTimerState && idleTimerState.totalSeconds > 0
@@ -840,7 +855,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
 
   useEffect(() => {
     const el = containerBoxRef.current;
-    if (!el || !isIdleTimerPerimeterVisible) return;
+    if (!el || !needsPerimeterMeasurement) return;
 
     const syncBox = () => {
       const rect = el.getBoundingClientRect();
@@ -858,7 +873,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [isIdleTimerPerimeterVisible]);
+  }, [needsPerimeterMeasurement, width, height, isFloatingMode]);
 
   // Dynamic Hover Sensor Dimensions tightly hugging capsule bounds so screen wings stay 100% click-through
   const getSensorDimensions = () => {
@@ -2537,6 +2552,8 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                 ? settings.theme === 'monochrome'
                   ? '0 0 16px rgba(255, 255, 255, 0.22), 0 8px 28px rgba(0, 0, 0, 0.65)'
                   : '0 0 16px rgba(99, 102, 241, 0.28), 0 8px 28px rgba(0, 0, 0, 0.65)'
+                : isPrayerPerimeterVisible
+                ? `0 0 18px ${activePrayerTheme.outerShadow}, 0 8px 28px rgba(0, 0, 0, 0.72)`
                 : isAlarmRinging && !isExpandedView && islandState !== 'tucked'
                 ? '0 0 20px var(--casa-timer-glow, rgba(245, 158, 11, 0.45)), 0 8px 28px rgba(0, 0, 0, 0.75)'
                 : isIdleTimerPerimeterVisible
@@ -2580,8 +2597,8 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
               />
             )}
 
-            {/* Idle Timer Perimeter Progress Border (Open U-Shape Docked / Closed Pill Floating) */}
-            {isIdleTimerPerimeterVisible && (() => {
+            {/* Idle Timer / Prayer T-0 Perimeter Stroke (Open U-Shape Docked / Closed Rounded Pill Floating) */}
+            {(isIdleTimerPerimeterVisible || isPrayerPerimeterVisible) && (() => {
               const perimeterW = measuredPillBox.width > 0 ? measuredPillBox.width : width;
               const perimeterH = measuredPillBox.height > 0 ? measuredPillBox.height : height;
               const strokeInset = 0.75;
@@ -2603,6 +2620,32 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
               const midX = clampedW / 2;
               const floatingPathD = `M ${midX},${topY} L ${rightX - cornerR},${topY} A ${cornerR},${cornerR} 0 0 1 ${rightX},${topY + cornerR} L ${rightX},${bottomY - cornerR} A ${cornerR},${cornerR} 0 0 1 ${rightX - cornerR},${bottomY} L ${leftX + cornerR},${bottomY} A ${cornerR},${cornerR} 0 0 1 ${leftX},${bottomY - cornerR} L ${leftX},${topY + cornerR} A ${cornerR},${cornerR} 0 0 1 ${leftX + cornerR},${topY} Z`;
               const perimeterPathD = isFloatingMode ? floatingPathD : uPathD;
+
+              if (isPrayerPerimeterVisible) {
+                return (
+                  <svg
+                    data-prayer-perimeter-stroke="true"
+                    data-placement-mode={isFloatingMode ? 'floating' : 'docked'}
+                    className="pointer-events-none absolute inset-0 w-full h-full z-30"
+                    viewBox={`0 0 ${clampedW} ${clampedH}`}
+                    aria-hidden="true"
+                  >
+                    <path
+                      d={perimeterPathD}
+                      fill="none"
+                      stroke={activePrayerTheme.stroke}
+                      strokeWidth={1.5}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="casa-prayer-perimeter-stroke"
+                      style={{
+                        filter: `drop-shadow(0 0 3px ${activePrayerTheme.glow})`,
+                      }}
+                    />
+                  </svg>
+                );
+              }
+
               const perimeterStrokeColor =
                 idleTimerState?.mode === 'rest'
                   ? 'var(--casa-rest, #10B981)'
@@ -2743,7 +2786,17 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                         />
 
                         {visiblePrayerAlert && effectiveExpandedMode !== 'expanded_ibadah' && (
-                          <div className="casa-prayer-t0-pill w-full h-[28px] px-3 flex items-center justify-between gap-2 bg-[#08080a] border-b border-white/[0.09] shrink-0 relative z-25 select-none">
+                          <div
+                            style={
+                              {
+                                '--casa-ibadah': activePrayerTheme.accent,
+                                '--casa-ibadah-glow': activePrayerTheme.glow,
+                                borderBottomColor: activePrayerTheme.bannerBorder,
+                                backgroundImage: `linear-gradient(90deg, ${activePrayerTheme.bannerTint}, rgba(8, 8, 10, 0.96) 65%)`,
+                              } as React.CSSProperties
+                            }
+                            className="w-full h-[28px] px-3 flex items-center justify-between gap-2 bg-[#08080a] border-b shrink-0 relative z-25 select-none"
+                          >
                             <div className="flex items-center gap-2 min-w-0">
                               <CasaCompanionAvatar isPlaying={false} expression="prayer" />
                               <span

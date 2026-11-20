@@ -112,3 +112,85 @@ export function evaluateDuePrayerDecision(
     allowedGraceMs,
   };
 }
+
+export interface PrayerVisualTheme {
+  accent: string;
+  stroke: string;
+  glow: string;
+  outerShadow: string;
+  bannerBorder: string;
+  bannerTint: string;
+}
+
+const MONOCHROME_PRAYER_THEME: PrayerVisualTheme = {
+  accent: '#FFFFFF',
+  stroke: '#FFFFFF',
+  glow: 'rgba(255, 255, 255, 0.36)',
+  outerShadow: 'rgba(255, 255, 255, 0.28)',
+  bannerBorder: 'rgba(255, 255, 255, 0.16)',
+  bannerTint: 'rgba(255, 255, 255, 0.04)',
+};
+
+const PRAYER_SKY_THEMES: Record<string, PrayerVisualTheme> = {
+  // Subuh / Fajr: fajar perak -> emas pagi lembut (#FDE68A)
+  fajr: {
+    accent: '#FDE68A',
+    stroke: '#FDE68A',
+    glow: 'rgba(253, 230, 138, 0.42)',
+    outerShadow: 'rgba(253, 230, 138, 0.30)',
+    bannerBorder: 'rgba(253, 230, 138, 0.28)',
+    bannerTint: 'rgba(253, 230, 138, 0.08)',
+  },
+  // Dzuhur / Dhuhr: putih surya cerah (#FFFBEB)
+  dhuhr: {
+    accent: '#FFFBEB',
+    stroke: '#FFFBEB',
+    glow: 'rgba(255, 251, 235, 0.44)',
+    outerShadow: 'rgba(255, 251, 235, 0.30)',
+    bannerBorder: 'rgba(255, 251, 235, 0.28)',
+    bannerTint: 'rgba(255, 251, 235, 0.07)',
+  },
+  // Ashar / Asr: kuning madu sore hangat (#FCD34D)
+  asr: {
+    accent: '#FCD34D',
+    stroke: '#FCD34D',
+    glow: 'rgba(252, 211, 77, 0.44)',
+    outerShadow: 'rgba(252, 211, 77, 0.32)',
+    bannerBorder: 'rgba(252, 211, 77, 0.28)',
+    bannerTint: 'rgba(252, 211, 77, 0.08)',
+  },
+  // Maghrib: jingga senja (#FB923C)
+  maghrib: {
+    accent: '#FB923C',
+    stroke: '#FB923C',
+    glow: 'rgba(251, 146, 60, 0.48)',
+    outerShadow: 'rgba(251, 146, 60, 0.36)',
+    bannerBorder: 'rgba(251, 146, 60, 0.32)',
+    bannerTint: 'rgba(251, 146, 60, 0.09)',
+  },
+  // Isya / Isha: biru-perak bulan adem (#93C5FD)
+  isha: {
+    accent: '#93C5FD',
+    stroke: '#93C5FD',
+    glow: 'rgba(147, 197, 253, 0.44)',
+    outerShadow: 'rgba(147, 197, 253, 0.32)',
+    bannerBorder: 'rgba(147, 197, 253, 0.30)',
+    bannerTint: 'rgba(147, 197, 253, 0.08)',
+  },
+};
+
+export function resolvePrayerVisualTheme(
+  prayerId: string | null | undefined,
+  isMonochrome: boolean
+): PrayerVisualTheme {
+  if (isMonochrome) {
+    return MONOCHROME_PRAYER_THEME;
+  }
+  const normalized = (prayerId ?? '').trim().toLowerCase();
+  if (normalized === 'fajr' || normalized === 'subuh') return PRAYER_SKY_THEMES.fajr;
+  if (normalized === 'dhuhr' || normalized === 'dzuhur') return PRAYER_SKY_THEMES.dhuhr;
+  if (normalized === 'asr' || normalized === 'ashar') return PRAYER_SKY_THEMES.asr;
+  if (normalized === 'maghrib') return PRAYER_SKY_THEMES.maghrib;
+  if (normalized === 'isha' || normalized === 'isya') return PRAYER_SKY_THEMES.isha;
+  return MONOCHROME_PRAYER_THEME;
+}
