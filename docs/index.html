@@ -40,7 +40,7 @@
     href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
     rel="stylesheet"
   />
-  <link rel="stylesheet" href="./styles.css?v=2.0.4-2" />
+  <link rel="stylesheet" href="./styles.css?v=2.1.0" />
 
   <script type="application/ld+json">
     {
@@ -53,7 +53,7 @@
       "description": "Ambient desktop notch & companion for Windows featuring monochrome OLED capsule interactions, synchronized lyrics, focus timer, brightness/Bluetooth telemetry, and drag-and-drop shelf.",
       "url": "https://farhanpratama09.github.io/casa-app/",
       "downloadUrl": "https://github.com/Farhanpratama09/casa-app/releases/latest",
-      "softwareVersion": "2.0.4",
+      "softwareVersion": "2.1.0",
       "license": "https://opensource.org/licenses/MIT",
       "author": {
         "@type": "Person",
@@ -243,6 +243,29 @@
                         <span id="casa-hud-detail" class="casa-hud-detail tabular">68%</span>
                       </div>
 
+                      <!-- Priority Pengingat Ibadah T-0 Pill (✦ ☾ + Adzan <Sholat> + Jam + Equalizer + Stop, hoverExpandLocked) -->
+                      <div class="casa-prayer-pill" id="casa-prayer-pill" hidden>
+                        <div class="casa-prayer-pill-left">
+                          <svg
+                            id="vm-prayer-eyes"
+                            class="casa-companion-svg casa-prayer-eyes-twinkle"
+                            viewBox="0 0 34 16"
+                            aria-hidden="true"
+                          ></svg>
+                          <span class="casa-prayer-title" id="vm-prayer-alert-title">Adzan Ashar</span>
+                          <span class="casa-prayer-time tabular" id="vm-prayer-alert-time">15:14</span>
+                          <span class="casa-prayer-eq" aria-hidden="true">
+                            <span class="casa-prayer-eq-bar"></span>
+                            <span class="casa-prayer-eq-bar"></span>
+                            <span class="casa-prayer-eq-bar"></span>
+                            <span class="casa-prayer-eq-bar"></span>
+                          </span>
+                        </div>
+                        <button type="button" id="vm-prayer-stop-btn" class="casa-prayer-stop-btn">
+                          Stop
+                        </button>
+                      </div>
+
                       <!-- Wide Feature Idle Bar (Active only in Lyrics / To-Do / HUD-Idle / DropZone) -->
                       <div class="casa-active-pill" id="casa-active-pill" hidden>
                         <div class="casa-avatar-slot" id="casa-avatar-slot">
@@ -338,6 +361,7 @@
                             <span>Drop Zone</span>
                             <span class="casa-m6-drop-badge tabular" id="vm-m6-drop-badge" hidden>0</span>
                           </button>
+                          <button type="button" class="casa-m6-tab" id="vm-m6-ibadah-tab" data-m6-tab="ibadah" aria-selected="false" hidden>Ibadah</button>
                         </nav>
 
                         <div class="casa-m6-head-right">
@@ -354,6 +378,29 @@
                           </button>
                         </div>
                       </header>
+
+                      <!-- Slim Expanded T-0 Prayer Banner (no forced tab switch) -->
+                      <div class="casa-m6-prayer-banner" id="vm-expanded-prayer-banner" hidden>
+                        <div class="casa-m6-prayer-banner-left">
+                          <svg
+                            id="vm-expanded-prayer-eyes"
+                            class="casa-companion-svg casa-prayer-eyes-twinkle"
+                            viewBox="0 0 34 16"
+                            aria-hidden="true"
+                          ></svg>
+                          <strong id="vm-expanded-prayer-label">Adzan Ashar</strong>
+                          <span class="casa-prayer-time tabular">15:14</span>
+                          <span class="casa-prayer-eq" aria-hidden="true">
+                            <span class="casa-prayer-eq-bar"></span>
+                            <span class="casa-prayer-eq-bar"></span>
+                            <span class="casa-prayer-eq-bar"></span>
+                            <span class="casa-prayer-eq-bar"></span>
+                          </span>
+                        </div>
+                        <button type="button" id="vm-expanded-prayer-stop-btn" class="casa-prayer-stop-btn compact">
+                          Stop
+                        </button>
+                      </div>
 
                       <div class="casa-m6-body">
                         <!-- Panel A: Musik -->
@@ -613,6 +660,139 @@
                             <div class="casa-dropped-items" id="vm-dropped-items"></div>
                           </div>
                         </div>
+
+                        <!-- Panel E: Ibadah (Opt-In v2.1.0 Parabolic Sun/Moon Dynamic Sky Curve) -->
+                        <div class="casa-m6-panel casa-m6-ibadah" id="vm-exp-ibadah" hidden>
+                          <div class="casa-ibadah-top">
+                            <div class="casa-ibadah-loc">
+                              <div>
+                                <div class="casa-ibadah-city-row">
+                                  <strong class="casa-ibadah-city">Jakarta</strong>
+                                  <span class="casa-ibadah-cc">ID</span>
+                                  <button
+                                    type="button"
+                                    id="vm-ibadah-refresh-btn"
+                                    class="casa-ibadah-refresh-btn"
+                                    title="Perbarui Lokasi"
+                                    aria-label="Perbarui Lokasi"
+                                  >
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                                      <polyline points="21 3 21 9 15 9" />
+                                    </svg>
+                                  </button>
+                                </div>
+                                <div class="casa-ibadah-meta tabular">Kemenag RI · Syafi&apos;i · UTC+07:00</div>
+                              </div>
+                            </div>
+                            <div class="casa-ibadah-right">
+                              <div class="casa-ibadah-countdown-box">
+                                <div class="casa-ibadah-next-label" id="vm-ibadah-next-heading">ASHAR</div>
+                                <div class="casa-ibadah-countdown tabular" id="vm-ibadah-countdown">-01:42:18</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div class="casa-ibadah-arc-wrap">
+                            <svg
+                              id="vm-ibadah-curve-svg"
+                              class="casa-ibadah-curve-svg"
+                              viewBox="0 0 532 58"
+                              preserveAspectRatio="none"
+                              aria-hidden="true"
+                            >
+                              <defs>
+                                <linearGradient id="vm-horizon-fade" x1="0%" y1="0%" x2="100%" y2="0%">
+                                  <stop offset="0%" stop-color="#ffffff" stop-opacity="0" />
+                                  <stop offset="10%" stop-color="#ffffff" stop-opacity="0.16" />
+                                  <stop offset="90%" stop-color="#ffffff" stop-opacity="0.16" />
+                                  <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+                                </linearGradient>
+                                <linearGradient id="vm-passed-sky-grad" gradientUnits="userSpaceOnUse" x1="10" y1="48" x2="218" y2="15">
+                                  <stop id="vm-passed-grad-start" offset="0%" stop-color="#FDE68A" stop-opacity="0.34" />
+                                  <stop id="vm-passed-grad-end" offset="100%" stop-color="#FCD34D" stop-opacity="0.74" />
+                                </linearGradient>
+                                <linearGradient id="vm-comet-tail" gradientUnits="userSpaceOnUse" x1="128" y1="12" x2="218" y2="15">
+                                  <stop id="vm-comet-grad-start" offset="0%" stop-color="#FDE68A" stop-opacity="0" />
+                                  <stop id="vm-comet-grad-mid" offset="60%" stop-color="#FCD34D" stop-opacity="0.65" />
+                                  <stop id="vm-comet-grad-end" offset="100%" stop-color="#FCD34D" stop-opacity="1" />
+                                </linearGradient>
+                                <filter id="vm-orb-glow" x="-80%" y="-80%" width="260%" height="260%">
+                                  <feGaussianBlur stdDeviation="2.6" result="blur" />
+                                  <feMerge>
+                                    <feMergeNode in="blur" />
+                                    <feMergeNode in="SourceGraphic" />
+                                  </feMerge>
+                                </filter>
+                              </defs>
+                              <!-- Horizon hairline -->
+                              <line x1="4" y1="40" x2="528" y2="40" stroke="url(#vm-horizon-fade)" stroke-width="1" />
+                              <!-- Remaining dashed trajectory -->
+                              <path
+                                d="M 218,15 C 245,17 258,20 266,21 C 308,27 342,35 372.4,40 C 408,46 445,49 478.8,50 C 498,51 510,52 522,53"
+                                fill="none"
+                                stroke="rgba(255,255,255,0.18)"
+                                stroke-width="1.35"
+                                stroke-dasharray="3 3.5"
+                                stroke-linecap="round"
+                              />
+                              <!-- Passed trajectory with clock-based sky phase gradient -->
+                              <path
+                                d="M 10,48 C 28,46 40,43 53.2,40 C 92,27 122,11 159.6,11 C 184,11 202,13 218,15"
+                                fill="none"
+                                stroke="url(#vm-passed-sky-grad)"
+                                stroke-width="1.65"
+                                stroke-linecap="round"
+                              />
+                              <!-- Shooting-star glowing tail -->
+                              <path
+                                d="M 128,13 C 142,11 152,11 159.6,11 C 184,11 202,13 218,15"
+                                fill="none"
+                                stroke="url(#vm-comet-tail)"
+                                stroke-width="2.4"
+                                stroke-linecap="round"
+                                filter="url(#vm-orb-glow)"
+                              />
+                              <!-- 5 neutral white/silver prayer anchor dots -->
+                              <circle class="vm-prayer-dot" cx="53.2" cy="40" r="2.2" fill="#E4E4E7" fill-opacity="0.65" stroke="#E4E4E7" stroke-width="1.1" />
+                              <circle class="vm-prayer-dot" cx="159.6" cy="11" r="2.2" fill="#E4E4E7" fill-opacity="0.65" stroke="#E4E4E7" stroke-width="1.1" />
+                              <circle cx="266" cy="21" r="5.6" fill="none" stroke="#FFFFFF" stroke-opacity="0.32" stroke-width="1" />
+                              <circle class="vm-prayer-dot" cx="266" cy="21" r="3" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="1.2" />
+                              <circle class="vm-prayer-dot" cx="372.4" cy="40" r="2.1" fill="#000000" stroke="rgba(255,255,255,0.34)" stroke-width="1.1" />
+                              <circle class="vm-prayer-dot" cx="478.8" cy="50" r="2.1" fill="#000000" stroke="rgba(255,255,255,0.34)" stroke-width="1.1" />
+                              <!-- Dynamic 13x13 celestial icon (driven by local clock hour) with solid #000000 r=8 backing circle -->
+                              <g id="vm-ibadah-celestial-orb" data-celestial-phase="sun">
+                                <circle id="vm-ibadah-orb-glow" cx="218" cy="15" r="9.5" fill="rgba(252, 211, 77, 0.34)" filter="url(#vm-orb-glow)" />
+                                <circle cx="218" cy="15" r="8" fill="#000000" />
+                                <g id="vm-ibadah-orb-glyph" transform="translate(211.5, 8.5)"></g>
+                              </g>
+                            </svg>
+                          </div>
+
+                          <div class="casa-ibadah-grid" id="vm-ibadah-grid">
+                            <div class="casa-ibadah-col passed">
+                              <span class="casa-ibadah-name">Subuh</span>
+                              <span class="casa-ibadah-time tabular">04:36</span>
+                            </div>
+                            <div class="casa-ibadah-col passed">
+                              <span class="casa-ibadah-name">Dzuhur</span>
+                              <span class="casa-ibadah-time tabular">11:55</span>
+                            </div>
+                            <div class="casa-ibadah-col next">
+                              <span class="casa-ibadah-name">Ashar</span>
+                              <span class="casa-ibadah-time tabular">15:14</span>
+                              <span class="casa-ibadah-next-tag">NEXT</span>
+                            </div>
+                            <div class="casa-ibadah-col">
+                              <span class="casa-ibadah-name">Maghrib</span>
+                              <span class="casa-ibadah-time tabular">17:58</span>
+                            </div>
+                            <div class="casa-ibadah-col">
+                              <span class="casa-ibadah-name">Isya</span>
+                              <span class="casa-ibadah-time tabular">19:09</span>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -762,6 +942,30 @@
                   </div>
                   <div class="vm-desktop-files" id="vm-desktop-files"></div>
                 </section>
+
+                <!-- Scenario 6: Pengingat Ibadah (Opt-In v2.1.0) -->
+                <section class="vm-scene" id="scene-ibadah" hidden aria-label="Skenario Pengingat Ibadah Offline">
+                  <div class="vm-panel-box vm-hud-box">
+                    <div class="vm-panel-head">
+                      <span class="vm-panel-eyebrow">Pengingat Ibadah · Offline Rust + Windows Geolocation</span>
+                      <span class="vm-panel-tag tabular" id="vm-ibadah-status-tag">Tab Ibadah Aktif (5 Tab)</span>
+                    </div>
+                    <p class="vm-focus-hint">
+                      Opt-in di Settings (default OFF). Saat T-0 di mode Idle/Smart-Tuck, kapsul muncul ringkas dengan mata ✦ ☾, efek getar mikro, soundwave monokrom, hoverExpandLocked penuh, dan tombol Stop. Saat Mode 6 terbuka di tab lain, banner tipis muncul tanpa memaksa pindah tab.
+                    </p>
+                    <div class="vm-inline-controls">
+                      <button type="button" id="vm-ibadah-toggle-btn" class="vm-action-btn">
+                        Toggle Tab Ibadah (ON/OFF)
+                      </button>
+                      <button type="button" id="vm-sim-prayer-idle-btn" class="vm-action-btn">
+                        Simulasi T-0 (Pil ✦ ☾)
+                      </button>
+                      <button type="button" id="vm-sim-prayer-banner-btn" class="vm-action-btn">
+                        Simulasi T-0 (Banner Mode 6)
+                      </button>
+                    </div>
+                  </div>
+                </section>
               </div>
             </div>
           </div>
@@ -772,7 +976,7 @@
           </div>
         </div>
 
-        <!-- 5 INTERACTIVE MODE CONTROLS DIRECTLY UNDER MONITOR -->
+        <!-- INTERACTIVE MODE CONTROLS DIRECTLY UNDER MONITOR -->
         <div class="mode-dock" role="toolbar" aria-label="Pilih skenario simulasi monitor">
           <button type="button" class="mode-dock-btn" data-vm-mode="resting" aria-pressed="true">
             Resting &amp; Wake
@@ -788,6 +992,9 @@
           </button>
           <button type="button" class="mode-dock-btn" data-vm-mode="dropzone" aria-pressed="false">
             Drag &amp; Drop
+          </button>
+          <button type="button" class="mode-dock-btn" data-vm-mode="ibadah" aria-pressed="false">
+            Pengingat Ibadah
           </button>
         </div>
       </div>
@@ -851,7 +1058,7 @@
 
             <div class="download-cta-col">
               <a
-                href="https://github.com/Farhanpratama09/casa-app/releases/download/v2.0.4/CASA_2.0.4_x64-setup.exe"
+                href="https://github.com/Farhanpratama09/casa-app/releases/download/v2.1.0/CASA_2.1.0_x64-setup.exe"
                 target="_blank"
                 rel="noopener noreferrer"
                 id="primary-download-btn"
@@ -860,7 +1067,7 @@
                 <span id="primary-download-label">Download CASA for Windows</span>
               </a>
               <span class="download-size-note tabular" id="download-size-note">
-                <span id="download-size-text">v2.0.4 · NSIS Setup (.exe) · 4.47 MB</span><span id="download-count-text" class="download-count-meta" hidden></span>
+                <span id="download-size-text">v2.1.0 · NSIS Setup (.exe) · 6.42 MB</span><span id="download-count-text" class="download-count-meta" hidden></span>
               </span>
             </div>
           </div>
@@ -876,11 +1083,11 @@
             <summary class="sha-summary">Verify SHA-256 checksum</summary>
             <div class="checksum-box">
               <div class="checksum-header">
-                <span>SHA-256 · CASA_2.0.4_x64-setup.exe</span>
+                <span>SHA-256 · CASA_2.1.0_x64-setup.exe</span>
                 <button type="button" id="copy-sha-btn" class="copy-mini-btn">Salin Hash</button>
               </div>
               <p class="checksum-code" id="sha-value-exe">
-                5AF99FC2F370BDFF079D856ACEF5B325C2FE5934A41C30B2A81D2FF9BA30C880
+                AF7A5AC6FACC9BB59DD345245F172848F2807B3A093E3C40E55368D0E796CAE7
               </p>
             </div>
           </details>
@@ -1125,6 +1332,6 @@
     </div>
   </footer>
 
-  <script src="./app.js?v=2.0.4-2" defer></script>
+  <script src="./app.js?v=2.1.0" defer></script>
 </body>
 </html>

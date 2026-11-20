@@ -97,10 +97,13 @@
   ];
 
   const state = {
-    mode: 'resting', // 'resting' | 'lyrics' | 'todo' | 'hud' | 'dropzone'
+    mode: 'resting', // 'resting' | 'lyrics' | 'todo' | 'hud' | 'dropzone' | 'ibadah'
     capsuleState: 'idle', // 'idle' | 'expanded'
     isRestingSleep: false,
-    expression: 'idle', // 'idle' | 'music' | 'focus' | 'dual_active'
+    expression: 'idle', // 'idle' | 'music' | 'focus' | 'dual_active' | 'prayer'
+    ibadahEnabled: false,
+    prayerAlertActive: false,
+    prayerCountdownSeconds: 1 * 3600 + 42 * 60 + 18,
     idleLyricMinimized: false,
     musicSubTab: 'player', // 'player' | 'playlists'
     isLyricsOpen: true,
@@ -149,6 +152,9 @@
     hudBarWrap: $('casa-hud-bar-wrap'),
     hudBarFill: $('casa-hud-bar-fill'),
     hudDetail: $('casa-hud-detail'),
+    prayerPill: $('casa-prayer-pill'),
+    prayerEyes: $('vm-prayer-eyes'),
+    prayerStopBtn: $('vm-prayer-stop-btn'),
     activePill: $('casa-active-pill'),
     eyes: $('vm-notch-eyes'),
     standbySegment: $('casa-standby-segment'),
@@ -173,13 +179,28 @@
     m6Eyes: $('vm-m6-eyes'),
     m6EyesBtn: $('vm-m6-eyes-btn'),
     m6TabButtons: Array.from(document.querySelectorAll('[data-m6-tab]')),
+    m6IbadahTab: $('vm-m6-ibadah-tab'),
     m6DropBadge: $('vm-m6-drop-badge'),
     collapseBtn: $('vm-notch-collapse-btn'),
+    expandedPrayerBanner: $('vm-expanded-prayer-banner'),
+    expandedPrayerEyes: $('vm-expanded-prayer-eyes'),
+    expandedPrayerStopBtn: $('vm-expanded-prayer-stop-btn'),
 
     expMusic: $('vm-exp-music'),
     expFocus: $('vm-exp-focus'),
     expControl: $('vm-exp-control'),
     expDropzone: $('vm-exp-dropzone'),
+    expIbadah: $('vm-exp-ibadah'),
+    ibadahCountdown: $('vm-ibadah-countdown'),
+    ibadahRefreshBtn: $('vm-ibadah-refresh-btn'),
+    ibadahCelestialOrb: $('vm-ibadah-celestial-orb'),
+    ibadahOrbGlow: $('vm-ibadah-orb-glow'),
+    ibadahOrbGlyph: $('vm-ibadah-orb-glyph'),
+    passedGradStart: $('vm-passed-grad-start'),
+    passedGradEnd: $('vm-passed-grad-end'),
+    cometGradStart: $('vm-comet-grad-start'),
+    cometGradMid: $('vm-comet-grad-mid'),
+    cometGradEnd: $('vm-comet-grad-end'),
 
     musicSubButtons: Array.from(document.querySelectorAll('[data-music-sub]')),
     musicSubPlayer: $('vm-music-sub-player'),
@@ -237,6 +258,11 @@
     sceneTodo: $('scene-todo'),
     sceneHud: $('scene-hud'),
     sceneDropzone: $('scene-dropzone'),
+    sceneIbadah: $('scene-ibadah'),
+    ibadahStatusTag: $('vm-ibadah-status-tag'),
+    ibadahToggleBtn: $('vm-ibadah-toggle-btn'),
+    simPrayerIdleBtn: $('vm-sim-prayer-idle-btn'),
+    simPrayerBannerBtn: $('vm-sim-prayer-banner-btn'),
 
     desktopTime: $('vm-desktop-time'),
     clockStatus: $('vm-clock-status'),
@@ -343,6 +369,23 @@
     const heartPath =
       'M 25,13.5 L 24.3,12.8 C 21.1,10.0 19.6,8.3 19.6,6.1 C 19.6,4.4 20.9,3.1 22.5,3.1 C 23.6,3.1 24.5,3.7 25,4.6 C 25.5,3.7 26.4,3.1 27.5,3.1 C 29.1,3.1 30.4,4.4 30.4,6.1 C 30.4,8.3 28.9,10.0 25.7,12.8 Z';
 
+    // Prayer expression (✦ ☾ — Star left eye + Crescent Moon right eye)
+    if (expr === 'prayer') {
+      svgEl.appendChild(
+        createSvgNode('path', {
+          d: 'M 8.5,1.8 Q 8.9,7.4 14.5,8 Q 8.9,8.6 8.5,14.2 Q 8.1,8.6 2.5,8 Q 8.1,7.4 8.5,1.8 Z',
+          fill: '#ffffff',
+        })
+      );
+      svgEl.appendChild(
+        createSvgNode('path', {
+          d: 'M 27.2,2.7 C 21.0,2.9 20.6,13.1 27.2,13.3 C 24.0,11.8 24.0,4.2 27.2,2.7 Z',
+          fill: '#ffffff',
+        })
+      );
+      return;
+    }
+
     // Left eye
     if (expr === 'music') {
       svgEl.appendChild(
@@ -420,6 +463,123 @@
       );
     } else {
       svgEl.appendChild(createSvgNode('path', { d: heartPath, fill: '#ffffff' }));
+    }
+  }
+
+  const SKY_HOUR_STOPS = [
+    [0.0, [148, 163, 184]],
+    [4.5, [148, 163, 184]],
+    [5.0, [203, 213, 225]],
+    [6.5, [253, 230, 138]],
+    [7.0, [253, 230, 138]],
+    [10.5, [254, 240, 138]],
+    [11.0, [255, 251, 235]],
+    [14.5, [255, 251, 235]],
+    [15.0, [252, 211, 77]],
+    [16.5, [252, 211, 77]],
+    [17.0, [251, 146, 60]],
+    [17.75, [251, 146, 60]],
+    [18.0, [147, 197, 253]],
+    [21.5, [203, 213, 225]],
+    [24.0, [148, 163, 184]],
+  ];
+
+  function sampleSkyRgbByHour(hourFloat) {
+    const h = ((hourFloat % 24) + 24) % 24;
+    for (let i = 0; i < SKY_HOUR_STOPS.length - 1; i += 1) {
+      const [h1, c1] = SKY_HOUR_STOPS[i];
+      const [h2, c2] = SKY_HOUR_STOPS[i + 1];
+      if (h >= h1 && h <= h2) {
+        const f = Math.max(0, Math.min(1, (h - h1) / Math.max(0.0001, h2 - h1)));
+        return [
+          Math.round(c1[0] + (c2[0] - c1[0]) * f),
+          Math.round(c1[1] + (c2[1] - c1[1]) * f),
+          Math.round(c1[2] + (c2[2] - c1[2]) * f),
+        ];
+      }
+    }
+    return [147, 197, 253];
+  }
+
+  function rgbToHex(rgb) {
+    return (
+      '#' +
+      rgb
+        .map((n) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, '0'))
+        .join('')
+    );
+  }
+
+  function syncIbadahClockSkyVisual(now) {
+    if (!el.expIbadah || !el.ibadahOrbGlyph) return;
+    const d = now || new Date();
+    const hourFloat = d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+    const phase =
+      hourFloat < 5.0 || hourFloat >= 18.0
+        ? 'moon'
+        : hourFloat < 7.0
+        ? 'sunrise'
+        : hourFloat < 15.75
+        ? 'sun'
+        : 'sunset';
+    const activeRgb = sampleSkyRgbByHour(hourFloat);
+    const startRgb = sampleSkyRgbByHour(hourFloat - 2.0);
+    const activeHex = rgbToHex(activeRgb);
+    const startHex = rgbToHex(startRgb);
+    const [r, g, b] = activeRgb;
+
+    el.expIbadah.style.setProperty('--vm-ibadah-sky', activeHex);
+    el.expIbadah.style.setProperty('--vm-ibadah-sky-bg', `rgba(${r}, ${g}, ${b}, 0.08)`);
+    el.expIbadah.style.setProperty('--vm-ibadah-sky-border', `rgba(${r}, ${g}, ${b}, 0.55)`);
+
+    if (el.passedGradStart) el.passedGradStart.setAttribute('stop-color', startHex);
+    if (el.passedGradEnd) el.passedGradEnd.setAttribute('stop-color', activeHex);
+    if (el.cometGradStart) el.cometGradStart.setAttribute('stop-color', startHex);
+    if (el.cometGradMid) el.cometGradMid.setAttribute('stop-color', activeHex);
+    if (el.cometGradEnd) el.cometGradEnd.setAttribute('stop-color', activeHex);
+    if (el.ibadahOrbGlow) el.ibadahOrbGlow.setAttribute('fill', `rgba(${r}, ${g}, ${b}, 0.36)`);
+    if (el.ibadahCelestialOrb) el.ibadahCelestialOrb.setAttribute('data-celestial-phase', phase);
+
+    clearNode(el.ibadahOrbGlyph);
+    if (phase === 'sunrise') {
+      el.ibadahOrbGlyph.appendChild(
+        createSvgNode('line', { x1: 1.5, y1: 9.6, x2: 11.5, y2: 9.6, stroke: activeHex, 'stroke-width': 1.15, 'stroke-linecap': 'round' })
+      );
+      el.ibadahOrbGlyph.appendChild(
+        createSvgNode('path', { d: 'M 3.3,9.6 A 3.2,3.2 0 0 1 9.7,9.6 Z', fill: activeHex })
+      );
+      [
+        [6.5, 2.2, 6.5, 3.8],
+        [3.1, 3.8, 4.1, 4.9],
+        [9.9, 3.8, 8.9, 4.9],
+      ].forEach(([x1, y1, x2, y2]) => {
+        el.ibadahOrbGlyph.appendChild(
+          createSvgNode('line', { x1, y1, x2, y2, stroke: activeHex, 'stroke-width': 1.1, 'stroke-linecap': 'round' })
+        );
+      });
+    } else if (phase === 'sun') {
+      el.ibadahOrbGlyph.appendChild(createSvgNode('circle', { cx: 6.5, cy: 6.5, r: 2.7, fill: activeHex }));
+      [
+        [6.5, 1.5], [10.0, 3.0], [11.5, 6.5], [10.0, 10.0],
+        [6.5, 11.5], [3.0, 10.0], [1.5, 6.5], [3.0, 3.0],
+      ].forEach(([cx, cy]) => {
+        el.ibadahOrbGlyph.appendChild(createSvgNode('circle', { cx, cy, r: 0.72, fill: activeHex }));
+      });
+    } else if (phase === 'sunset') {
+      el.ibadahOrbGlyph.appendChild(
+        createSvgNode('path', { d: 'M 3.2,9.2 A 3.3,3.3 0 0 1 9.8,9.2 Z', fill: activeHex })
+      );
+      el.ibadahOrbGlyph.appendChild(
+        createSvgNode('line', { x1: 1.5, y1: 9.2, x2: 11.5, y2: 9.2, stroke: activeHex, 'stroke-width': 1.15, 'stroke-linecap': 'round' })
+      );
+      el.ibadahOrbGlyph.appendChild(
+        createSvgNode('line', { x1: 3.8, y1: 11.2, x2: 9.2, y2: 11.2, stroke: activeHex, 'stroke-width': 1.05, 'stroke-linecap': 'round', 'stroke-opacity': 0.55 })
+      );
+    } else {
+      el.ibadahOrbGlyph.appendChild(
+        createSvgNode('path', { d: 'M 8.5,2.0 C 3.3,2.3 2.9,10.7 8.5,11.0 C 5.7,9.6 5.7,3.4 8.5,2.0 Z', fill: activeHex })
+      );
+      el.ibadahOrbGlyph.appendChild(createSvgNode('circle', { cx: 10.2, cy: 3.6, r: 0.95, fill: activeHex }));
     }
   }
 
@@ -875,6 +1035,7 @@
   }
 
   function resolveActiveExpression() {
+    if (state.prayerAlertActive) return 'prayer';
     if (state.mode === 'lyrics') return 'music';
     if (state.mode === 'todo') return state.dualIdleActive ? 'dual_active' : 'focus';
     return 'idle';
@@ -883,7 +1044,8 @@
   function resolveMode6Variant() {
     if (state.mode === 'lyrics') return 'music';
     if (state.mode === 'todo') return 'todo';
-    if (state.mode === 'hud' || state.mode === 'resting') return 'control';
+    if (state.mode === 'ibadah' && state.ibadahEnabled) return 'ibadah';
+    if (state.mode === 'hud' || state.mode === 'resting' || state.mode === 'ibadah') return 'control';
     return 'dropzone';
   }
 
@@ -899,21 +1061,38 @@
 
     renderCompanionAvatar(el.eyes, activeExpr);
     renderCompanionAvatar(el.m6Eyes, activeExpr);
+    renderCompanionAvatar(el.prayerEyes, 'prayer');
+    renderCompanionAvatar(el.expandedPrayerEyes, 'prayer');
 
     if (el.monitor) {
       el.monitor.setAttribute('data-capsule-open', isExpanded ? 'true' : 'false');
     }
 
+    const showExpandedPrayerBanner =
+      isExpanded && state.prayerAlertActive && variant !== 'ibadah';
+
     if (el.capsule) {
       el.capsule.setAttribute('data-state', isExpanded ? 'expanded' : 'idle');
       el.capsule.setAttribute('data-variant', variant);
+      el.capsule.setAttribute('data-five-tabs', state.ibadahEnabled ? 'true' : 'false');
+      el.capsule.setAttribute(
+        'data-has-prayer-banner',
+        showExpandedPrayerBanner ? 'true' : 'false'
+      );
+    }
+
+    if (el.m6IbadahTab) {
+      el.m6IbadahTab.hidden = !state.ibadahEnabled;
+    }
+    if (el.expandedPrayerBanner) {
+      el.expandedPrayerBanner.hidden = !showExpandedPrayerBanner;
     }
 
     if (el.idleLayer) el.idleLayer.hidden = isExpanded;
     if (el.expandedLayer) el.expandedLayer.hidden = !isExpanded;
 
     // Perimeter Open U-Shape Focus Timer Stroke (when To-Do & Focus active in Idle)
-    const showPerimeter = !isExpanded && state.mode === 'todo';
+    const showPerimeter = !isExpanded && !state.prayerAlertActive && state.mode === 'todo';
     if (el.perimeterSvg) {
       el.perimeterSvg.hidden = !showPerimeter;
     }
@@ -923,14 +1102,17 @@
       el.perimeterPath.style.strokeDashoffset = String(Math.max(5, 100 - pct));
     }
 
-    // Idle Layers (Compact × ♥ in Resting & Wake mode vs HUD vs Wide Feature Idle Bar)
+    // Idle Layers (Priority Prayer T-0 Pill > Compact × ♥ > HUD > Wide Feature Idle Bar)
+    const showPrayerPill = !isExpanded && state.prayerAlertActive;
     const showCompactEyesOnly =
       !isExpanded &&
+      !showPrayerPill &&
       !state.hudKind &&
-      state.mode === 'resting';
-    const showHud = !isExpanded && Boolean(state.hudKind);
-    const showActivePill = !isExpanded && !showCompactEyesOnly && !showHud;
+      (state.mode === 'resting' || state.mode === 'ibadah');
+    const showHud = !isExpanded && !showPrayerPill && Boolean(state.hudKind);
+    const showActivePill = !isExpanded && !showPrayerPill && !showCompactEyesOnly && !showHud;
 
+    if (el.prayerPill) el.prayerPill.hidden = !showPrayerPill;
     if (el.restingPill) {
       el.restingPill.hidden = !showCompactEyesOnly;
       el.restingPill.setAttribute('data-sleep', state.isRestingSleep ? 'true' : 'false');
@@ -1003,10 +1185,11 @@
     el.m6TabButtons.forEach((btn) => {
       const tab = btn.getAttribute('data-m6-tab');
       const isMatch =
-        (tab === 'music' && state.mode === 'lyrics') ||
-        (tab === 'todo' && state.mode === 'todo') ||
-        (tab === 'hud' && (state.mode === 'hud' || state.mode === 'resting')) ||
-        (tab === 'dropzone' && state.mode === 'dropzone');
+        (tab === 'music' && variant === 'music') ||
+        (tab === 'todo' && variant === 'todo') ||
+        (tab === 'hud' && variant === 'control') ||
+        (tab === 'ibadah' && variant === 'ibadah') ||
+        (tab === 'dropzone' && variant === 'dropzone');
       btn.setAttribute('aria-selected', isMatch ? 'true' : 'false');
     });
 
@@ -1015,6 +1198,16 @@
     if (el.expFocus) el.expFocus.hidden = variant !== 'todo';
     if (el.expControl) el.expControl.hidden = variant !== 'control';
     if (el.expDropzone) el.expDropzone.hidden = variant !== 'dropzone';
+    if (el.expIbadah) el.expIbadah.hidden = variant !== 'ibadah';
+
+    if (el.ibadahCountdown) {
+      const sec = Math.max(0, state.prayerCountdownSeconds);
+      const hh = String(Math.floor(sec / 3600)).padStart(2, '0');
+      const mm = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+      const ss = String(sec % 60).padStart(2, '0');
+      el.ibadahCountdown.textContent = `-${hh}:${mm}:${ss}`;
+    }
+    syncIbadahClockSkyVisual(now);
 
     // Mode 6 Music Player Metadata
     if (el.expAudioLabel) el.expAudioLabel.textContent = state.audioOutputLabel;
@@ -1084,6 +1277,13 @@
     if (el.sceneTodo) el.sceneTodo.hidden = state.mode !== 'todo';
     if (el.sceneHud) el.sceneHud.hidden = state.mode !== 'hud';
     if (el.sceneDropzone) el.sceneDropzone.hidden = state.mode !== 'dropzone';
+    if (el.sceneIbadah) el.sceneIbadah.hidden = state.mode !== 'ibadah';
+
+    if (el.ibadahStatusTag) {
+      el.ibadahStatusTag.textContent = state.ibadahEnabled
+        ? 'Tab Ibadah Aktif (5 Tab)'
+        : 'Tab Ibadah Nonaktif (4 Tab)';
+    }
 
     el.modeButtons.forEach((btn) => {
       btn.setAttribute(
@@ -1138,6 +1338,10 @@
       state.capsuleState = 'idle';
       showHudChip('volume', 'Volume', `${state.volume}%`, true);
     } else if (nextMode === 'dropzone') {
+      state.capsuleState = 'expanded';
+    } else if (nextMode === 'ibadah') {
+      state.ibadahEnabled = true;
+      state.prayerAlertActive = false;
       state.capsuleState = 'expanded';
     }
     syncUI();
@@ -1353,6 +1557,7 @@
           state.capsuleState = 'expanded';
           syncUI();
         } else if (tab === 'dropzone') switchMode('dropzone');
+        else if (tab === 'ibadah') switchMode('ibadah');
       });
     });
 
@@ -1382,6 +1587,8 @@
 
       el.capsule.addEventListener('click', (ev) => {
         if (ev.target && ev.target.closest('button')) return;
+        // hoverExpandLocked parity during Pengingat Ibadah T-0 idle pill
+        if (state.capsuleState === 'idle' && state.prayerAlertActive) return;
         if (state.capsuleState === 'idle') {
           state.isRestingSleep = false;
           state.capsuleState = 'expanded';
@@ -1481,6 +1688,59 @@
         state.isRestingSleep = false;
         state.capsuleState = state.capsuleState === 'expanded' ? 'idle' : 'expanded';
         syncUI();
+      });
+    }
+
+    // Pengingat Ibadah (v2.1.0 Opt-In + T-0 Simulation)
+    if (el.ibadahToggleBtn) {
+      el.ibadahToggleBtn.addEventListener('click', () => {
+        state.ibadahEnabled = !state.ibadahEnabled;
+        if (!state.ibadahEnabled) {
+          state.prayerAlertActive = false;
+        }
+        syncUI();
+      });
+    }
+
+    if (el.simPrayerIdleBtn) {
+      el.simPrayerIdleBtn.addEventListener('click', () => {
+        state.ibadahEnabled = true;
+        state.prayerAlertActive = true;
+        state.capsuleState = 'idle';
+        state.isRestingSleep = false;
+        state.hudKind = '';
+        syncUI();
+      });
+    }
+
+    if (el.simPrayerBannerBtn) {
+      el.simPrayerBannerBtn.addEventListener('click', () => {
+        state.ibadahEnabled = true;
+        state.prayerAlertActive = true;
+        state.mode = 'lyrics';
+        state.capsuleState = 'expanded';
+        syncUI();
+      });
+    }
+
+    const stopDemoPrayerAlert = (ev) => {
+      if (ev) ev.stopPropagation();
+      state.prayerAlertActive = false;
+      syncUI();
+    };
+
+    if (el.prayerStopBtn) {
+      el.prayerStopBtn.addEventListener('click', stopDemoPrayerAlert);
+    }
+    if (el.expandedPrayerStopBtn) {
+      el.expandedPrayerStopBtn.addEventListener('click', stopDemoPrayerAlert);
+    }
+    if (el.ibadahRefreshBtn) {
+      el.ibadahRefreshBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        el.ibadahRefreshBtn.classList.remove('spinning');
+        void el.ibadahRefreshBtn.offsetWidth;
+        el.ibadahRefreshBtn.classList.add('spinning');
       });
     }
 
@@ -1784,7 +2044,7 @@
           ? exeVersion.trim().startsWith('v')
             ? exeVersion.trim()
             : `v${exeVersion.trim()}`
-          : 'v2.0.4';
+          : 'v2.1.0';
       el.downloadSizeText.textContent = `${versionTag} · NSIS Setup (.exe) · ${exeSize}`;
     }
     if (el.downloadCountText) {
@@ -1886,13 +2146,13 @@
       let exeSize = null;
       let exeVersion = null;
       if (v2Release && Array.isArray(v2Release.assets)) {
-        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.0.4';
+        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.1.0';
         const exeAsset = v2Release.assets.find(
           (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
         );
         if (exeAsset && isSafeGitHubUrl(exeAsset.browser_download_url)) {
           exeUrl = exeAsset.browser_download_url;
-          exeSize = formatMegabytes(exeAsset.size) || '4.47 MB';
+          exeSize = formatMegabytes(exeAsset.size) || '6.42 MB';
         }
       }
 
@@ -1911,7 +2171,7 @@
         );
       } catch (_err) {}
     } catch (_err) {
-      // Keep static v2.0.4 fallback link & hide download count gracefully when offline/rate-limited
+      // Keep static v2.1.0 fallback link & hide download count gracefully when offline/rate-limited
     }
   }
 
@@ -2141,7 +2401,7 @@
 
       const versionEl = document.createElement('span');
       versionEl.className = 'review-version-badge';
-      versionEl.textContent = item.app_version || 'v2.0.4';
+      versionEl.textContent = item.app_version || 'v2.1.0';
 
       const starsWrap = document.createElement('span');
       starsWrap.className = 'reviews-stars-row';
@@ -2412,7 +2672,7 @@
               comment,
               website_hp: websiteHp,
               elapsed_ms: elapsedMs,
-              app_version: 'v2.0.4',
+              app_version: 'v2.1.0',
             }),
           });
 

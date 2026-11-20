@@ -411,9 +411,22 @@ textarea {
   height: 186px;
 }
 
+.vm-notch-capsule[data-state="expanded"][data-variant="control"][data-five-tabs="true"] {
+  width: min(540px, calc(100% - 8px));
+}
+
+.vm-notch-capsule[data-state="expanded"][data-variant="ibadah"] {
+  width: min(560px, calc(100% - 8px));
+  height: 186px;
+}
+
 .vm-notch-capsule[data-state="expanded"][data-variant="dropzone"] {
   width: min(580px, calc(100% - 8px));
   height: 192px;
+}
+
+.vm-notch-capsule[data-state="expanded"][data-has-prayer-banner="true"] {
+  height: 214px;
 }
 
 .vm-notch-capsule[data-drop-hover="true"] {
@@ -721,23 +734,370 @@ textarea {
   background: #000000;
 }
 
-/* 1:1 Mode6TopNav (h: 34px, grid 1fr auto 1fr) */
+/* Priority Pengingat Ibadah T-0 Pill (Pure Monochrome OLED, Compact + Micro-Vibrate + Breathing Glow) */
+@keyframes casaPrayerVibrate {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  14% { transform: translate3d(-2px, 0, 0); }
+  28% { transform: translate3d(2px, 0, 0); }
+  42% { transform: translate3d(-1.5px, 0, 0); }
+  58% { transform: translate3d(1.5px, 0, 0); }
+  74% { transform: translate3d(-0.75px, 0, 0); }
+  88% { transform: translate3d(0.5px, 0, 0); }
+}
+
+@keyframes casaPrayerGlowBreathe {
+  0%, 100% {
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+      inset 0 -1px 8px rgba(255, 255, 255, 0.14);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.34),
+      inset 0 -1px 14px rgba(255, 255, 255, 0.28);
+  }
+}
+
+@keyframes casaPrayerTwinkle {
+  0%, 100% {
+    opacity: 0.78;
+    transform: scale(0.95);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes casaPrayerEqBar {
+  0%, 100% {
+    transform: scaleY(0.32);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+.casa-prayer-eyes-twinkle {
+  animation: casaPrayerTwinkle 2.3s ease-in-out infinite;
+  filter: drop-shadow(0 0 2.5px rgba(255, 255, 255, 0.4));
+}
+
+.casa-prayer-pill {
+  height: 39px;
+  min-width: 248px;
+  max-width: min(320px, calc(100vw - 36px));
+  padding: 0 12px;
+  border-radius: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: default;
+  animation:
+    casaPrayerVibrate 600ms cubic-bezier(0.36, 0.07, 0.19, 0.97) 1,
+    casaPrayerGlowBreathe 2.4s ease-in-out infinite;
+}
+
+.casa-prayer-pill-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.casa-prayer-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.casa-prayer-time {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.48);
+  white-space: nowrap;
+}
+
+.casa-prayer-eq {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+.casa-prayer-eq-bar {
+  width: 2px;
+  border-radius: 9999px;
+  background: #ffffff;
+  transform-origin: bottom;
+  animation: casaPrayerEqBar 0.85s ease-in-out infinite;
+}
+
+.casa-prayer-eq-bar:nth-child(1) { height: 7px; animation-duration: 0.85s; }
+.casa-prayer-eq-bar:nth-child(2) { height: 11px; animation-duration: 0.65s; animation-delay: 140ms; }
+.casa-prayer-eq-bar:nth-child(3) { height: 9px; animation-duration: 0.95s; animation-delay: 260ms; }
+.casa-prayer-eq-bar:nth-child(4) { height: 6px; animation-duration: 0.75s; animation-delay: 90ms; }
+
+.casa-prayer-stop-btn {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  border: none;
+  background: #ffffff;
+  color: #000000;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.15s ease, transform 0.12s ease;
+}
+
+.casa-prayer-stop-btn:hover {
+  opacity: 0.9;
+}
+
+.casa-prayer-stop-btn:active {
+  transform: scale(0.95);
+}
+
+.casa-prayer-stop-btn.compact {
+  height: 19px;
+  padding: 0 8px;
+  font-size: 9.5px;
+}
+
+/* 1:1 Mode6TopNav (h: 34px, asymmetric flex to prevent 5-tab squeeze) */
 .casa-m6-header {
   height: 34px;
   padding: 0 10px;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 6px;
   background: #000000;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   flex-shrink: 0;
+}
+
+.casa-m6-prayer-banner {
+  height: 28px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: #08080a;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  flex-shrink: 0;
+}
+
+.casa-m6-prayer-banner-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.78);
+  min-width: 0;
+}
+
+.casa-m6-prayer-banner-left strong {
+  color: #ffffff;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Panel E: Ibadah Pure Monochrome OLED (Parabolic Sun / Shooting-Star Trajectory) */
+.casa-m6-ibadah {
+  width: 100%;
+  height: 100%;
+  padding: 7px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 4px;
+  background: #000000;
+}
+
+.casa-ibadah-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.casa-ibadah-loc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.casa-ibadah-city-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.casa-ibadah-city {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.casa-ibadah-cc {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.casa-ibadah-refresh-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.58);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.casa-ibadah-refresh-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+@keyframes casaSpinOnce {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.casa-ibadah-refresh-btn.spinning svg {
+  animation: casaSpinOnce 0.55s linear;
+}
+
+.casa-ibadah-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.casa-ibadah-meta {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 1px;
+}
+
+.casa-ibadah-countdown-box {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.casa-ibadah-next-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--vm-ibadah-sky, #FCD34D);
+  opacity: 0.88;
+}
+
+.casa-ibadah-countdown {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.12;
+}
+
+.casa-ibadah-arc-wrap {
+  width: 100%;
+  height: 56px;
+  flex-shrink: 0;
+}
+
+.casa-ibadah-curve-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  display: block;
+}
+
+.casa-ibadah-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.casa-ibadah-col {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 4px 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: center;
+  min-width: 0;
+}
+
+.casa-ibadah-col.passed {
+  opacity: 0.52;
+}
+
+.casa-ibadah-col.next {
+  border-color: var(--vm-ibadah-sky-border, rgba(252, 211, 77, 0.55));
+  background: var(--vm-ibadah-sky-bg, rgba(252, 211, 77, 0.08));
+}
+
+.casa-ibadah-name {
+  font-size: 9.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+  line-height: 1;
+}
+
+.casa-ibadah-col.next .casa-ibadah-name {
+  color: var(--vm-ibadah-sky, #FCD34D);
+}
+
+.casa-ibadah-time {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.15;
+  margin-top: 2px;
+}
+
+.casa-ibadah-next-tag {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--vm-ibadah-sky, #FCD34D);
+  line-height: 1;
+  margin-top: 2px;
 }
 
 .casa-m6-head-left {
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  flex-shrink: 0;
 }
 
 .casa-m6-eye-btn {
@@ -2811,6 +3171,34 @@ textarea {
     width: 100% !important;
     height: auto !important;
     min-height: 186px;
+  }
+
+  .casa-m6-nav {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .casa-m6-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .casa-ibadah-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 2px;
+  }
+
+  .casa-ibadah-time {
+    font-size: 10.5px;
+  }
+
+  .casa-ibadah-state {
+    font-size: 6.5px;
+  }
+
+  .casa-prayer-pill {
+    min-width: 0;
+    width: auto;
   }
 
   .casa-m6-music,

@@ -13,7 +13,7 @@ import puppeteer from 'puppeteer-core';
 
 const DOCS_DIR = path.resolve('docs');
 const EXE_BUNDLE_PATH = path.resolve(
-  'src-tauri/target/release/bundle/nsis/CASA_2.0.4_x64-setup.exe'
+  'src-tauri/target/release/bundle/nsis/CASA_2.1.0_x64-setup.exe'
 );
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -130,19 +130,19 @@ async function main() {
           contentType: 'application/json',
           body: JSON.stringify([
             {
-              tag_name: 'v2.0.4',
+              tag_name: 'v2.1.0',
               assets: [
                 {
-                  name: 'CASA_2.0.4_x64-setup.exe',
-                  size: 4688136,
+                  name: 'CASA_2.1.0_x64-setup.exe',
+                  size: 6730364,
                   download_count: 8,
                   browser_download_url:
-                    'https://github.com/Farhanpratama09/casa-app/releases/download/v2.0.4/CASA_2.0.4_x64-setup.exe',
+                    'https://github.com/Farhanpratama09/casa-app/releases/download/v2.1.0/CASA_2.1.0_x64-setup.exe',
                 },
-                { name: 'CASA_2.0.4_x64-setup.exe.sig', size: 432, download_count: 90 },
-                { name: 'CASA_2.0.4_x64_en-US.msi', size: 6774784, download_count: 3 },
-                { name: 'CASA_2.0.4_x64_en-US.msi.sig', size: 432, download_count: 45 },
-                { name: 'latest.json', size: 860, download_count: 500 },
+                { name: 'CASA_2.1.0_x64-setup.exe.sig', size: 432, download_count: 90 },
+                { name: 'CASA_2.1.0_x64_en-US.msi', size: 8826880, download_count: 3 },
+                { name: 'CASA_2.1.0_x64_en-US.msi.sig', size: 432, download_count: 45 },
+                { name: 'latest.json', size: 938, download_count: 500 },
               ],
             },
             {
@@ -228,8 +228,8 @@ async function main() {
     check(
       layoutAudit.hasPrimaryExe &&
         layoutAudit.primaryLabelText === 'Download CASA for Windows' &&
-        layoutAudit.dlSizeText.startsWith('v2.0.4 · NSIS Setup (.exe) ·') &&
-        layoutAudit.primaryHref.includes('CASA_2.0.4_x64-setup.exe') &&
+        layoutAudit.dlSizeText.startsWith('v2.1.0 · NSIS Setup (.exe) ·') &&
+        layoutAudit.primaryHref.includes('CASA_2.1.0_x64-setup.exe') &&
         layoutAudit.shaClosedInitially &&
         layoutAudit.shaSummaryText === 'Verify SHA-256 checksum' &&
         /^[0-9A-F]{64}$/.test(layoutAudit.shaText) &&
@@ -344,7 +344,7 @@ async function main() {
     const m6OpenCheck = await page.evaluate(() => ({
       expanded: document.getElementById('vm-notch-capsule')?.getAttribute('data-state') === 'expanded',
       variant: document.getElementById('vm-notch-capsule')?.getAttribute('data-variant'),
-      hasNavTabs: document.querySelectorAll('.casa-m6-tab').length === 4,
+      hasNavTabs: document.querySelectorAll('.casa-m6-tab:not([hidden])').length === 4,
     }));
     await page.keyboard.down('AltLeft');
     await page.keyboard.press('Space');
@@ -504,6 +504,90 @@ async function main() {
     check(
       dzBefore.dropCards === 1 && dzBefore.copyBackVisible,
       'Mode 5 (Drag & Drop): DropShelfCard & Copy Back to Desktop functional'
+    );
+
+    // Mode 6: Pengingat Ibadah (v2.1.0 Opt-In 5th Tab, Parabolic Curve, T-0 ✦ ☾ Pill & Expanded Banner)
+    await page.click('button[data-vm-mode="ibadah"]');
+    await new Promise((r) => setTimeout(r, 150));
+    const ibadahPanelAudit = await page.evaluate(() => {
+      const dots = Array.from(document.querySelectorAll('#vm-ibadah-curve-svg .vm-prayer-dot'));
+      const neutralDotFills = new Set(['#E4E4E7', '#FFFFFF', '#000000']);
+      const allDotsNeutral =
+        dots.length === 5 &&
+        dots.every((d) => neutralDotFills.has((d.getAttribute('fill') || '').toUpperCase()));
+      const orbGlyphChildren = document.getElementById('vm-ibadah-orb-glyph')?.children.length ?? 0;
+      const celestialPhase =
+        document.getElementById('vm-ibadah-celestial-orb')?.getAttribute('data-celestial-phase') || '';
+      return {
+        visibleTabs: document.querySelectorAll('.casa-m6-tab:not([hidden])').length,
+        ibadahOpen: document.getElementById('vm-exp-ibadah')?.hidden === false,
+        hasParabolicSvg: Boolean(document.getElementById('vm-ibadah-curve-svg')),
+        hasCelestialOrbIcon:
+          orbGlyphChildren > 0 && ['sunrise', 'sun', 'sunset', 'moon'].includes(celestialPhase),
+        allDotsNeutral,
+        hasRefreshNearCity: Boolean(
+          document.querySelector('.casa-ibadah-city-row #vm-ibadah-refresh-btn')
+        ),
+        nextHeadingText: document.getElementById('vm-ibadah-next-heading')?.textContent?.trim() || '',
+        prayerCols: document.querySelectorAll('#vm-ibadah-grid .casa-ibadah-col').length,
+        nextTagTexts: Array.from(document.querySelectorAll('#vm-ibadah-grid .casa-ibadah-next-tag')).map(
+          (el) => el.textContent?.trim() || ''
+        ),
+        gridText: document.getElementById('vm-ibadah-grid')?.textContent || '',
+        variant: document.getElementById('vm-notch-capsule')?.getAttribute('data-variant'),
+      };
+    });
+    await page.click('#vm-sim-prayer-idle-btn');
+    await new Promise((r) => setTimeout(r, 120));
+    // Verify hoverExpandLocked: clicking non-button area of T-0 pill does NOT expand Mode 6
+    await page.click('#vm-prayer-alert-title');
+    await new Promise((r) => setTimeout(r, 120));
+    const prayerIdleAudit = await page.evaluate(() => ({
+      prayerPillVisible: document.getElementById('casa-prayer-pill')?.hidden === false,
+      stayedIdle: document.getElementById('vm-notch-capsule')?.getAttribute('data-state') === 'idle',
+      titleText: document.getElementById('vm-prayer-alert-title')?.textContent?.trim() || '',
+      hasStarCrescentEyes: (document.getElementById('vm-prayer-eyes')?.children.length ?? 0) === 2,
+      eqBars: document.querySelectorAll('#casa-prayer-pill .casa-prayer-eq-bar').length,
+    }));
+    await page.click('#vm-prayer-stop-btn');
+    await new Promise((r) => setTimeout(r, 120));
+    await page.click('#vm-sim-prayer-banner-btn');
+    await new Promise((r) => setTimeout(r, 150));
+    const prayerBannerAudit = await page.evaluate(() => ({
+      bannerVisible: document.getElementById('vm-expanded-prayer-banner')?.hidden === false,
+      stayedOnMusicTab: document.getElementById('vm-exp-music')?.hidden === false,
+      expandedState: document.getElementById('vm-notch-capsule')?.getAttribute('data-state') === 'expanded',
+    }));
+    await page.click('#vm-expanded-prayer-stop-btn');
+    await new Promise((r) => setTimeout(r, 100));
+    const afterBannerStopAudit = await page.evaluate(() => ({
+      bannerHidden: document.getElementById('vm-expanded-prayer-banner')?.hidden === true,
+      stayedExpanded: document.getElementById('vm-notch-capsule')?.getAttribute('data-state') === 'expanded',
+    }));
+    check(
+      ibadahPanelAudit.visibleTabs === 5 &&
+        ibadahPanelAudit.ibadahOpen &&
+        ibadahPanelAudit.hasParabolicSvg &&
+        ibadahPanelAudit.hasCelestialOrbIcon &&
+        ibadahPanelAudit.allDotsNeutral &&
+        ibadahPanelAudit.hasRefreshNearCity &&
+        ibadahPanelAudit.nextHeadingText === 'ASHAR' &&
+        ibadahPanelAudit.prayerCols === 5 &&
+        ibadahPanelAudit.nextTagTexts.length === 1 &&
+        ibadahPanelAudit.nextTagTexts[0] === 'NEXT' &&
+        !/LEWAT|NANTI|BERIKUTNYA/i.test(ibadahPanelAudit.gridText) &&
+        ibadahPanelAudit.variant === 'ibadah' &&
+        prayerIdleAudit.prayerPillVisible &&
+        prayerIdleAudit.stayedIdle &&
+        prayerIdleAudit.titleText === 'Adzan Ashar' &&
+        prayerIdleAudit.hasStarCrescentEyes &&
+        prayerIdleAudit.eqBars === 4 &&
+        prayerBannerAudit.bannerVisible &&
+        prayerBannerAudit.stayedOnMusicTab &&
+        prayerBannerAudit.expandedState &&
+        afterBannerStopAudit.bannerHidden &&
+        afterBannerStopAudit.stayedExpanded,
+      `Mode 6 (Pengingat Ibadah v2.1.0): 5 tabs, celestial icon + dynamic sky curve, Refresh near city, NEXT tag, T-0 pill (✦ ☾ + 4 eq + hoverExpandLocked) & expanded banner verified`
     );
 
     // Clean Path Routing Without `#` (/casa-app/<section>, popstate Back, Logo reset -> /casa-app/)
@@ -826,7 +910,7 @@ async function main() {
         typeof postedReviewBody?.elapsed_ms === 'number' &&
         Number.isFinite(postedReviewBody.elapsed_ms) &&
         postedReviewBody.elapsed_ms >= 0 &&
-        postedReviewBody?.app_version === 'v2.0.4',
+        postedReviewBody?.app_version === 'v2.1.0',
       `Supabase apikey-only fetch, Play Store summary (${liveMockAudit.avgScore}), Creator reply, 5★ filter & submit-review verified`
     );
 

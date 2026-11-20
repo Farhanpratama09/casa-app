@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { VolumeX } from 'lucide-react';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { listen } from '@tauri-apps/api/event';
 import { IslandMode, CompactSubtype, HardwareMetrics, IslandState } from '../types/island';
 import { IdlePillView } from './views/IdlePillView';
+import { CasaCompanionAvatar } from './companion/CasaCompanionAvatar';
 import { DropZoneView } from './views/DropZoneView';
 import { Mode6TopNav } from './views/Mode6TopNav';
 import { Mode6ControlCenterView } from './views/mode6/Mode6ControlCenterView';
@@ -14,6 +16,13 @@ import { useTodoState } from '../features/todo/useTodoState';
 import { MediaExpandedView } from '../features/media/MediaExpandedView';
 import { TimerExpandedView } from '../features/timer/TimerExpandedView';
 import { TodoExpandedView } from '../features/todo/TodoExpandedView';
+import { IbadahExpandedView } from '../features/ibadah/IbadahExpandedView';
+import {
+  notifyPrayerSettingsChanged,
+  setPrayerRuntimeFullscreenState,
+  stopPrayerAlert,
+  usePrayerStore,
+} from '../features/ibadah/prayerStore';
 import {
   setSmartIgnoreCursorEvents,
   playChimeCue,
@@ -113,9 +122,23 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   const isAlarmRinging = Boolean(idleTimerState?.isAlarmRinging);
   const isAlarmRingingRef = useRef<boolean>(isAlarmRinging);
   isAlarmRingingRef.current = isAlarmRinging;
+  const prayerStore = usePrayerStore();
+  const visiblePrayerAlert =
+    prayerStore.activeAlert && !prayerStore.activeAlert.suppressVisual
+      ? prayerStore.activeAlert
+      : null;
+  const isPrayerAlertVisible = visiblePrayerAlert !== null;
+  const isPrayerAlertVisibleRef = useRef<boolean>(isPrayerAlertVisible);
+  isPrayerAlertVisibleRef.current = isPrayerAlertVisible;
+  const isPriorityAlert = isAlarmRinging || isPrayerAlertVisible;
+  const isPriorityAlertRef = useRef<boolean>(isPriorityAlert);
+  isPriorityAlertRef.current = isPriorityAlert;
   const { hudAlert, telemetry } = useSystemHardware();
   const isKeepAwake = Boolean(telemetry.stay_awake);
   const { settings } = useSettingsStore();
+  const isIbadahEnabled = settings.ibadah.enabled;
+  const isIbadahEnabledRef = useRef<boolean>(isIbadahEnabled);
+  isIbadahEnabledRef.current = isIbadahEnabled;
   const placementMode = settings.placementMode;
   const isFloatingMode = placementMode === 'floating';
   const horizontalAlign = settings.horizontalAlign;
@@ -188,6 +211,8 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   const autoTuckIdleTimerRef = useRef<NodeJS.Timeout | null>(null);
   const wasTuckedByFullscreenRef = useRef<boolean>(false);
   const wasHiddenByFullscreenRef = useRef<boolean>(false);
+  const wasTuckedBeforeAlertRef = useRef<boolean>(false);
+  const prevPriorityAlertRef = useRef<boolean>(false);
   const prevIsFullscreenActiveRef = useRef<boolean>(false);
   const fullscreenExitCooldownUntilRef = useRef<number>(0);
   const [fullscreenExitTick, setFullscreenExitTick] = useState<number>(0);
@@ -258,7 +283,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       restingSleepTimerRef.current = null;
     }
 
-    if (isAlarmRingingRef.current) {
+    if (isPriorityAlertRef.current) {
       return;
     }
     // ISOLASI STATE GUARD: Timer auto-resting hanya berjalan saat idle hening total, Keep Awake mati, DAN kursor di luar kapsul
@@ -339,7 +364,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       islandStateRef.current !== 'idle' ||
       isMusicPlayingRef.current ||
       isTimerActiveRef.current ||
-      isAlarmRingingRef.current ||
+      isPriorityAlertRef.current ||
       isKeepAwakeRef.current ||
       hasHudAlertRef.current ||
       isCursorInsideRef.current ||
@@ -355,7 +380,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         islandStateRef.current === 'idle' &&
         !isMusicPlayingRef.current &&
         !isTimerActiveRef.current &&
-        !isAlarmRingingRef.current &&
+        !isPriorityAlertRef.current &&
         !isKeepAwakeRef.current &&
         !hasHudAlertRef.current &&
         !isCursorInsideRef.current &&
@@ -750,6 +775,8 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       isFloatingMode: isFloatingModeRef.current,
       hasHudAlert: hudWake,
       isAlarmRinging: isAlarmRingingRef.current,
+      isPrayerAlertActive: isPrayerAlertVisibleRef.current,
+      isIbadahEnabled: isIbadahEnabledRef.current,
       isRestingSleep: isRestingSleepRef.current,
       isLyricsOpen: lyricsOpen,
       isFocusHoverPeek: focusPeek,
@@ -769,6 +796,8 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     isFloatingMode,
     hasHudAlert,
     isAlarmRinging,
+    isPrayerAlertActive: isPrayerAlertVisible,
+    isIbadahEnabled,
     isRestingSleep,
     isLyricsOpen,
     isFocusHoverPeek,
@@ -793,7 +822,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     islandState === 'idle' &&
     !isExpandedView &&
     !hasHudAlert &&
-    !isAlarmRinging &&
+    !isPriorityAlert &&
     isTimerActive &&
     (idleTimerState?.totalSeconds ?? 0) > 0;
   const isIdleTimerPaused = Boolean(idleTimerState?.isPaused);
@@ -887,6 +916,18 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     getActiveIdleHitboxHeight,
   ]);
 
+  // Sync Prayer Scheduler with runtime fullscreen & same-window ibadah setting changes
+  useEffect(() => {
+    setPrayerRuntimeFullscreenState(isFullscreenActive);
+  }, [isFullscreenActive]);
+
+  useEffect(() => {
+    notifyPrayerSettingsChanged();
+    if (!settings.ibadah.enabled && modeRef.current === 'expanded_ibadah') {
+      onChangeModeRef.current('expanded_music');
+    }
+  }, [settings.ibadah]);
+
   // Auto-Tuck Quiet Idle Scheduler (10s after quiet idle if setting enabled)
   useEffect(() => {
     resetAutoTuckIdleTimer();
@@ -896,6 +937,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     isMusicPlaying,
     isTimerActive,
     isAlarmRinging,
+    isPrayerAlertVisible,
     isKeepAwake,
     hasHudAlert,
     isFullscreenActive,
@@ -958,7 +1000,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         onChangeModeRef.current(hasSecondaryBubble ? 'dual_bubble' : 'idle');
       }
 
-      if (!hasHudAlert && !isAlarmRinging && islandStateRef.current !== 'tucked') {
+      if (!hasHudAlert && !isPriorityAlert && islandStateRef.current !== 'tucked') {
         wasTuckedByFullscreenRef.current = true;
         setIsPeeking(false);
         isPeekingRef.current = false;
@@ -1028,7 +1070,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     fullscreenBehavior,
     isFullscreenActive,
     hasHudAlert,
-    isAlarmRinging,
+    isPriorityAlert,
     hasSecondaryBubble,
     clearAutoTuckIdleTimer,
     applyWindowSize,
@@ -1394,7 +1436,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         return;
       }
 
-      if (isAlarmRinging || isAlarmRingingRef.current) {
+      if (isPriorityAlert || isPriorityAlertRef.current) {
         return;
       }
 
@@ -1685,9 +1727,14 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       }
 
       // 2. Status 'idle' dengan Click-to-Lock & Anti-Double-Jump Guard:
+      //    - Saat Priority Alert (Adzan / Timer Alarm) aktif: hoverExpandLocked mengunci klik body pil
+      //      sehingga menyentuh pil tidak akan melebarkan Mode 6 menutupi game/desktop.
       //    - Dari Mode 1 (Resting): klik mengunci ke Modes 2-5 (Idle aktif) tanpa langsung melompat ke Mode 6
       //    - Dari Modes 2-5 (Idle): klik mengunci Mode 6 (Mekar) secara persistent
       if (currentState === 'idle') {
+        if (isPriorityAlertRef.current) {
+          return;
+        }
         if (isRestingSleep || isRestingSleepRef.current) {
           hoverSuppressedRef.current = true;
           isRestingSleepRef.current = false;
@@ -1822,30 +1869,42 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     }
   }, [resetRestingSleepTimer]);
 
-  // Wake tucked/peeking notch cleanly to Idle when Focus Alarm starts ringing so banner takeover stays clickable
+  // Generalized Priority Alert Wake & Post-Stop State Recovery (Timer Alarm + Pengingat Ibadah T-0)
+  // - Expanded Mode 6: stays open (never collapses/minimizes; slim top banner simply clears).
+  // - Normal Desktop (non-fullscreen): after Stop/ended, remains cleanly in `idle` so natural
+  //   resting/auto-tuck timers resume organically without abrupt forced minimize.
+  // - Fullscreen / Gaming (`isFullscreenActive && smart-tuck`): returns immediately to `tucked`.
   useEffect(() => {
-    if (!isAlarmRinging) return;
+    const wasActive = prevPriorityAlertRef.current;
+    prevPriorityAlertRef.current = isPriorityAlert;
 
-    if (tuckedEnterTimerRef.current) {
-      clearTimeout(tuckedEnterTimerRef.current);
-      tuckedEnterTimerRef.current = null;
-    }
-    if (intensiveHoverTimerRef.current) {
-      clearTimeout(intensiveHoverTimerRef.current);
-      intensiveHoverTimerRef.current = null;
-    }
-    if (isRestingSleepRef.current) {
-      isRestingSleepRef.current = false;
-      setIsRestingSleep(false);
-    }
+    if (isPriorityAlert && !wasActive) {
+      if (tuckedEnterTimerRef.current) {
+        clearTimeout(tuckedEnterTimerRef.current);
+        tuckedEnterTimerRef.current = null;
+      }
+      if (intensiveHoverTimerRef.current) {
+        clearTimeout(intensiveHoverTimerRef.current);
+        intensiveHoverTimerRef.current = null;
+      }
+      clearAutoTuckIdleTimer();
+      if (restingSleepTimerRef.current) {
+        clearTimeout(restingSleepTimerRef.current);
+        restingSleepTimerRef.current = null;
+      }
+      if (isRestingSleepRef.current) {
+        isRestingSleepRef.current = false;
+        setIsRestingSleep(false);
+      }
 
-    const cur = islandStateRef.current;
-    if (cur === 'tucked' || cur === 'tucked_peek' || cur === 'idle_peek') {
-      islandStateRef.current = 'idle';
-      setIslandState('idle');
-      setIsPeeking(false);
-      isPeekingRef.current = false;
-      if (cur !== 'idle_peek') {
+      const cur = islandStateRef.current;
+      if (cur === 'tucked' || cur === 'tucked_peek') {
+        wasTuckedBeforeAlertRef.current =
+          isFullscreenActiveRef.current && fullscreenBehaviorRef.current === 'smart-tuck';
+        islandStateRef.current = 'idle';
+        setIslandState('idle');
+        setIsPeeking(false);
+        isPeekingRef.current = false;
         applyWindowSize(
           getActiveIdleWindowWidth(),
           getActiveIdleHitboxHeight(),
@@ -1853,9 +1912,54 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           false,
           false
         );
+      } else if (cur === 'idle_peek') {
+        wasTuckedBeforeAlertRef.current = false;
+        islandStateRef.current = 'idle';
+        setIslandState('idle');
+        setIsPeeking(false);
+        isPeekingRef.current = false;
+      } else {
+        wasTuckedBeforeAlertRef.current = false;
+      }
+      return;
+    }
+
+    if (!isPriorityAlert && wasActive) {
+      const isActiveFullscreenSmartTuck =
+        isFullscreenActiveRef.current && fullscreenBehaviorRef.current === 'smart-tuck';
+      wasTuckedBeforeAlertRef.current = false;
+
+      if (islandStateRef.current === 'expanded') {
+        // Keep Mode 6 expanded untouched after Stop / audio ended
+        return;
+      }
+
+      if (isActiveFullscreenSmartTuck) {
+        setIsPeeking(false);
+        isPeekingRef.current = false;
+        isCollapsingRef.current = true;
+        setIsLandingComplete(false);
+        islandStateRef.current = 'tucked';
+        setIslandState('tucked');
+      } else {
+        // Normal desktop: keep capsule visible in `idle` and resume natural resting / auto-tuck timers
+        if (islandStateRef.current !== 'idle') {
+          islandStateRef.current = 'idle';
+          setIslandState('idle');
+        }
+        resetRestingSleepTimer();
+        resetAutoTuckIdleTimer();
       }
     }
-  }, [isAlarmRinging, applyWindowSize, getActiveIdleWindowWidth, getActiveIdleHitboxHeight]);
+  }, [
+    isPriorityAlert,
+    clearAutoTuckIdleTimer,
+    resetRestingSleepTimer,
+    resetAutoTuckIdleTimer,
+    applyWindowSize,
+    getActiveIdleWindowWidth,
+    getActiveIdleHitboxHeight,
+  ]);
 
   useEffect(() => {
     collapseToIdleRef.current = collapseToIdle;
@@ -2090,12 +2194,20 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       if (currentState === 'idle' || currentState === 'tucked_peek') {
         useSkillStore.getState().cycleActiveSkill(dirStep);
       } else if (isExpandedView || isPeeking) {
-        const modes: IslandMode[] = [
-          'expanded_music',
-          'expanded_timer',
-          'expanded_control',
-          'drop_zone',
-        ];
+        const modes: IslandMode[] = isIbadahEnabledRef.current
+          ? [
+              'expanded_music',
+              'expanded_timer',
+              'expanded_control',
+              'drop_zone',
+              'expanded_ibadah',
+            ]
+          : [
+              'expanded_music',
+              'expanded_timer',
+              'expanded_control',
+              'drop_zone',
+            ];
         const normalizedMode =
           effectiveExpandedMode === 'expanded_todo' ? 'expanded_timer' : effectiveExpandedMode;
         const currentIdx = modes.indexOf(normalizedMode);
@@ -2126,13 +2238,16 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   // Wheel scroll on idle pill or expanded card to cycle active skills
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
+      if (isPriorityAlertRef.current && !isExpandedView) {
+        return;
+      }
       if ((e.target as HTMLElement)?.closest('.oled-thin-scrollbar')) {
         return;
       }
       const direction = e.deltaY > 0 ? 'next' : 'prev';
       handleNavigate(direction);
     },
-    [handleNavigate]
+    [handleNavigate, isExpandedView]
   );
 
   // Native Tauri Window File-Drop Listener for automatic DropZone morphing & persistent drop handling
@@ -2621,6 +2736,59 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                           isPeekPreview={islandState === 'idle_peek'}
                         />
 
+                        {visiblePrayerAlert && effectiveExpandedMode !== 'expanded_ibadah' && (
+                          <div className="casa-prayer-t0-pill w-full h-[28px] px-3 flex items-center justify-between gap-2 bg-[#08080a] border-b border-white/[0.09] shrink-0 relative z-25 select-none">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <CasaCompanionAvatar isPlaying={false} expression="prayer" />
+                              <span
+                                style={{ color: 'var(--casa-ibadah, #FFFFFF)' }}
+                                className="text-[10.5px] font-bold tracking-tight whitespace-nowrap"
+                              >
+                                Adzan {visiblePrayerAlert.prayerLabel}
+                              </span>
+                              {visiblePrayerAlert.timeLabel && (
+                                <span className="font-mono text-[10px] tabular-nums text-white/45 whitespace-nowrap">
+                                  {visiblePrayerAlert.timeLabel}
+                                </span>
+                              )}
+                              {visiblePrayerAlert.audioMode !== 'visual' && (
+                                <span className="casa-prayer-eq shrink-0" aria-hidden="true">
+                                  <span className="casa-prayer-eq-bar" />
+                                  <span className="casa-prayer-eq-bar" />
+                                  <span className="casa-prayer-eq-bar" />
+                                  <span className="casa-prayer-eq-bar" />
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                stopPrayerAlert();
+                              }}
+                              style={{
+                                backgroundColor: 'var(--casa-ibadah, #FFFFFF)',
+                                color: '#000000',
+                              }}
+                              className="h-[19px] px-2 rounded-full text-[9.5px] font-bold inline-flex items-center gap-1 hover:opacity-90 active:scale-95 transition-all cursor-pointer shrink-0"
+                              title={
+                                visiblePrayerAlert.audioMode === 'visual'
+                                  ? 'Tutup pengingat ibadah'
+                                  : 'Hentikan audio adzan'
+                              }
+                            >
+                              {visiblePrayerAlert.audioMode !== 'visual' && (
+                                <VolumeX className="w-2.5 h-2.5" />
+                              )}
+                              <span>
+                                {visiblePrayerAlert.audioMode === 'visual' ? 'Tutup' : 'Stop'}
+                              </span>
+                            </button>
+                          </div>
+                        )}
+
                         <div
                           className="w-full flex-1 min-h-0 flex flex-col justify-center overflow-visible relative z-20"
                           style={{ overflow: 'visible' }}
@@ -2695,6 +2863,10 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                               onCloseBtPod={() => setIsBtPodOpen(false)}
                               onInteractionLock={handleLockExpanded}
                             />
+                          )}
+
+                          {effectiveExpandedMode === 'expanded_ibadah' && (
+                            <IbadahExpandedView />
                           )}
 
                           {effectiveExpandedMode === 'drop_zone' && (

@@ -18,14 +18,22 @@ import {
   ExternalLink,
   Target,
   Moon,
+  MoonStar,
   Cpu,
   MemoryStick,
   Radio,
   Power,
 } from 'lucide-react';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { listen } from '@tauri-apps/api/event';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import {
+  consumePendingSettingsDeepLink,
+  isValidSettingsSection,
+  SETTINGS_DEEP_LINK_STORAGE_KEY,
+  SETTINGS_NAVIGATE_EVENT,
+} from '../../utils/settingsWindow';
 import {
   CASA_THEME_PALETTES,
   CasaFullscreenBehavior,
@@ -49,6 +57,7 @@ import {
 } from '../../utils/alarmChime';
 import { useMusicAffinityStore } from '../../hooks/useMusicAffinity';
 import { useUpdateNotification } from '../../hooks/useUpdateNotification';
+import { IbadahSettingsSection } from './IbadahSettingsSection';
 import {
   AppUpdateCheckResult,
   getAutostartEnabled,
@@ -59,7 +68,7 @@ import {
   setAutostartEnabled,
 } from '../../utils/tauriBridge';
 
-type SettingsSectionId = 'appearance' | 'behavior' | 'audio' | 'system';
+type SettingsSectionId = 'appearance' | 'behavior' | 'audio' | 'ibadah' | 'system';
 
 const SIDEBAR_ITEMS: Array<{
   id: SettingsSectionId;
@@ -84,6 +93,12 @@ const SIDEBAR_ITEMS: Array<{
     label: 'Timer & Audio',
     subtitle: 'Nada dering 15s & siklus fokus',
     icon: Volume2,
+  },
+  {
+    id: 'ibadah',
+    label: 'Ibadah & Lokasi',
+    subtitle: 'Jadwal sholat offline, lokasi & adzan',
+    icon: MoonStar,
   },
   {
     id: 'system',
@@ -430,7 +445,9 @@ const LiveNotchPreviewCard: React.FC<{
 export const DesktopSettingsWindow: React.FC = () => {
   const { settings, palette } = useSettingsStore();
   const updateNotification = useUpdateNotification();
-  const [activeSection, setActiveSection] = useState<SettingsSectionId>('appearance');
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>(
+    () => consumePendingSettingsDeepLink() ?? 'appearance'
+  );
 
   // Audio custom alarm states
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -493,8 +510,38 @@ export const DesktopSettingsWindow: React.FC = () => {
       }
     };
     window.addEventListener('keydown', onKeyDown);
+
+    // Deep-link navigation listener (works when Settings window is already open in background)
+    const onStorageDeepLink = (event: StorageEvent) => {
+      if (event.key !== SETTINGS_DEEP_LINK_STORAGE_KEY || !event.newValue) return;
+      try {
+        const parsed = JSON.parse(event.newValue) as { section?: unknown };
+        if (isValidSettingsSection(parsed?.section)) {
+          setActiveSection(parsed.section);
+        }
+      } catch {
+        // Ignore malformed deep-link snapshot
+      }
+    };
+    window.addEventListener('storage', onStorageDeepLink);
+
+    let unlistenNavigate: (() => void) | null = null;
+    if (isTauriRuntime()) {
+      void listen<{ section?: unknown }>(SETTINGS_NAVIGATE_EVENT, (event) => {
+        if (isValidSettingsSection(event.payload?.section)) {
+          setActiveSection(event.payload.section);
+        }
+      })
+        .then((fn) => {
+          unlistenNavigate = fn;
+        })
+        .catch(() => {});
+    }
+
     return () => {
       window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('storage', onStorageDeepLink);
+      unlistenNavigate?.();
       if (isTestingSoundRef.current) {
         isTestingSoundRef.current = false;
         stopAlarmChime();
@@ -592,7 +639,7 @@ export const DesktopSettingsWindow: React.FC = () => {
     void updateNotification.dismissBadge();
     if (!isTauriRuntime()) {
       setUpdateResult({
-        currentVersion: '2.0.4',
+        currentVersion: '2.1.0',
         available: false,
         version: null,
         body: null,
@@ -624,13 +671,13 @@ export const DesktopSettingsWindow: React.FC = () => {
       } else {
         void updateNotification.clearNotification();
         setUpdateResult({
-          currentVersion: '2.0.4',
+          currentVersion: '2.1.0',
           available: false,
           version: null,
           body: null,
           date: null,
           statusKind: 'up-to-date',
-          message: 'CASA sudah menggunakan versi terbaru (v2.0.4).',
+          message: 'CASA sudah menggunakan versi terbaru (v2.1.0).',
         });
       }
     } catch (err) {
@@ -646,7 +693,7 @@ export const DesktopSettingsWindow: React.FC = () => {
         lower.includes('network');
 
       setUpdateResult({
-        currentVersion: '2.0.4',
+        currentVersion: '2.1.0',
         available: false,
         version: null,
         body: msg,
@@ -682,7 +729,7 @@ export const DesktopSettingsWindow: React.FC = () => {
       if (!update) {
         void updateNotification.clearNotification();
         setUpdateResult({
-          currentVersion: '2.0.4',
+          currentVersion: '2.1.0',
           available: false,
           version: null,
           body: null,
@@ -724,7 +771,7 @@ export const DesktopSettingsWindow: React.FC = () => {
       await relaunch();
     } catch (err) {
       setUpdateResult((prev) => ({
-        currentVersion: prev?.currentVersion ?? '2.0.4',
+        currentVersion: prev?.currentVersion ?? '2.1.0',
         available: prev?.available ?? false,
         version: prev?.version ?? null,
         body: null,
@@ -823,7 +870,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                   CASA
                 </span>
                 <span className="px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.10] text-[10px] font-mono text-white/75">
-                  v2.0.4
+                  v2.1.0
                 </span>
               </div>
               <div className="text-[10px] font-mono text-white/40 mt-0.5 truncate">
@@ -858,22 +905,30 @@ export const DesktopSettingsWindow: React.FC = () => {
                     )}
                     <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-white' : 'text-white/45'}`} />
                     <span className="truncate flex-1">{item.label}</span>
-                    {item.id === 'system' && updateNotification.badgeVisible && (
+                    {item.id === 'system' && updateNotification.updateAvailable && (
                       <span
                         data-settings-sidebar-update-badge="true"
-                        style={{
-                          backgroundColor:
-                            settings.theme === 'monochrome' ? '#FFFFFF' : palette.timer,
-                          color: '#000000',
-                        }}
-                        className="px-1.5 py-[1px] rounded-full text-[9px] font-mono font-bold leading-none shrink-0"
+                        className="relative flex h-[6px] w-[6px] shrink-0"
                         title={
                           updateNotification.latestVersion
-                            ? `Pembaruan v${updateNotification.latestVersion} tersedia`
-                            : 'Pembaruan tersedia'
+                            ? `Update v${updateNotification.latestVersion} tersedia`
+                            : 'Update tersedia'
                         }
                       >
-                        1
+                        <span
+                          style={{
+                            backgroundColor:
+                              settings.theme === 'monochrome' ? '#FFFFFF' : palette.timer,
+                          }}
+                          className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+                        />
+                        <span
+                          style={{
+                            backgroundColor:
+                              settings.theme === 'monochrome' ? '#FFFFFF' : palette.timer,
+                          }}
+                          className="relative inline-flex rounded-full h-[6px] w-[6px]"
+                        />
                       </span>
                     )}
                   </button>
@@ -1255,9 +1310,93 @@ export const DesktopSettingsWindow: React.FC = () => {
               </div>
             )}
 
-            {/* TAB 4: SYSTEM, UPDATES & ABOUT */}
+            {/* TAB 4: IBADAH & LOKASI */}
+            {activeSection === 'ibadah' && (
+              <IbadahSettingsSection
+                settings={settings}
+                palette={palette}
+                onUpdateIbadah={(patch) =>
+                  updateSettings((prev) => ({
+                    ...prev,
+                    ibadah: {
+                      ...prev.ibadah,
+                      ...patch,
+                    },
+                  }))
+                }
+              />
+            )}
+
+            {/* TAB 5: SYSTEM, UPDATES & ABOUT */}
             {activeSection === 'system' && (
               <div className="space-y-4">
+                {/* Real-Time Update Available Banner/Card (auto-updates live via casa://update-status) */}
+                {(updateNotification.updateAvailable || updateResult?.available) && (
+                  <div
+                    data-realtime-update-card="true"
+                    style={{
+                      borderColor:
+                        settings.theme === 'monochrome'
+                          ? 'rgba(255,255,255,0.32)'
+                          : `${palette.timer}66`,
+                      backgroundColor:
+                        settings.theme === 'monochrome'
+                          ? 'rgba(255,255,255,0.05)'
+                          : `${palette.timer}12`,
+                    }}
+                    className="p-3.5 rounded-xl border space-y-2.5"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="relative flex h-[7px] w-[7px] shrink-0">
+                            <span
+                              style={{
+                                backgroundColor:
+                                  settings.theme === 'monochrome' ? '#FFFFFF' : palette.timer,
+                              }}
+                              className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+                            />
+                            <span
+                              style={{
+                                backgroundColor:
+                                  settings.theme === 'monochrome' ? '#FFFFFF' : palette.timer,
+                              }}
+                              className="relative inline-flex rounded-full h-[7px] w-[7px]"
+                            />
+                          </span>
+                          <span className="text-[12.5px] font-semibold text-white">
+                            Update Tersedia · v
+                            {updateResult?.version ?? updateNotification.latestVersion}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-white/70 mt-1.5 leading-relaxed whitespace-pre-line max-h-[84px] overflow-y-auto oled-thin-scrollbar pr-1">
+                          {(updateResult?.body || updateNotification.releaseNotes || '').trim() ||
+                            'Versi terbaru CASA telah tersedia dengan tanda tangan digital Minisign.'}
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isInstallingUpdate}
+                        onClick={() => void handleInstallUpdate()}
+                        className="px-3 py-1.5 rounded-lg bg-white hover:bg-white/90 text-black text-[11px] font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0 transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>
+                          {isInstallingUpdate ? 'Mengunduh...' : 'Download & Restart'}
+                        </span>
+                      </button>
+                    </div>
+
+                    {installProgressText && (
+                      <div className="pt-2 border-t border-white/[0.08] text-[10.5px] font-mono text-white/80">
+                        {installProgressText}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="divide-y divide-white/[0.07] border-t border-b border-white/[0.07]">
                   <SettingFlatRow
                     title="Jalankan Saat Windows Menyala"
@@ -1337,7 +1476,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[13px] font-semibold text-white">
-                            CASA v{updateResult?.currentVersion ?? '2.0.4'}
+                            CASA v{updateResult?.currentVersion ?? '2.1.0'}
                           </span>
                           <span className="text-[10px] font-mono text-white/45 px-1.5 py-0.5 rounded border border-white/[0.08] bg-[#08080A]">
                             Signed Updater

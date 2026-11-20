@@ -4,12 +4,17 @@ use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 
+const LATEST_JSON_ENDPOINT_URL: &str =
+    "https://github.com/Farhanpratama09/casa-app/releases/latest/download/latest.json";
 const GITHUB_RELEASES_LATEST_URL: &str =
     "https://api.github.com/repos/farhanpratama09/casa-app/releases/latest";
+const GITHUB_RELEASES_PAGE_URL: &str =
+    "https://github.com/Farhanpratama09/casa-app/releases/latest";
 const UPDATE_EVENT_NAME: &str = "casa://update-status";
 const STARTUP_CHECK_DELAY_SECS: u64 = 5;
 const PERIODIC_CHECK_INTERVAL_SECS: u64 = 45 * 60;
 const FOCUS_DEBOUNCE_SECS: u64 = 180;
+const FORCE_MIN_INTERVAL_SECS: u64 = 15;
 const HTTP_TIMEOUT_SECS: u64 = 8;
 
 #[derive(Clone, serde::Serialize)]
@@ -18,14 +23,25 @@ pub struct UpdateNotificationPayload {
     pub current_version: String,
     pub latest_version: Option<String>,
     pub release_url: Option<String>,
+    pub release_notes: Option<String>,
+    pub published_at: Option<String>,
     pub update_available: bool,
     pub badge_visible: bool,
+}
+
+#[derive(Deserialize)]
+struct LatestJsonManifest {
+    version: Option<String>,
+    notes: Option<String>,
+    pub_date: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct GitHubLatestRelease {
     tag_name: Option<String>,
     html_url: Option<String>,
+    body: Option<String>,
+    published_at: Option<String>,
     draft: Option<bool>,
     prerelease: Option<bool>,
 }
@@ -36,6 +52,8 @@ enum FetchOutcome {
         etag: Option<String>,
         tag_name: Option<String>,
         html_url: Option<String>,
+        release_notes: Option<String>,
+        published_at: Option<String>,
         is_draft: bool,
         is_prerelease: bool,
     },
@@ -46,6 +64,8 @@ struct UpdateMonitorInner {
     etag: Option<String>,
     latest_version: Option<String>,
     release_url: Option<String>,
+    release_notes: Option<String>,
+    published_at: Option<String>,
     dismissed_version: Option<String>,
     last_check_instant: Option<Instant>,
     last_check_wall: Option<SystemTime>,
@@ -70,6 +90,8 @@ impl Default for UpdateMonitorState {
                 etag: None,
                 latest_version: None,
                 release_url: None,
+                release_notes: None,
+                published_at: None,
                 dismissed_version: None,
                 last_check_instant: None,
                 last_check_wall: None,
@@ -150,6 +172,16 @@ fn build_payload(inner: &UpdateMonitorInner, current_version: &str) -> UpdateNot
         } else {
             None
         },
+        release_notes: if update_available {
+            inner.release_notes.clone()
+        } else {
+            None
+        },
+        published_at: if update_available {
+            inner.published_at.clone()
+        } else {
+            None
+        },
         update_available,
         badge_visible,
     }
@@ -170,11 +202,72 @@ fn elapsed_since_last_check_secs(inner: &UpdateMonitorInner) -> Option<u64> {
     }
 }
 
+async fn fetch_latest_json_with_etag(
+    client: &reqwest::Client,
+    current_version: &str,
+    cached_etag: Option<&str>,
+) -> FetchOutcome {
+    let mut request = client
+        .get(LATEST_JSON_ENDPOINT_URL)
+        .header("User-Agent", format!("CASA-App/{current_version}"))
+        .header("Accept", "application/json");
+
+    if let Some(etag) = cached_etag {
+        if !etag.trim().is_empty() {
+            request = request.header("If-None-Match", etag);
+        }
+    }
+
+    let Ok(response) = request.send().await else {
+        return FetchOutcome::FailedOrSkipped;
+    };
+
+    if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+        return FetchOutcome::NotModified;
+    }
+
+    if !response.status().is_success() {
+        return FetchOutcome::FailedOrSkipped;
+    }
+
+    let etag = response
+        .headers()
+        .get(reqwest::header::ETAG)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let Ok(manifest) = response.json::<LatestJsonManifest>().await else {
+        return FetchOutcome::FailedOrSkipped;
+    };
+
+    if manifest.version.as_deref().map(str::trim).unwrap_or("").is_empty() {
+        return FetchOutcome::FailedOrSkipped;
+    }
+
+    FetchOutcome::Updated {
+        etag,
+        tag_name: manifest.version,
+        html_url: Some(GITHUB_RELEASES_PAGE_URL.to_string()),
+        release_notes: manifest.notes.filter(|s| !s.trim().is_empty()),
+        published_at: manifest.pub_date.filter(|s| !s.trim().is_empty()),
+        is_draft: false,
+        is_prerelease: false,
+    }
+}
+
 async fn fetch_latest_release_with_etag(
     client: &reqwest::Client,
     current_version: &str,
     cached_etag: Option<&str>,
 ) -> FetchOutcome {
+    // Primary: lightweight signed OTA `latest.json` endpoint (zero GitHub REST API rate-limit)
+    match fetch_latest_json_with_etag(client, current_version, cached_etag).await {
+        FetchOutcome::FailedOrSkipped => {}
+        resolved => return resolved,
+    }
+
+    // Secondary fallback: GitHub Releases latest API with ETag
     let mut request = client
         .get(GITHUB_RELEASES_LATEST_URL)
         .header("User-Agent", format!("CASA-App/{current_version}"))
@@ -214,6 +307,8 @@ async fn fetch_latest_release_with_etag(
         etag,
         tag_name: release.tag_name,
         html_url: release.html_url,
+        release_notes: release.body.filter(|s| !s.trim().is_empty()),
+        published_at: release.published_at.filter(|s| !s.trim().is_empty()),
         is_draft: release.draft.unwrap_or(false),
         is_prerelease: release.prerelease.unwrap_or(false),
     }
@@ -230,11 +325,14 @@ pub async fn run_silent_update_check(app: &AppHandle, force: bool) {
         if inner.is_checking {
             return;
         }
-        if !force {
-            if let Some(secs) = elapsed_since_last_check_secs(&inner) {
-                if secs < FOCUS_DEBOUNCE_SECS {
-                    return;
-                }
+        let min_gap = if force {
+            FORCE_MIN_INTERVAL_SECS
+        } else {
+            FOCUS_DEBOUNCE_SECS
+        };
+        if let Some(secs) = elapsed_since_last_check_secs(&inner) {
+            if secs < min_gap {
+                return;
             }
         }
         inner.is_checking = true;
@@ -256,6 +354,8 @@ pub async fn run_silent_update_check(app: &AppHandle, force: bool) {
                 etag,
                 tag_name,
                 html_url,
+                release_notes,
+                published_at,
                 is_draft,
                 is_prerelease,
             } => {
@@ -271,9 +371,13 @@ pub async fn run_silent_update_check(app: &AppHandle, force: bool) {
                                 inner.latest_version = Some(normalized);
                             }
                             inner.release_url = html_url;
+                            inner.release_notes = release_notes;
+                            inner.published_at = published_at;
                         } else {
                             inner.latest_version = None;
                             inner.release_url = None;
+                            inner.release_notes = None;
+                            inner.published_at = None;
                             inner.dismissed_version = None;
                         }
                     }
@@ -314,10 +418,14 @@ pub async fn get_update_notification_status(
 }
 
 #[tauri::command]
-pub async fn trigger_background_update_check(app: AppHandle) -> Result<(), String> {
+pub async fn trigger_background_update_check(
+    app: AppHandle,
+    force: Option<bool>,
+) -> Result<(), String> {
     let app_clone = app.clone();
+    let should_force = force.unwrap_or(false);
     tauri::async_runtime::spawn(async move {
-        run_silent_update_check(&app_clone, false).await;
+        run_silent_update_check(&app_clone, should_force).await;
     });
     Ok(())
 }
@@ -349,6 +457,8 @@ pub async fn clear_update_notification(
         let mut inner = state.inner.lock().await;
         inner.latest_version = None;
         inner.release_url = None;
+        inner.release_notes = None;
+        inner.published_at = None;
         inner.dismissed_version = None;
         build_payload(&inner, &current_version)
     };

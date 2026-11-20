@@ -1,4 +1,4 @@
-# Product Requirements Document (PRD) — CASA `v2.0.4`
+# Product Requirements Document (PRD) — CASA `v2.1.0`
 
 **CASA — Dynamic Rabbit Island for Windows** (`com.farhanpratama.casa`)  
 Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + Rust + React 19 + TypeScript + Vite)  
@@ -8,7 +8,7 @@ Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + R
 
 ## 1. Identitas & Filosofi Produk
 - **Nama Produk:** CASA (*Dynamic Rabbit Island for Windows*)
-- **Versi Acuan:** `2.0.4` (tersinkron di [package.json](../package.json), [Cargo.toml](../src-tauri/Cargo.toml), [tauri.conf.json](../src-tauri/tauri.conf.json), sidebar Settings, dan [docs/index.html](./index.html))
+- **Versi Acuan:** `2.1.0` (tersinkron di [package.json](../package.json), [Cargo.toml](../src-tauri/Cargo.toml), [tauri.conf.json](../src-tauri/tauri.conf.json), dan sidebar Settings; tautan biner `#download` pada [docs/index.html](./index.html) diperbarui saat rilis biner bertanda tangan `v2.1.0` dipublikasikan)
 - **Konsep Inti:** Kapsul *top-flush Dynamic Island* berlatar OLED hitam murni (`#000000`) di tepi atas monitor Windows 10/11 yang hening (*non-intrusive*, `WS_EX_NOACTIVATE`), menyatukan pemutar musik & lirik sinkron milidetik, *Focus Timer & To-Do Ring*, kontrol cepat sistem, *Drag & Drop Shelf*, dan ekspresi maskot **Obsidian Bunny** (`× ♥`).
 
 ---
@@ -34,14 +34,28 @@ Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + R
   3. **`colorblind` (Okabe-Ito):** Palet ramah deuteranopia/protanopia.
 
 ### 2.3 Jendela Settings, `Quit CASA` & System Tray
-- **Settings Window (`DesktopSettingsWindow.tsx`):** Menyediakan 4 tab (*Appearance & Themes*, *Island & Behavior*, *Timer & Audio*, *System & Updates*) dengan kartu pratinjau *live notch*, *swatches* tema OLED anti-slop, manajemen *Launch at Startup*, *Global Shortcut `Alt+Space`*, indikator notifikasi badge `1` real-time dari pengecekan senyap `ETag` GitHub Releases (`update_monitor.rs`), dan panel **OTA Signed Auto-Updater**.
+- **Settings Window (`DesktopSettingsWindow.tsx`):** Menyediakan 5 tab (*Appearance*, *Island & Behavior*, *Timer & Audio*, **`Ibadah & Lokasi`**, *System & Updates*) dengan kartu pratinjau *live notch*, *swatches* tema OLED anti-slop, manajemen *Launch at Startup*, *Global Shortcut `Alt+Space`*, indikator notifikasi badge `1` real-time dari pengecekan senyap `ETag` GitHub Releases (`update_monitor.rs`), dan panel **OTA Signed Auto-Updater**.
 - **Tombol `Quit CASA` di Sidebar Settings:** Memanggil command IPC `quit_app` (`tauriBridge.ts` -> `src-tauri/src/lib.rs`) yang wajib mengeksekusi `app.global_shortcut().unregister_all()` sebelum `app.exit(0)` agar proses aplikasi dan shortcut OS bersih seketika.
 - **System Tray Menu (Bahasa Inggris Seragam):**
   - `Show / Hide CASA` (`toggle_visibility`)
   - `Gaming Mode: Auto` (`toggle_gaming`)
   - `Quit CASA` (`quit` — ikut membebaskan global shortcut sebelum keluar)
 
-### 2.4 Native Window, Hitbox 50Hz & Telemetry Perangkat Keras
+### 2.4 Modul Pengingat Ibadah (`v2.1.0`, Opt-In Default OFF)
+- **Aktivasi & Navigasi 5 Tab (`Mode6TopNav.tsx`):** Default nonaktif (`ibadah.enabled = false`) sehingga bar navigasi tetap 4 tab dan tidak ada scheduler latar belakang. Saat diaktifkan, muncul tab ke-5 **`Ibadah`** pada header `flex justify-between` dengan lebar kapsul adaptif (`540–560px`) serta panel `IbadahExpandedView.tsx` Pure Monochrome OLED berupa **kurva parabola matahari/bintang jatuh SVG** (Subuh → Dzuhur zenith → Ashar → Maghrib horizon → Isya malam) lengkap dengan orb real-time, 5 kolom label sejajar, dan shortcut deep-link ke sidebar Settings **`Ibadah & Lokasi`**.
+- **Deteksi Lokasi & Kalkulasi Offline (`src-tauri/src/prayer.rs`):**
+  - Jalur 1: API lokasi bawaan Windows (`Windows.Devices.Geolocation`) dengan timeout 7 detik, fallback pesan ramah, dan tombol pintasan aman ke `ms-settings:privacy-location`.
+  - Jalur 2: Pencarian kota manual via Rust `reqwest` (Open-Meteo Geocoding API tanpa melonggarkan CSP WebView) yang menyimpan koordinat + `countryCode` lokal.
+  - Perhitungan astronomi 100% offline berbasis crate `salah` + `chrono::Local` (mengikuti zona waktu aktif Windows, otomatis rollover pasca-Isya ke Subuh H+1, auto-map standar hisab per negara `ID`→Kemenag RI / `MY`→JAKIM / `SG`→MUIS / `SA/AE`→Umm al-Qura / `US/CA`→ISNA / lainnya→MWL, mazhab `Syafi'i | Hanafi`, serta koreksi `±` menit).
+- **Audio Lazy Dual-Path `0 MB` Idle RAM (`prayerAudio.ts`):** Pilihan **`Adzan Penuh` | `Chime Singkat` | `Visual Saja`** dengan tombol uji terpisah (**`Test Adzan`** & **`Test Subuh`**) di Settings `Ibadah & Lokasi`. Khusus waktu **Subuh**, mode Adzan memuat `public/audio/adzan-subuh.ogg` secara *lazy* dengan *graceful fallback* ke `public/audio/adzan.ogg`, lalu `playChimeCue` bila keduanya belum tersedia; untuk **Dzuhur, Ashar, Maghrib, dan Isya** langsung memuat `public/audio/adzan.ogg` (fallback ke `playChimeCue`). Referensi elemen `Audio` dilepas penuh pada setiap fallback, `Stop`, maupun `ended`.
+- **Perilaku `T-0`, Fullscreen & Konflik Timer (`prayerStore.ts`, `CasaIsland.tsx`):**
+  - **Pil Notifikasi Ringkas T-0 & Pemulihan State:** Menampilkan ekspresi mata Bintang & Bulan (**`✦ ☾`** pada `CasaCompanionAvatar` `'prayer'`), teks ringkas **`Adzan <Sholat>`** + jam tabular + 4 bar equalizer monokrom + tombol **`Stop`** (atau **`Tutup`** pada mode Visual Saja), efek getar mikro 600ms, *breathing border glow*, serta `hoverExpandLocked` penuh. Usai `Stop` / audio selesai: jendela tetap mekar jika sebelumnya berada di **Mode 6 Expanded**, kembali ke **`idle`** normal pada desktop biasa (bukan langsung minimize), dan hanya otomatis kembali ke **`tucked`** saat sedang **Fullscreen / Gaming (`smart-tuck`)**.
+  - **Fullscreen `total-hide` (Opsi B):** Menjaga layar benar-benar bersih tanpa memunculkan visual pil; hanya memutar audio (Adzan/Chime), sedangkan mode `Visual Saja` ditahan hingga keluar fullscreen dalam grace window 5 menit.
+  - **Mode 6 Expanded (Tab Lain Terbuka):** Tidak memaksa pindah tab; menampilkan banner tipis 28px di bawah header navigasi lengkap dengan tombol **`Stop`**.
+  - **Prioritas Konflik Adzan > Timer:** Saat bersamaan dengan alarm Focus Timer, Adzan langsung mengambil alih prioritas dan mematikan loop suara Timer secara senyap sambil menjaga status selesai & aksi To-Do tertaut agar tetap tampil tepat setelah Adzan dihentikan.
+  - **Sleep / Hibernate Wake Catch-Up:** Evaluasi berbasis *wall-clock* epoch dengan grace window 5 menit, deduplikasi `YYYY-MM-DD:prayer`, dan penekanan otomatis jika waktu sholat sudah terlewat lama.
+
+### 2.5 Native Window, Hitbox 50Hz & Telemetry Perangkat Keras
 - **Kanvas Tetap Anti-Resize Hitch:** Window utama terkunci di ukuran logis **`1100×340`** (`LogicalSize`), posisinya dihitung aware DPI melalui `position_window_top` + Win32 `SetWindowPos` (`WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`, menghapus `WS_EX_TRANSPARENT` statis).
 - **Dynamic Multi-Rect Hitbox Poller (`hitbox.rs`):** Polling 50Hz membandingkan posisi kursor terhadap maksimal 6 `HitRect` aktif (`update_island_hitboxes`), mengatur `WS_EX_TRANSPARENT` secara real-time di luar area kapsul, pod kiri/kanan, dan pop-up.
 - **Resting, Smart-Tuck & HUD:** Kapsul kompak **`× ♥`** (`W=126px` di web / `IDLE_MIN_AWAKE_WIDTH: 180` & `TUCKED_HEIGHT: 4px` Smart-Tuck), Circular Battery Ring SVG, perimeter stroke To-Do Focus, HUD real-time Volume/Brightness/Bluetooth (`system_hardware.rs`), CPU/RAM (`system_stats.rs`), serta Drop Zone Shelf (`drop_zone.rs`).
@@ -51,7 +65,7 @@ Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + R
 ## 3. Web Showcase (`docs/`) — Paritas 1:1 & Komunitas
 
 - **URL Produksi:** `https://farhanpratama09.github.io/casa-app/`
-- **Estetika & Paritas Native 1:1:** Pure Monochrome OLED (`#000000` canvas, `#09090b` surface, hairline `rgba(255,255,255,0.08)`). Monitor Virtual (`#virtual-monitor`) mereplikasi 1:1 anatomi kapsul native (bahu cekung atas, intro `"Hi."` Obsidian Bunny -> pil kompak `× ♥`, *Resting & Wake*, *Mode 6 `Player | Playlists`* + pop-up `QUEUE` kanan, *Idle Lyric Minimize*, *Focus Ring & Dual-Idle*, *HUD Brightness slider* yang meredupkan layar virtual, serta *Drop Zone Shelf* dengan *Copy Back to Desktop*).
+- **Estetika & Paritas Native 1:1:** Pure Monochrome OLED (`#000000` canvas, `#09090b` surface, hairline `rgba(255,255,255,0.08)`). Monitor Virtual (`#virtual-monitor`) mereplikasi 1:1 anatomi kapsul native (bahu cekung atas, intro `"Hi."` Obsidian Bunny -> pil kompak `× ♥`, *Resting & Wake*, *Mode 6 `Player | Playlists`* + pop-up `QUEUE` kanan, *Idle Lyric Minimize*, *Focus Ring & Dual-Idle*, *HUD Brightness slider* yang meredupkan layar virtual, *Drop Zone Shelf* dengan *Copy Back to Desktop*, serta *Pengingat Ibadah* opt-in 5 tab kurva parabola SVG & simulasi pil `T-0` `✦ ☾`).
 - **Navigasi Clean Path Tanpa `#`:** Menggunakan `History API` (`pushState` / `replaceState`) untuk `/casa-app/`, `/casa-app/playground`, `/casa-app/arsitektur`, `/casa-app/unduh`, `/casa-app/feedback` (+ alias `/casa-app/discussions`) disertai pemulihan SPA lewat [404.html](./404.html).
 - **Smart Download Counter & Cooldown:**
   - `initSmartReleaseHub()` mengambil statistik dari GitHub Releases API, menjumlahkan khusus biner installer (`.exe` dan `.msi`; mengecualikan `.sig` & `latest.json`), menyimpannya pada `localStorage` (`casa_dl_count_cache`) selama **15 menit** (`DL_CACHE_TTL_MS`), dan sembunyi anggun bila offline.

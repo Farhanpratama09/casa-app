@@ -9,9 +9,11 @@ import {
 } from '../utils/tauriBridge';
 
 const DEFAULT_STATUS: UpdateNotificationStatus = {
-  currentVersion: '2.0.4',
+  currentVersion: '2.1.0',
   latestVersion: null,
   releaseUrl: null,
+  releaseNotes: null,
+  publishedAt: null,
   updateAvailable: false,
   badgeVisible: false,
 };
@@ -22,6 +24,7 @@ let subscriberCount = 0;
 let initialized = false;
 let unlistenEvent: UnlistenFn | null = null;
 let lastWakeTriggerAtMs = 0;
+let lastOnlineTriggerAtMs = 0;
 
 function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -32,6 +35,8 @@ function setStatus(next: UpdateNotificationStatus): void {
     currentStatus.currentVersion === next.currentVersion &&
     currentStatus.latestVersion === next.latestVersion &&
     currentStatus.releaseUrl === next.releaseUrl &&
+    (currentStatus.releaseNotes ?? null) === (next.releaseNotes ?? null) &&
+    (currentStatus.publishedAt ?? null) === (next.publishedAt ?? null) &&
     currentStatus.updateAvailable === next.updateAvailable &&
     currentStatus.badgeVisible === next.badgeVisible
   ) {
@@ -45,7 +50,14 @@ function triggerDebouncedWakeCheck(): void {
   const now = Date.now();
   if (now - lastWakeTriggerAtMs < 180_000) return;
   lastWakeTriggerAtMs = now;
-  void triggerBackgroundUpdateCheck();
+  void triggerBackgroundUpdateCheck(false);
+}
+
+function handleNetworkOnline(): void {
+  const now = Date.now();
+  if (now - lastOnlineTriggerAtMs < 15_000) return;
+  lastOnlineTriggerAtMs = now;
+  void triggerBackgroundUpdateCheck(true);
 }
 
 function handleWindowFocusOrWake(): void {
@@ -72,6 +84,7 @@ async function ensureSubscribed(): Promise<void> {
 
   if (typeof window !== 'undefined') {
     window.addEventListener('focus', handleWindowFocusOrWake);
+    window.addEventListener('online', handleNetworkOnline);
   }
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', handleWindowFocusOrWake);
@@ -87,6 +100,7 @@ function teardownIfUnused(): void {
   }
   if (typeof window !== 'undefined') {
     window.removeEventListener('focus', handleWindowFocusOrWake);
+    window.removeEventListener('online', handleNetworkOnline);
   }
   if (typeof document !== 'undefined') {
     document.removeEventListener('visibilitychange', handleWindowFocusOrWake);

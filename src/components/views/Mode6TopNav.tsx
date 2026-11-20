@@ -33,7 +33,7 @@ export interface Mode6TopNavProps {
   isPeekPreview?: boolean;
 }
 
-const NAV_TABS: Array<{ id: IslandMode; label: string; matchModes: IslandMode[] }> = [
+const BASE_NAV_TABS: Array<{ id: IslandMode; label: string; matchModes: IslandMode[] }> = [
   { id: 'expanded_music', label: 'Musik', matchModes: ['expanded_music'] },
   {
     id: 'expanded_timer',
@@ -43,6 +43,12 @@ const NAV_TABS: Array<{ id: IslandMode; label: string; matchModes: IslandMode[] 
   { id: 'expanded_control', label: 'Control Center', matchModes: ['expanded_control'] },
   { id: 'drop_zone', label: 'Drop Zone', matchModes: ['drop_zone'] },
 ];
+
+const IBADAH_NAV_TAB: { id: IslandMode; label: string; matchModes: IslandMode[] } = {
+  id: 'expanded_ibadah',
+  label: 'Ibadah',
+  matchModes: ['expanded_ibadah'],
+};
 
 const renderHudIcon = (alert: SystemHudAlert) => {
   switch (alert.kind) {
@@ -105,8 +111,8 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
   const { hudAlert: rawHudAlert } = useSystemHardware();
   const { stats: systemStats } = useSystemTelemetry(false);
   const dropZoneCount = useDropZoneStore((s) => s.items.length);
-  const { badgeVisible: hasUpdateBadge, latestVersion: availableUpdateVersion } =
-    useUpdateNotification();
+  const updateNotification = useUpdateNotification();
+  const availableUpdateVersion = updateNotification.latestVersion;
   const { settings, palette } = useSettingsStore();
   const isControlCenterTab = currentMode === 'expanded_control';
   const showHeaderBattery = systemStats.battery.has_battery && !isControlCenterTab;
@@ -119,13 +125,18 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
       ? null
       : rawHudAlert;
 
+  const navTabs = settings.ibadah.enabled
+    ? [...BASE_NAV_TABS, IBADAH_NAV_TAB]
+    : BASE_NAV_TABS;
+  const isCompactFiveTab = navTabs.length >= 5;
+
   return (
     <header
       onClick={onHeaderClick}
-      className="w-full h-[34px] px-2.5 grid grid-cols-[1fr_auto_1fr] items-center gap-2 bg-[#000000] border-b border-white/[0.08] select-none shrink-0 relative z-30"
+      className="w-full h-[34px] px-2.5 flex items-center justify-between gap-1.5 bg-[#000000] border-b border-white/[0.08] select-none shrink-0 relative z-30"
     >
       {/* Kiri: Mata Reaktif Companion */}
-      <div className="flex items-center justify-start min-w-0">
+      <div className="flex items-center justify-start shrink-0">
         <button
           type="button"
           onClick={(e) => {
@@ -153,7 +164,7 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
       </div>
 
       {/* Tengah: Bar Navigasi Kapsul Gelap atau Transient System HUD Badge */}
-      <div className="relative flex items-center justify-center min-w-0">
+      <div className="relative flex-1 flex items-center justify-center min-w-0">
         <AnimatePresence mode="wait" initial={false}>
           {hudAlert ? (
             <motion.div
@@ -189,9 +200,9 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
               exit={{ opacity: 0 }}
               transition={{ duration: 0.12 }}
               aria-label="Navigasi Modul Mode 6"
-              className="flex items-center gap-0.5 p-[2.5px] rounded-full bg-[#0b0b0d] border border-white/[0.08]"
+              className="flex items-center gap-0.5 p-[2.5px] rounded-full bg-[#0b0b0d] border border-white/[0.08] max-w-full"
             >
-              {NAV_TABS.map((tab) => {
+              {navTabs.map((tab) => {
                 const isActive = tab.matchModes.includes(currentMode);
                 return (
                   <button
@@ -202,7 +213,9 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
                       playChimeCue('tap');
                       onSelectMode(tab.id);
                     }}
-                    className={`relative px-2 py-[3px] rounded-full text-[10px] leading-none tracking-tight transition-colors duration-150 cursor-pointer whitespace-nowrap ${
+                    className={`relative rounded-full leading-none tracking-tight transition-colors duration-150 cursor-pointer whitespace-nowrap ${
+                      isCompactFiveTab ? 'px-1.5 py-[3px] text-[9.5px]' : 'px-2 py-[3px] text-[10px]'
+                    } ${
                       isActive
                         ? 'text-white font-semibold'
                         : 'text-white/50 hover:text-white/85 font-medium'
@@ -251,31 +264,40 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
           onClick={(e) => {
             e.stopPropagation();
             playChimeCue('tap');
-            void openDesktopSettingsWindow();
+            void openDesktopSettingsWindow(
+              updateNotification.updateAvailable ? 'system' : undefined
+            );
           }}
           className="relative w-[22px] h-[22px] rounded-full bg-white/[0.06] hover:bg-white/[0.16] border border-white/[0.08] text-white/60 hover:text-white flex items-center justify-center transition-all active:scale-90 cursor-pointer shrink-0"
           title={
-            hasUpdateBadge && availableUpdateVersion
-              ? `Pembaruan v${availableUpdateVersion} tersedia — Klik untuk membuka Pengaturan CASA`
+            updateNotification.updateAvailable && availableUpdateVersion
+              ? `Update v${availableUpdateVersion} tersedia`
               : 'Buka Pengaturan CASA'
           }
           aria-label={
-            hasUpdateBadge && availableUpdateVersion
-              ? `Pengaturan CASA (Pembaruan v${availableUpdateVersion} tersedia)`
+            updateNotification.updateAvailable && availableUpdateVersion
+              ? `Update v${availableUpdateVersion} tersedia — Pengaturan CASA`
               : 'Pengaturan CASA'
           }
         >
           <Settings className="w-3 h-3" />
-          {hasUpdateBadge && (
+          {updateNotification.updateAvailable && (
             <span
               data-update-badge="true"
-              style={{
-                backgroundColor: settings.theme === 'monochrome' ? '#FFFFFF' : palette.timer,
-                color: '#000000',
-              }}
-              className="absolute -top-1 -right-1 min-w-[13px] h-[13px] px-[3px] rounded-full border border-black font-mono text-[8px] font-bold leading-none flex items-center justify-center pointer-events-none select-none shadow-sm"
+              className="absolute -top-0.5 -right-0.5 flex h-[6px] w-[6px] pointer-events-none select-none"
             >
-              1
+              <span
+                style={{
+                  backgroundColor: settings.theme === 'monochrome' ? '#FFFFFF' : palette.timer,
+                }}
+                className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+              />
+              <span
+                style={{
+                  backgroundColor: settings.theme === 'monochrome' ? '#FFFFFF' : palette.timer,
+                }}
+                className="relative inline-flex rounded-full h-[6px] w-[6px] ring-1 ring-black"
+              />
             </span>
           )}
         </button>

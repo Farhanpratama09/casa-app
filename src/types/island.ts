@@ -6,6 +6,7 @@ export type IslandMode =
   | 'expanded_timer'
   | 'expanded_todo'
   | 'expanded_control'
+  | 'expanded_ibadah'
   | 'drop_zone';
 
 export type IslandState =

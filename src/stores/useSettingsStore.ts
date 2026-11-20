@@ -24,6 +24,42 @@ export interface CustomAlarmMetadata {
   updatedAt: number;
 }
 
+export type IbadahLocationMode = 'auto' | 'manual';
+export type IbadahCalculationMethod =
+  | 'auto'
+  | 'kemenag'
+  | 'jakim'
+  | 'muis'
+  | 'umm_al_qura'
+  | 'mwl'
+  | 'isna'
+  | 'egyptian'
+  | 'karachi';
+export type IbadahMadhab = 'shafi' | 'hanafi';
+export type IbadahAudioMode = 'adzan' | 'chime' | 'visual';
+
+export interface IbadahOffsets {
+  fajr: number;
+  dhuhr: number;
+  asr: number;
+  maghrib: number;
+  isha: number;
+}
+
+export interface IbadahSettings {
+  enabled: boolean;
+  locationMode: IbadahLocationMode;
+  city: string;
+  region: string;
+  countryCode: string;
+  latitude: number;
+  longitude: number;
+  method: IbadahCalculationMethod;
+  madhab: IbadahMadhab;
+  offsets: IbadahOffsets;
+  audioMode: IbadahAudioMode;
+}
+
 export interface CasaSettings {
   theme: CasaThemeId;
   placementMode: CasaPlacementMode;
@@ -36,6 +72,7 @@ export interface CasaSettings {
   autoStartNextCycle: boolean;
   customAlarmMeta: CustomAlarmMetadata | null;
   launchAtStartup: boolean;
+  ibadah: IbadahSettings;
 }
 
 export interface CasaThemePalette {
@@ -52,6 +89,8 @@ export interface CasaThemePalette {
   dangerGlow: string;
   wifi: string;
   bluetooth: string;
+  ibadah: string;
+  ibadahGlow: string;
 }
 
 export const CASA_THEME_PALETTES: Record<CasaThemeId, CasaThemePalette> = {
@@ -69,6 +108,8 @@ export const CASA_THEME_PALETTES: Record<CasaThemeId, CasaThemePalette> = {
     dangerGlow: 'rgba(244, 63, 94, 0.16)',
     wifi: '#2DD4BF',
     bluetooth: '#6366F1',
+    ibadah: '#E4E4E7',
+    ibadahGlow: 'rgba(255, 255, 255, 0.18)',
   },
   monochrome: {
     timer: '#FFFFFF',
@@ -84,6 +125,8 @@ export const CASA_THEME_PALETTES: Record<CasaThemeId, CasaThemePalette> = {
     dangerGlow: 'rgba(244, 244, 245, 0.18)',
     wifi: '#FFFFFF',
     bluetooth: '#D4D4D8',
+    ibadah: '#FFFFFF',
+    ibadahGlow: 'rgba(255, 255, 255, 0.24)',
   },
   colorblind: {
     timer: '#38BDF8',
@@ -99,7 +142,29 @@ export const CASA_THEME_PALETTES: Record<CasaThemeId, CasaThemePalette> = {
     dangerGlow: 'rgba(234, 88, 12, 0.20)',
     wifi: '#38BDF8',
     bluetooth: '#1D4ED8',
+    ibadah: '#38BDF8',
+    ibadahGlow: 'rgba(56, 189, 248, 0.24)',
   },
+};
+
+export const DEFAULT_IBADAH_SETTINGS: IbadahSettings = {
+  enabled: false,
+  locationMode: 'auto',
+  city: 'Jakarta',
+  region: 'DKI Jakarta',
+  countryCode: 'ID',
+  latitude: -6.2088,
+  longitude: 106.8456,
+  method: 'auto',
+  madhab: 'shafi',
+  offsets: {
+    fajr: 0,
+    dhuhr: 0,
+    asr: 0,
+    maghrib: 0,
+    isha: 0,
+  },
+  audioMode: 'adzan',
 };
 
 export const DEFAULT_CASA_SETTINGS: CasaSettings = {
@@ -114,7 +179,104 @@ export const DEFAULT_CASA_SETTINGS: CasaSettings = {
   autoStartNextCycle: false,
   customAlarmMeta: null,
   launchAtStartup: false,
+  ibadah: DEFAULT_IBADAH_SETTINGS,
 };
+
+const VALID_IBADAH_METHODS = new Set<IbadahCalculationMethod>([
+  'auto',
+  'kemenag',
+  'jakim',
+  'muis',
+  'umm_al_qura',
+  'mwl',
+  'isna',
+  'egyptian',
+  'karachi',
+]);
+
+function clampPrayerOffset(val: unknown): number {
+  if (typeof val !== 'number' || !Number.isFinite(val)) return 0;
+  return Math.max(-60, Math.min(60, Math.round(val)));
+}
+
+function sanitizeIbadahSettings(raw: unknown): IbadahSettings {
+  const input = raw && typeof raw === 'object' ? (raw as Partial<IbadahSettings>) : {};
+  const rawOffsets =
+    input.offsets && typeof input.offsets === 'object'
+      ? (input.offsets as Partial<IbadahOffsets>)
+      : {};
+
+  const locationMode: IbadahLocationMode =
+    input.locationMode === 'manual' || input.locationMode === 'auto'
+      ? input.locationMode
+      : DEFAULT_IBADAH_SETTINGS.locationMode;
+
+  const method: IbadahCalculationMethod =
+    typeof input.method === 'string' &&
+    VALID_IBADAH_METHODS.has(input.method as IbadahCalculationMethod)
+      ? (input.method as IbadahCalculationMethod)
+      : DEFAULT_IBADAH_SETTINGS.method;
+
+  const madhab: IbadahMadhab =
+    input.madhab === 'hanafi' || input.madhab === 'shafi'
+      ? input.madhab
+      : DEFAULT_IBADAH_SETTINGS.madhab;
+
+  const audioMode: IbadahAudioMode =
+    input.audioMode === 'adzan' || input.audioMode === 'chime' || input.audioMode === 'visual'
+      ? input.audioMode
+      : DEFAULT_IBADAH_SETTINGS.audioMode;
+
+  const latitude =
+    typeof input.latitude === 'number' &&
+    Number.isFinite(input.latitude) &&
+    input.latitude >= -90 &&
+    input.latitude <= 90
+      ? input.latitude
+      : DEFAULT_IBADAH_SETTINGS.latitude;
+
+  const longitude =
+    typeof input.longitude === 'number' &&
+    Number.isFinite(input.longitude) &&
+    input.longitude >= -180 &&
+    input.longitude <= 180
+      ? input.longitude
+      : DEFAULT_IBADAH_SETTINGS.longitude;
+
+  const city =
+    typeof input.city === 'string' && input.city.trim().length > 0
+      ? input.city.trim().slice(0, 80)
+      : DEFAULT_IBADAH_SETTINGS.city;
+
+  const region =
+    typeof input.region === 'string' ? input.region.trim().slice(0, 80) : DEFAULT_IBADAH_SETTINGS.region;
+
+  const countryCode =
+    typeof input.countryCode === 'string' && input.countryCode.trim().length > 0
+      ? input.countryCode.trim().toUpperCase().slice(0, 4)
+      : DEFAULT_IBADAH_SETTINGS.countryCode;
+
+  return {
+    enabled:
+      typeof input.enabled === 'boolean' ? input.enabled : DEFAULT_IBADAH_SETTINGS.enabled,
+    locationMode,
+    city,
+    region,
+    countryCode,
+    latitude,
+    longitude,
+    method,
+    madhab,
+    offsets: {
+      fajr: clampPrayerOffset(rawOffsets.fajr),
+      dhuhr: clampPrayerOffset(rawOffsets.dhuhr),
+      asr: clampPrayerOffset(rawOffsets.asr),
+      maghrib: clampPrayerOffset(rawOffsets.maghrib),
+      isha: clampPrayerOffset(rawOffsets.isha),
+    },
+    audioMode,
+  };
+}
 
 function sanitizeSettings(raw: unknown): CasaSettings {
   const input = raw && typeof raw === 'object' ? (raw as Partial<CasaSettings>) : {};
@@ -194,6 +356,7 @@ function sanitizeSettings(raw: unknown): CasaSettings {
       typeof input.launchAtStartup === 'boolean'
         ? input.launchAtStartup
         : DEFAULT_CASA_SETTINGS.launchAtStartup,
+    ibadah: sanitizeIbadahSettings(input.ibadah),
   };
 }
 
@@ -215,6 +378,8 @@ export function applyThemeCssVariables(theme: CasaThemeId): void {
   root.style.setProperty('--casa-danger-glow', palette.dangerGlow);
   root.style.setProperty('--casa-wifi', palette.wifi);
   root.style.setProperty('--casa-bluetooth', palette.bluetooth);
+  root.style.setProperty('--casa-ibadah', palette.ibadah);
+  root.style.setProperty('--casa-ibadah-glow', palette.ibadahGlow);
 }
 
 function parseSettingsJson(raw: string | null): CasaSettings {

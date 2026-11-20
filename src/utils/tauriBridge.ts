@@ -605,6 +605,8 @@ export interface UpdateNotificationStatus {
   currentVersion: string;
   latestVersion: string | null;
   releaseUrl: string | null;
+  releaseNotes?: string | null;
+  publishedAt?: string | null;
   updateAvailable: boolean;
   badgeVisible: boolean;
 }
@@ -655,7 +657,7 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
 export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   if (!isTauriEnv) {
     return {
-      currentVersion: '2.0.4',
+      currentVersion: '2.1.0',
       available: false,
       version: null,
       body: null,
@@ -670,9 +672,11 @@ export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
 export async function getUpdateNotificationStatus(): Promise<UpdateNotificationStatus> {
   if (!isTauriEnv) {
     return {
-      currentVersion: '2.0.4',
+      currentVersion: '2.1.0',
       latestVersion: null,
       releaseUrl: null,
+      releaseNotes: null,
+      publishedAt: null,
       updateAvailable: false,
       badgeVisible: false,
     };
@@ -681,19 +685,21 @@ export async function getUpdateNotificationStatus(): Promise<UpdateNotificationS
     return await invoke<UpdateNotificationStatus>('get_update_notification_status');
   } catch {
     return {
-      currentVersion: '2.0.4',
+      currentVersion: '2.1.0',
       latestVersion: null,
       releaseUrl: null,
+      releaseNotes: null,
+      publishedAt: null,
       updateAvailable: false,
       badgeVisible: false,
     };
   }
 }
 
-export async function triggerBackgroundUpdateCheck(): Promise<void> {
+export async function triggerBackgroundUpdateCheck(force = false): Promise<void> {
   if (!isTauriEnv) return;
   try {
-    await invoke('trigger_background_update_check');
+    await invoke('trigger_background_update_check', { force });
   } catch {
     // Silent swallow for offline or transient errors
   }
@@ -730,5 +736,111 @@ export async function quitCasaApp(): Promise<void> {
     await invoke('quit_app');
   } catch (err) {
     console.warn('[CASA IPC] quit_app failed:', err);
+  }
+}
+
+export interface PrayerOffsetsPayload {
+  fajr: number;
+  dhuhr: number;
+  asr: number;
+  maghrib: number;
+  isha: number;
+}
+
+export interface PrayerScheduleRequestPayload {
+  latitude: number;
+  longitude: number;
+  countryCode?: string | null;
+  method: string;
+  madhab: string;
+  offsets: PrayerOffsetsPayload;
+}
+
+export interface PrayerEntryItem {
+  id: 'fajr' | 'dhuhr' | 'asr' | 'maghrib' | 'isha' | string;
+  label: string;
+  timestampMs: number;
+  timeLabel: string;
+  isPassed: boolean;
+  isNext: boolean;
+}
+
+export interface PrayerScheduleResponse {
+  dateKey: string;
+  timezoneLabel: string;
+  resolvedMethod: string;
+  resolvedMethodLabel: string;
+  madhabLabel: string;
+  prayers: PrayerEntryItem[];
+  nextPrayerId: string;
+  nextPrayerLabel: string;
+  nextPrayerTimestampMs: number;
+  nextPrayerTimeLabel: string;
+  nextPrayerDateKey: string;
+  nextPrayerIsTomorrow: boolean;
+  mostRecentPrayerId: string;
+  mostRecentPrayerLabel: string;
+  mostRecentPrayerTimestampMs: number;
+  mostRecentPrayerDateKey: string;
+}
+
+export interface DetectedLocationResult {
+  status: 'ok' | 'permission_denied' | 'service_disabled' | 'timeout' | 'unsupported' | 'error';
+  latitude: number | null;
+  longitude: number | null;
+  city: string | null;
+  region: string | null;
+  countryCode: string | null;
+  accuracyMeters: number | null;
+  message: string;
+}
+
+export interface CitySearchItem {
+  name: string;
+  region: string | null;
+  country: string;
+  countryCode: string;
+  latitude: number;
+  longitude: number;
+}
+
+export async function getPrayerTimesNative(
+  request: PrayerScheduleRequestPayload
+): Promise<PrayerScheduleResponse | null> {
+  if (!isTauriEnv) {
+    return null;
+  }
+  return await invoke<PrayerScheduleResponse>('get_prayer_times', { request });
+}
+
+export async function detectWindowsLocation(): Promise<DetectedLocationResult> {
+  if (!isTauriEnv) {
+    return {
+      status: 'unsupported',
+      latitude: null,
+      longitude: null,
+      city: null,
+      region: null,
+      countryCode: null,
+      accuracyMeters: null,
+      message: 'Deteksi lokasi Windows hanya tersedia di aplikasi desktop CASA.',
+    };
+  }
+  return await invoke<DetectedLocationResult>('detect_windows_location');
+}
+
+export async function searchPrayerCity(query: string): Promise<CitySearchItem[]> {
+  if (!isTauriEnv) {
+    return [];
+  }
+  return await invoke<CitySearchItem[]>('search_prayer_city', { query });
+}
+
+export async function openWindowsLocationSettings(): Promise<void> {
+  if (!isTauriEnv) return;
+  try {
+    await invoke('open_windows_location_settings');
+  } catch (err) {
+    console.warn('[CASA IPC] open_windows_location_settings failed:', err);
   }
 }

@@ -4,6 +4,7 @@ import { CasaSkill, SkillPriorityTier } from '../types';
 import { TimerState } from '../../types/island';
 import { TimerCardView } from '../../components/views/TimerCardView';
 import { playAlarmNoticeOnce, startAlarmChime } from '../../utils/alarmChime';
+import { isPrayerAlertActive } from '../../features/ibadah/prayerStore';
 import { getSettingsSnapshot } from '../../stores/useSettingsStore';
 import { useSkillStore } from '../store';
 import { TimerExpandedView } from '../../features/timer/TimerExpandedView';
@@ -108,7 +109,11 @@ export const timerSkill: CasaSkill<TimerState> = {
             };
           });
         } else {
-          startAlarmChime();
+          // Respect Adzan > Timer priority: never overlap audio if Adzan is currently active,
+          // while still preserving `isAlarmRinging: true` & linked To-Do state for after Adzan stops.
+          if (!isPrayerAlertActive()) {
+            startAlarmChime();
+          }
           setState((prev: TimerState) => ({
             ...prev,
             remainingSeconds: 0,

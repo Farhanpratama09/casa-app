@@ -7,6 +7,7 @@ import { IslandMode, CompactSubtype } from './types/island';
 import { toggleGamingMode, playChimeCue } from './utils/tauriBridge';
 import { getCurrentWindowLabel } from './utils/settingsWindow';
 import { initializeSkillsEngine } from './skills';
+import { startPrayerSchedulerEngine } from './features/ibadah/prayerStore';
 
 const IS_SETTINGS_WINDOW = getCurrentWindowLabel() === 'settings';
 
@@ -20,6 +21,11 @@ function MainIslandApp() {
   const [compactSubtype, setCompactSubtype] = useState<CompactSubtype>('charging');
   const [isGamingMode, setIsGamingMode] = useState<boolean>(false);
   const [showDevTrigger, setShowDevTrigger] = useState<boolean>(false);
+
+  // Start single Prayer Scheduler Engine ONLY in main island window (0 background work when ibadah.enabled === false)
+  useEffect(() => {
+    return startPrayerSchedulerEngine();
+  }, []);
 
   const handleToggleDevTrigger = () => {
     if (!import.meta.env.DEV) return;

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useSkillStore } from '../../skills/store';
 import { useTimerState } from '../../features/timer/useTimerState';
+import { stopPrayerAlert, usePrayerStore } from '../../features/ibadah/prayerStore';
 import { useDropZoneStore } from '../../stores/useDropZoneStore';
 import { TodoItem } from '../../types/island';
 import { useSystemHardware, SystemHudAlert } from '../../hooks/useSystemHardware';
@@ -413,7 +414,15 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
     hasLaptopBattery && !laptopBatteryCharging && laptopBatteryPct < 15
   );
 
+  const prayerStore = usePrayerStore();
+  const activePrayerAlert =
+    prayerStore.activeAlert && !prayerStore.activeAlert.suppressVisual
+      ? prayerStore.activeAlert
+      : null;
+  const isPrayerAlertVisible = activePrayerAlert !== null;
+
   const companionExpression: CompanionExpression = resolveCompanionExpression({
+    isPrayerAlert: isPrayerAlertVisible,
     isAlarmRinging,
     isTimerRunning: isTimerActive && !isTimerPaused,
     isPlaying,
@@ -424,6 +433,7 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
   });
 
   const isRestingMode =
+    !isPrayerAlertVisible &&
     !isAlarmRinging &&
     !isPlaying &&
     !isTimerActive &&
@@ -432,7 +442,9 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
     !isLowBatteryExpression &&
     !hudAlert &&
     !useClockPill;
-  const activeModeKey = isAlarmRinging
+  const activeModeKey = isPrayerAlertVisible
+    ? 'prayer-takeover'
+    : isAlarmRinging
     ? 'alarm-takeover'
     : hudAlert
     ? 'system-hud'
@@ -641,7 +653,70 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
         isExpanded ? 'pointer-events-none' : ''
       }`}
     >
-      {activeModeKey === 'alarm-takeover' ? (
+      {activeModeKey === 'prayer-takeover' && activePrayerAlert ? (
+        /* PRIORITY BANNER TAKEOVER: Pengingat Ibadah T-0 (✦ ☾ + Adzan <Sholat> + Jam + Equalizer + Stop/Tutup) */
+        <motion.div
+          key={`mode-prayer-takeover-${activePrayerAlert.fireKey}`}
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+          onClick={(e) => {
+            // hoverExpandLocked: klik area non-tombol TIDAK melebarkan Mode 6
+            e.stopPropagation();
+          }}
+          className="casa-prayer-t0-pill min-w-[248px] px-3 h-full rounded-[inherit] flex items-center justify-between gap-2.5 bg-[#000000] select-none cursor-default"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <CasaCompanionAvatar isPlaying={false} expression="prayer" />
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span
+                style={{ color: 'var(--casa-ibadah, #FFFFFF)' }}
+                className="font-sans text-[11.5px] font-bold tracking-tight whitespace-nowrap"
+              >
+                Adzan {activePrayerAlert.prayerLabel}
+              </span>
+              {activePrayerAlert.timeLabel && (
+                <span className="font-mono text-[10.5px] tabular-nums text-white/45 whitespace-nowrap">
+                  {activePrayerAlert.timeLabel}
+                </span>
+              )}
+            </div>
+            {activePrayerAlert.audioMode !== 'visual' && (
+              <span
+                className="casa-prayer-eq shrink-0 ml-0.5"
+                aria-hidden="true"
+              >
+                <span className="casa-prayer-eq-bar" />
+                <span className="casa-prayer-eq-bar" />
+                <span className="casa-prayer-eq-bar" />
+                <span className="casa-prayer-eq-bar" />
+              </span>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              stopPrayerAlert();
+            }}
+            style={{
+              backgroundColor: 'var(--casa-ibadah, #FFFFFF)',
+              color: '#000000',
+            }}
+            className="h-[22px] px-2.5 rounded-full hover:brightness-95 font-sans text-[10px] font-bold transition-all cursor-pointer active:scale-95 whitespace-nowrap shrink-0"
+            title={
+              activePrayerAlert.audioMode === 'visual'
+                ? 'Tutup pengingat ibadah'
+                : 'Hentikan audio adzan'
+            }
+          >
+            {activePrayerAlert.audioMode === 'visual' ? 'Tutup' : 'Stop'}
+          </button>
+        </motion.div>
+      ) : activeModeKey === 'alarm-takeover' ? (
         /* PRIORITY BANNER TAKEOVER: Focus Timer "Time's Up!" (~360px OLED + Warm Amber) */
         <motion.div
           key="mode-alarm-takeover"

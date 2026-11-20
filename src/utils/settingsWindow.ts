@@ -1,7 +1,57 @@
 import { getCurrentWebviewWindow, WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { emit } from '@tauri-apps/api/event';
+
+export type SettingsSectionTarget = 'appearance' | 'behavior' | 'audio' | 'ibadah' | 'system';
+
+export const SETTINGS_DEEP_LINK_STORAGE_KEY = 'casa_settings_deep_link_v1';
+export const SETTINGS_NAVIGATE_EVENT = 'casa://settings-navigate';
+
+const VALID_SECTIONS = new Set<SettingsSectionTarget>([
+  'appearance',
+  'behavior',
+  'audio',
+  'ibadah',
+  'system',
+]);
 
 const isTauriRuntime = () =>
   typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+export function isValidSettingsSection(value: unknown): value is SettingsSectionTarget {
+  return typeof value === 'string' && VALID_SECTIONS.has(value as SettingsSectionTarget);
+}
+
+export function consumePendingSettingsDeepLink(): SettingsSectionTarget | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get('section');
+    if (isValidSettingsSection(fromQuery)) {
+      return fromQuery;
+    }
+  } catch {
+    // Ignore malformed query string
+  }
+
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_DEEP_LINK_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { section?: unknown; ts?: unknown };
+    window.localStorage.removeItem(SETTINGS_DEEP_LINK_STORAGE_KEY);
+    if (
+      isValidSettingsSection(parsed?.section) &&
+      typeof parsed?.ts === 'number' &&
+      Date.now() - parsed.ts <= 10_000
+    ) {
+      return parsed.section;
+    }
+  } catch {
+    // Non-fatal
+  }
+
+  return null;
+}
 
 export function getCurrentWindowLabel(): string {
   if (!isTauriRuntime()) {
@@ -18,29 +68,54 @@ let pendingSettingsOpen: Promise<void> | null = null;
 
 /**
  * Opens or focuses the dedicated non-transparent CASA Settings desktop window (`settings`, 760x520).
+ * Optional `section` deep-links directly to the requested sidebar tab whether freshly created or already open.
  */
-export async function openDesktopSettingsWindow(): Promise<void> {
+export async function openDesktopSettingsWindow(section?: SettingsSectionTarget): Promise<void> {
+  if (typeof window !== 'undefined' && section && isValidSettingsSection(section)) {
+    try {
+      window.localStorage.setItem(
+        SETTINGS_DEEP_LINK_STORAGE_KEY,
+        JSON.stringify({ section, ts: Date.now() })
+      );
+    } catch {
+      // Non-fatal
+    }
+  }
+
   if (!isTauriRuntime()) {
-    console.info('[CASA] Settings desktop window is only available inside the Tauri runtime.');
+    console.info(
+      '[CASA] Settings desktop window is only available inside the Tauri runtime.',
+      section ? `(section=${section})` : ''
+    );
     return;
   }
 
   if (pendingSettingsOpen) {
-    return pendingSettingsOpen;
+    await pendingSettingsOpen;
+    if (section && isValidSettingsSection(section)) {
+      void emit(SETTINGS_NAVIGATE_EVENT, { section }).catch(() => {});
+    }
+    return;
   }
 
   pendingSettingsOpen = (async () => {
     try {
       const existing = await WebviewWindow.getByLabel('settings');
       if (existing) {
+        if (section && isValidSettingsSection(section)) {
+          await emit(SETTINGS_NAVIGATE_EVENT, { section }).catch(() => {});
+        }
         await existing.unminimize().catch(() => {});
         await existing.show();
         await existing.setFocus();
         return;
       }
 
+      const targetUrl =
+        section && isValidSettingsSection(section) ? `/?section=${encodeURIComponent(section)}` : '/';
+
       const settingsWin = new WebviewWindow('settings', {
-        url: '/',
+        url: targetUrl,
         title: 'CASA Settings',
         width: 760,
         height: 520,
@@ -66,6 +141,11 @@ export async function openDesktopSettingsWindow(): Promise<void> {
         void settingsWin.once('tauri://created', () => {
           void settingsWin.show().catch(() => {});
           void settingsWin.setFocus().catch(() => {});
+          if (section && isValidSettingsSection(section)) {
+            setTimeout(() => {
+              void emit(SETTINGS_NAVIGATE_EVENT, { section }).catch(() => {});
+            }, 180);
+          }
           finish();
         });
 

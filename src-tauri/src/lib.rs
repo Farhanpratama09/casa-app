@@ -10,6 +10,7 @@ mod drop_zone;
 mod hitbox;
 mod media;
 mod native_audio;
+mod prayer;
 mod spotify_oauth;
 mod system_hardware;
 mod system_stats;
@@ -575,6 +576,10 @@ pub fn run() {
             update_monitor::trigger_background_update_check,
             update_monitor::dismiss_update_badge,
             update_monitor::clear_update_notification,
+            prayer::get_prayer_times,
+            prayer::detect_windows_location,
+            prayer::search_prayer_city,
+            prayer::open_windows_location_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CASA application");
