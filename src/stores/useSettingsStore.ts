@@ -8,8 +8,10 @@
  */
 
 import { useCallback, useSyncExternalStore } from 'react';
+import { emit, listen } from '@tauri-apps/api/event';
 
 export const SETTINGS_STORAGE_KEY = 'casa_settings_v1';
+export const SETTINGS_UPDATED_EVENT = 'casa://settings-updated';
 
 export type CasaThemeId = 'default' | 'monochrome' | 'colorblind';
 export type CasaPlacementMode = 'docked' | 'floating';
@@ -409,10 +411,23 @@ function loadInitialSettings(): CasaSettings {
 }
 
 let currentSettings: CasaSettings = loadInitialSettings();
+let lastSerializedSettings = JSON.stringify(currentSettings);
 const listeners = new Set<() => void>();
 
+function applyRemoteSettings(next: CasaSettings): void {
+  const serialized = JSON.stringify(next);
+  if (serialized === lastSerializedSettings) {
+    return;
+  }
+  lastSerializedSettings = serialized;
+  currentSettings = next;
+  applyThemeCssVariables(next.theme);
+  listeners.forEach((fn) => fn());
+}
+
 // Cross-window real-time sync: when "settings" window updates localStorage,
-// WebView2 fires `storage` event on "main" window so theme CSS vars, layout & hitboxes update instantaneously.
+// WebView2 fires `storage` event AND Tauri broadcasts `casa://settings-updated`
+// so main window theme CSS vars, layout, hitboxes, and Ibadah scheduler update deterministically.
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event: StorageEvent) => {
     if (event.key !== null && event.key !== SETTINGS_STORAGE_KEY) {
@@ -422,21 +437,29 @@ if (typeof window !== 'undefined') {
       event.key === null
         ? window.localStorage.getItem(SETTINGS_STORAGE_KEY)
         : event.newValue;
-    const next = parseSettingsJson(raw);
-    currentSettings = next;
-    applyThemeCssVariables(next.theme);
-    listeners.forEach((fn) => fn());
+    applyRemoteSettings(parseSettingsJson(raw));
   });
+
+  if ('__TAURI_INTERNALS__' in window) {
+    void listen<unknown>(SETTINGS_UPDATED_EVENT, (event) => {
+      applyRemoteSettings(sanitizeSettings(event.payload));
+    }).catch(() => {});
+  }
 }
 
 function persistAndNotify(next: CasaSettings): void {
+  const serialized = JSON.stringify(next);
+  lastSerializedSettings = serialized;
   currentSettings = next;
   applyThemeCssVariables(next.theme);
   if (typeof window !== 'undefined') {
     try {
-      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(next));
+      window.localStorage.setItem(SETTINGS_STORAGE_KEY, serialized);
     } catch (err) {
       console.warn('[useSettingsStore] Failed to persist settings:', err);
+    }
+    if ('__TAURI_INTERNALS__' in window) {
+      void emit(SETTINGS_UPDATED_EVENT, next).catch(() => {});
     }
   }
   listeners.forEach((fn) => fn());

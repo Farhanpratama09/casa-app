@@ -2392,7 +2392,7 @@
           ? exeVersion.trim().startsWith('v')
             ? exeVersion.trim()
             : `v${exeVersion.trim()}`
-          : 'v2.1.0';
+          : 'v2.1.1';
       el.downloadSizeText.textContent = `${versionTag} · NSIS Setup (.exe) · ${exeSize}`;
     }
     if (el.downloadCountText) {
@@ -2494,7 +2494,7 @@
       let exeSize = null;
       let exeVersion = null;
       if (v2Release && Array.isArray(v2Release.assets)) {
-        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.1.0';
+        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.1.1';
         const exeAsset = v2Release.assets.find(
           (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
         );
@@ -2519,7 +2519,7 @@
         );
       } catch (_err) {}
     } catch (_err) {
-      // Keep static v2.1.0 fallback link & hide download count gracefully when offline/rate-limited
+      // Keep static v2.1.1 fallback link & hide download count gracefully when offline/rate-limited
     }
   }
 

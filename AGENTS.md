@@ -1,4 +1,4 @@
-# AGENTS.md — Repository Rules & Engineering Guardrails (`CASA v2.1.0`)
+# AGENTS.md — Repository Rules & Engineering Guardrails (`CASA v2.1.1`)
 
 Instruksi wajib bagi setiap agen AI dan kontributor yang bekerja di repositori `casa-app`. Seluruh detail teknis berpegang pada kode aktual di `src/`, `src-tauri/`, dan `docs/` serta [CASA_CONTEXT.md](./CASA_CONTEXT.md).
 

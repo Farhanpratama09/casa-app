@@ -1,4 +1,4 @@
-# CASA_CONTEXT.md — Single Source of Truth (`v2.1.0`)
+# CASA_CONTEXT.md — Single Source of Truth (`v2.1.1`)
 
 > Dibuat dari implementasi nyata pada `src/`, `src-tauri/`, dan `docs/` (bukan asumsi). Wajib diperbarui setiap kali kode atau arsitektur berubah.  
 > **CASA** — *Dynamic Rabbit Island for Windows* (`com.farhanpratama.casa`) · MIT License.
@@ -10,7 +10,7 @@
 | Aspek | Detail |
 |---|---|
 | Form factor | Window Tauri transparan, frameless, `alwaysOnTop`, `skipTaskbar`, `shadow:false`, dipusatkan di tepi atas monitor aktif |
-| Identifier / Versi | `com.farhanpratama.casa` / **`2.1.0`** (`tauri.conf.json`, `Cargo.toml`, `package.json`) |
+| Identifier / Versi | `com.farhanpratama.casa` / **`2.1.1`** (`tauri.conf.json`, `Cargo.toml`, `package.json`, `docs/`) |
 | Window utama | `1100×340` terkunci (kanvas logis 1100 px menghindari *DWM swapchain ResizeBuffers hitch*; hitbox dinamis via `WS_EX_TRANSPARENT` per `HitRect`) |
 | Settings window | Window sekunder `settings` (`DesktopSettingsWindow.tsx`) berarsitektur flat OLED 2-kolom (5 tab sidebar termasuk **`Ibadah & Lokasi`**) + tombol **`Quit CASA`** |
 | Frontend | React 19, TypeScript 5.7 (`strict`), Vite 6 (dev `127.0.0.1:1420`), Tailwind 3.4, framer-motion 12, zustand 5, lucide-react |
@@ -40,7 +40,7 @@ asaverse/
 │  ├─ styles.css             ← Pure OLED theme + native Mode 6 capsule & Play Store reviews styling
 │  ├─ 404.html               ← Clean SPA sub-route restoration (/playground, /arsitektur, /unduh, /feedback)
 │  ├─ favicon.svg            ← Obsidian Bunny icon (`× ♥`)
-│  ├─ PRD.md                 ← Product Requirements Document v2.1.0
+│  ├─ PRD.md                 ← Product Requirements Document v2.1.1
 │  └─ sasha-character-spec.md
 ├─ supabase/                 ← Backend moderasi ulasan publik (`ivlyujaafwqziogajjtk.supabase.co`)
 │  ├─ config.toml            ← `verify_jwt = false` untuk `submit-review` & `telegram-webhook`
@@ -54,7 +54,7 @@ asaverse/
 │  ├─ verify-search-playlist-flow.mjs ← Verifikasi Search Drawer & Playlist popover flow
 │  └─ verify-*.{ts,js}                ← Logic test suite (lyrics, queue, browser sanitizer, time-sync, hitbox)
 ├─ src-tauri/
-│  ├─ tauri.conf.json        ← v2.1.0, com.farhanpratama.casa, 1100x340, CSP, updater pubkey + endpoints
+│  ├─ tauri.conf.json        ← v2.1.1, com.farhanpratama.casa, 1100x340, CSP, updater pubkey + endpoints
 │  ├─ capabilities/default.json
 │  └─ src/
 │     ├─ main.rs / lib.rs    ← DPI window align (`position_window_top`), 50Hz hitbox, `Alt+Space`, tray EN, `quit_app`, updater
@@ -85,7 +85,7 @@ asaverse/
    │     └─ mode6/
    │        ├─ Mode6MusicLayout.tsx       ← Mode 6 sub-nav `Player | Playlists`, pop-up kanan `QUEUE`, search & lyrics pods
    │        └─ Mode6ControlCenterView.tsx ← Wi-Fi/BT satellite pods, theme-aware audio output icon, sliders, telemetry
-   ├─ features/              ← `skillsRegistry.ts`, `media/`, `timer/`, `todo/`, `ibadah/` (`prayerStore.ts`, `prayerAudio.ts`, `IbadahExpandedView.tsx`)
+   ├─ features/              ← `skillsRegistry.ts`, `media/`, `timer/`, `todo/`, `ibadah/` (`prayerStore.ts`, `prayerScheduleLogic.ts`, `prayerAudio.ts`, `IbadahExpandedView.tsx`)
    ├─ hooks/                 ← `useSystemHardware.ts`, `useSystemTelemetry.ts`, `useCompanionMood.ts`, `useMusicAffinity.ts`
    ├─ skills/                ← `CasaSkill` engine, `useSkillStore`, `MediaSkill`, `timerSkill`, `todoSkill`
    └─ utils/                 ← `tauriBridge.ts`, `islandLayoutState.ts`, `spotifyService.ts`, `lyricsService.ts`, `musicQueueEngine.ts`, `smartShuffle.ts`, `settingsWindow.ts`
@@ -111,7 +111,7 @@ asaverse/
 
 ---
 
-## 4. Arsitektur Frontend & UX `v2.1.0` (`src/` & `docs/`)
+## 4. Arsitektur Frontend & UX `v2.1.1` (`src/` & `docs/`)
 
 ### 4.1 Dimensi Kapsul (`islandLayoutState.ts`)
 - **Smart-Tuck:** `120×4 px` (sensor hover `124×8 px`), cooldown pasca-fullscreen `450 ms`.
@@ -132,7 +132,7 @@ asaverse/
   - *Proportional Unsynced Scroll:* Lirik tanpa timestamp menampilkan badge `Unsynced` dengan gulir halus proporsional (`computeUnsyncedScrollProgress`, margin intro/outro ±9%) dan jeda otomatis 4 detik saat digulir manual via *mouse wheel*.
   - *Timer → To-Do Auto-Check & Persistent Storage:* Daftar To-Do berawal kosong (`[]`) tanpa dummy task dan dipersistensikan sinkron via [todoPersistence.ts](./src/features/todo/todoPersistence.ts) (`localStorage` `casa_todo_items_v1` + validasi startup `focusedTaskId`); saat alarm berakhir pada item To-Do tertaut, muncul 3 aksi (`Selesai` | `+5m` | `Dismiss`), dan mencentang/menghapus item lebih dulu otomatis melepaskan tautan `focusedTaskId` (`unlinkTodoFromTimerState`).
 - **Modul Pengingat Ibadah (`v2.1.0`, Opt-In Default OFF):**
-  - *Zero Background Overhead saat OFF:* Tab ke-5 **`Ibadah`** pada `Mode6TopNav` (kini menggunakan `flex justify-between`) dan scheduler wall-clock (`prayerStore.ts`) hanya aktif bila pengguna menyalakan saklar di sidebar Settings **`Ibadah & Lokasi`**.
+  - *Zero Background Overhead saat OFF:* Tab ke-5 **`Ibadah`** pada `Mode6TopNav` (kini menggunakan `flex justify-between`) dan scheduler wall-clock (`prayerStore.ts` + `prayerScheduleLogic.ts`) hanya aktif bila pengguna menyalakan saklar di sidebar Settings **`Ibadah & Lokasi`**. `useSettingsStore.ts` juga memancarkan event `casa://settings-updated` lintas jendela WebView2, dan deduplikasi `fireKey` mengikutsertakan menit jadwal (`dateKey:prayerId:scheduledMin`) dengan perataan detik `:00` di `prayer.rs` serta tampilan preview `HH:MM` pada stepper koreksi menit Settings.
   - *Offline Rust Math & Dual Geolocation:* Menghitung 5 waktu sholat hari `D` + rollover Subuh `D+1` pasca-Isya via crate `salah` + `chrono::Local` (`prayer.rs`), mendukung `Windows.Devices.Geolocation` dengan timeout 7s + pencarian kota manual via Rust `reqwest` (Open-Meteo, CSP WebView tetap terkunci), pemetaan standar hisab otomatis berdasarkan `countryCode` (`ID` → Kemenag RI, `MY` → JAKIM, `SG` → MUIS, `SA/AE` → Umm al-Qura, `US/CA` → ISNA, lainnya → MWL), mazhab `Syafi'i | Hanafi`, dan offset `±` menit per waktu sholat.
   - *Lazy Dual-Path Audio (`0 MB` Idle RAM) & Priority Arbitration:* Audio `public/audio/adzan-subuh.ogg` (khusus **Subuh**, *graceful fallback* ke `/audio/adzan.ogg` lalu `playChimeCue`) dan `public/audio/adzan.ogg` (**Dzuhur, Ashar, Maghrib, Isya**, fallback ke `playChimeCue`) hanya dimuat *lazy* saat `T-0` / `Test Adzan` / `Test Subuh` (`prayerAudio.ts`) dan langsung dilepas setelah `Stop` / `ended`. Adzan mengambil prioritas audio di atas Focus Timer (mematikan loop chime Timer secara senyap tanpa menghapus status selesai/tautan To-Do Timer).
   - *Fullscreen, Post-Stop State & Celestial Sky Curve:* Pil T-0 tampil ringkas (`✦ ☾` mata Bintang & Bulan pada `CasaCompanionAvatar` ekspresi `'prayer'`, teks `Adzan <Sholat>`, jam tabular, 4 bar equalizer monokrom, tombol `Stop`/`Tutup`, animasi *micro-vibrate* 600ms, dan *breathing border glow*) dengan `hoverExpandLocked` penuh. Setelah `Stop`/audio selesai: tetap terbuka jika sebelumnya **Expanded Mode 6**, kembali ke **`idle`** normal pada desktop biasa, dan hanya langsung kembali ke **`tucked`** jika sedang aktif **Fullscreen / Gaming (`smart-tuck`)**. Pada `total-hide`, layar dijaga bersih (audio-only untuk Adzan/Chime; `Visual Saja` ditahan hingga keluar fullscreen dalam grace window 5 menit). Tab `Ibadah` menampilkan kurva parabola SVG dengan 5 titik sholat, ikon benda langit bergerak `13×13px` (Matahari Terbit / Matahari Penuh / Matahari Terbenam / Bulan Sabit + bintang) berlatar `#000000` (`r=8`) dan interpolasi warna langit dinamis (patuh Pure Monochrome pada tema `monochrome`), tombol *Perbarui Lokasi* (`↻`) di sebelah kota, label ringkas `<SHOLAT>` + `NEXT`, serta deep-link langsung ke sidebar Settings **`Ibadah & Lokasi`**.

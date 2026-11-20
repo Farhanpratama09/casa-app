@@ -13,11 +13,13 @@
  */
 
 import { useSyncExternalStore } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import {
   getSettingsSnapshot,
   IbadahAudioMode,
   IbadahSettings,
   SETTINGS_STORAGE_KEY,
+  SETTINGS_UPDATED_EVENT,
 } from '../../stores/useSettingsStore';
 import {
   getPrayerTimesNative,
@@ -25,10 +27,14 @@ import {
 } from '../../utils/tauriBridge';
 import { stopAlarmChime } from '../../utils/alarmChime';
 import { playPrayerAudio, stopPrayerAudio } from './prayerAudio';
+import {
+  evaluateDuePrayerDecision,
+  PRAYER_WAKE_GRACE_MS,
+  pruneFiredPrayerMap,
+} from './prayerScheduleLogic';
 
 const FIRED_STORAGE_KEY = 'casa_prayer_fired_v1';
-const GRACE_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
-const COLD_BOOT_GRACE_MS = 60 * 1000; // 60 seconds on fresh launch/enable
+const GRACE_WINDOW_MS = PRAYER_WAKE_GRACE_MS; // 5 minutes
 const CHIME_VISUAL_AUTO_DISMISS_MS = 20_000; // 20 seconds
 const ADZAN_SAFETY_MAX_MS = 6 * 60 * 1000; // 6 minutes safety cap
 
@@ -116,24 +122,10 @@ function readFiredMap(): Record<string, number> {
   try {
     const raw = window.localStorage.getItem(FIRED_STORAGE_KEY);
     if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return {};
-    const cutoff = Date.now() - 48 * 3600 * 1000;
-    const pruned: Record<string, number> = {};
-    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof v === 'number' && v >= cutoff) {
-        pruned[k] = v;
-      }
-    }
-    return pruned;
+    return pruneFiredPrayerMap(JSON.parse(raw), Date.now());
   } catch {
     return {};
   }
-}
-
-function hasFiredKey(fireKey: string): boolean {
-  const map = readFiredMap();
-  return typeof map[fireKey] === 'number';
 }
 
 function markFiredKey(fireKey: string): void {
@@ -167,7 +159,7 @@ function scheduleAutoDismiss(delayMs: number, expectedFireKey: string): void {
 /**
  * Lightweight browser preview fallback when running outside Tauri desktop runtime.
  */
-function buildBrowserPreviewSchedule(ibadah: IbadahSettings): PrayerScheduleResponse {
+export function buildBrowserPreviewSchedule(ibadah: IbadahSettings): PrayerScheduleResponse {
   const now = new Date();
   const y = now.getFullYear();
   const m = now.getMonth();
@@ -378,39 +370,42 @@ function triggerPrayerAlert(payload: {
   });
 }
 
-function evaluateDuePrayer(schedule: PrayerScheduleResponse, nowMs: number): void {
+function evaluateDuePrayer(
+  schedule: PrayerScheduleResponse,
+  nowMs: number,
+  prevTickWallClockMs: number | null
+): void {
   const recentTs = schedule.mostRecentPrayerTimestampMs;
-  const fireKey = `${schedule.mostRecentPrayerDateKey}:${schedule.mostRecentPrayerId}`;
-  const elapsedMs = nowMs - recentTs;
+  const decision = evaluateDuePrayerDecision({
+    mostRecentPrayerId: schedule.mostRecentPrayerId,
+    mostRecentPrayerDateKey: schedule.mostRecentPrayerDateKey,
+    mostRecentPrayerTimestampMs: recentTs,
+    nowMs,
+    lastTickWallClockMs: prevTickWallClockMs,
+    firedMap: readFiredMap(),
+  });
 
-  if (elapsedMs < 0) return;
-
-  if (hasFiredKey(fireKey)) {
+  if (decision.action === 'future' || decision.action === 'already_fired') {
     return;
   }
 
-  // Was the scheduler already running across this prayer timestamp (normal tick or sleep/wake)?
-  const crossedWhileRunning =
-    lastTickWallClockMs !== null && lastTickWallClockMs <= recentTs + 1500;
-  const allowedGraceMs = crossedWhileRunning ? GRACE_WINDOW_MS : COLD_BOOT_GRACE_MS;
-
-  if (elapsedMs <= allowedGraceMs) {
-    markFiredKey(fireKey);
+  if (decision.action === 'trigger') {
+    markFiredKey(decision.fireKey);
     const matchingToday = schedule.prayers.find((p) => p.id === schedule.mostRecentPrayerId);
     const fallbackDt = new Date(recentTs);
     const formattedFallbackTime = `${String(fallbackDt.getHours()).padStart(2, '0')}:${String(
       fallbackDt.getMinutes()
     ).padStart(2, '0')}`;
     triggerPrayerAlert({
-      fireKey,
+      fireKey: decision.fireKey,
       prayerId: schedule.mostRecentPrayerId,
       prayerLabel: schedule.mostRecentPrayerLabel,
       timeLabel: matchingToday?.timeLabel || formattedFallbackTime,
       triggeredAtMs: recentTs,
     });
   } else {
-    // Stale prayer passed well before wake/boot -> suppress silently so we never blast late Adzan
-    markFiredKey(fireKey);
+    // Suppress stale scheduled minute silently (only locks that exact HH:MM so offset edits still fire)
+    markFiredKey(decision.fireKey);
   }
 }
 
@@ -443,6 +438,7 @@ export async function refreshPrayerSchedule(): Promise<void> {
     const nativeSchedule = await getPrayerTimesNative(req);
     const resolved = nativeSchedule ?? buildBrowserPreviewSchedule(settings.ibadah);
     const nowMs = Date.now();
+    const prevTickMs = lastTickWallClockMs;
     lastConfigKey = buildConfigKey(settings.ibadah);
     lastTzOffsetMin = new Date(nowMs).getTimezoneOffset();
 
@@ -455,7 +451,7 @@ export async function refreshPrayerSchedule(): Promise<void> {
     });
 
     if (engineOwned) {
-      evaluateDuePrayer(resolved, nowMs);
+      evaluateDuePrayer(resolved, nowMs, prevTickMs);
       lastTickWallClockMs = nowMs;
     }
   } catch (err) {
@@ -632,15 +628,37 @@ export function startPrayerSchedulerEngine(): () => void {
     }
   };
 
+  let unlistenSettingsUpdated: (() => void) | undefined;
+  let isActive = true;
+
   if (typeof window !== 'undefined') {
     window.addEventListener('storage', onStorage);
     window.addEventListener('focus', onWake);
     document.addEventListener('visibilitychange', onVisibility);
+
+    if ('__TAURI_INTERNALS__' in window) {
+      listen(SETTINGS_UPDATED_EVENT, () => {
+        if (!isActive) return;
+        syncSchedulerLifecycle();
+      })
+        .then((unlisten) => {
+          if (!isActive) {
+            unlisten();
+          } else {
+            unlistenSettingsUpdated = unlisten;
+          }
+        })
+        .catch(() => {});
+    }
   }
 
   return () => {
+    isActive = false;
     engineOwned = false;
     teardownActiveScheduler();
+    if (unlistenSettingsUpdated) {
+      unlistenSettingsUpdated();
+    }
     if (typeof window !== 'undefined') {
       window.removeEventListener('storage', onStorage);
       window.removeEventListener('focus', onWake);

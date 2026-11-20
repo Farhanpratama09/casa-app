@@ -22,10 +22,13 @@ import {
 import {
   CitySearchItem,
   detectWindowsLocation,
+  getPrayerTimesNative,
   openWindowsLocationSettings,
   playChimeCue,
+  PrayerScheduleResponse,
   searchPrayerCity,
 } from '../../utils/tauriBridge';
+import { buildBrowserPreviewSchedule } from '../../features/ibadah/prayerStore';
 import {
   AdzanAudioVariant,
   playPrayerAudio,
@@ -93,6 +96,36 @@ export const IbadahSettingsSection: React.FC<IbadahSettingsSectionProps> = ({
 
   const [testingTarget, setTestingTarget] = useState<null | 'regular' | 'subuh' | 'chime'>(null);
   const [audioNotice, setAudioNotice] = useState<string | null>(null);
+  const [previewSchedule, setPreviewSchedule] = useState<PrayerScheduleResponse | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getPrayerTimesNative({
+      latitude: ibadah.latitude,
+      longitude: ibadah.longitude,
+      countryCode: ibadah.countryCode,
+      method: ibadah.method,
+      madhab: ibadah.madhab,
+      offsets: ibadah.offsets,
+    }).then((nativeRes) => {
+      if (!active) return;
+      setPreviewSchedule(nativeRes ?? buildBrowserPreviewSchedule(ibadah));
+    });
+    return () => {
+      active = false;
+    };
+  }, [
+    ibadah.latitude,
+    ibadah.longitude,
+    ibadah.countryCode,
+    ibadah.method,
+    ibadah.madhab,
+    ibadah.offsets.fajr,
+    ibadah.offsets.dhuhr,
+    ibadah.offsets.asr,
+    ibadah.offsets.maghrib,
+    ibadah.offsets.isha,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -529,13 +562,24 @@ export const IbadahSettingsSection: React.FC<IbadahSettingsSectionProps> = ({
           <div className="grid grid-cols-5 gap-1.5">
             {OFFSET_FIELDS.map(({ key, label }) => {
               const val = ibadah.offsets[key] || 0;
+              const entry = previewSchedule?.prayers.find((p) => p.id === key);
               return (
                 <div
                   key={key}
-                  className="p-2 rounded-lg bg-[#060608] border border-white/[0.08] flex flex-col items-center gap-1.5"
+                  className="p-2 rounded-lg bg-[#060608] border border-white/[0.08] flex flex-col items-center gap-1"
                 >
                   <span className="text-[10px] text-white/60 font-medium">{label}</span>
-                  <div className="flex items-center gap-1">
+                  {entry && (
+                    <span
+                      className={`font-mono text-[10.5px] tabular-nums font-bold leading-none ${
+                        entry.isNext ? 'text-white' : entry.isPassed ? 'text-white/40' : 'text-white/80'
+                      }`}
+                      title={`Jadwal ${label} setelah koreksi (${entry.timeLabel})`}
+                    >
+                      {entry.timeLabel}
+                    </span>
+                  )}
+                  <div className="flex items-center gap-1 mt-0.5">
                     <button
                       type="button"
                       onClick={() => handleAdjustOffset(key, -1)}
@@ -560,6 +604,11 @@ export const IbadahSettingsSection: React.FC<IbadahSettingsSectionProps> = ({
               );
             })}
           </div>
+          {!ibadah.enabled && (
+            <div className="text-[10.5px] text-white/45 leading-snug">
+              Aktifkan saklar <span className="text-white/75 font-medium">Aktifkan Pengingat Ibadah</span> di atas agar koreksi waktu memicu notifikasi T-0.
+            </div>
+          )}
         </div>
 
         {/* Mode Audio & Test */}

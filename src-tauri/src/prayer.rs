@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration as ChronoDuration, Local, NaiveDate, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Local, NaiveDate, Timelike, Utc};
 use salah::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -155,8 +155,14 @@ fn compute_day_times(
         .map_err(|e| format!("Gagal menghitung jadwal sholat untuk {date}: {e:?}"))?;
 
     let apply = |dt_utc: DateTime<Utc>, offset_min: i32| -> DateTime<Local> {
-        let adjusted = dt_utc + ChronoDuration::minutes(clamp_offset_minutes(offset_min));
-        adjusted.with_timezone(&Local)
+        let local_base = dt_utc.with_timezone(&Local);
+        // Align trigger timestamp with displayed HH:MM (:00 seconds) so minute-offset tests
+        // and T-0 notifications fire cleanly on the exact displayed minute mark.
+        let minute_aligned = local_base
+            .with_second(0)
+            .and_then(|d| d.with_nanosecond(0))
+            .unwrap_or(local_base);
+        minute_aligned + ChronoDuration::minutes(clamp_offset_minutes(offset_min))
     };
 
     Ok([
@@ -315,7 +321,7 @@ struct ReverseGeocodeApiResponse {
 async fn reverse_geocode_coords(lat: f64, lon: f64) -> (Option<String>, Option<String>, Option<String>) {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(4))
-        .user_agent("CASA-Desktop/2.1.0")
+        .user_agent("CASA-Desktop/2.1.1")
         .build()
     {
         Ok(c) => c,
@@ -551,7 +557,7 @@ pub async fn search_prayer_city(query: String) -> Result<Vec<CitySearchItem>, St
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(6))
-        .user_agent("CASA-Desktop/2.1.0")
+        .user_agent("CASA-Desktop/2.1.1")
         .build()
         .map_err(|e| format!("Gagal menginisialisasi HTTP client: {e}"))?;
 
@@ -649,6 +655,14 @@ mod tests {
         assert_eq!(base.prayers.len(), 5);
         for w in base.prayers.windows(2) {
             assert!(w[0].timestamp_ms < w[1].timestamp_ms);
+        }
+        for p in &base.prayers {
+            assert_eq!(
+                p.timestamp_ms % 60_000,
+                0,
+                "prayer {} timestamp should align to exact :00 seconds",
+                p.id
+            );
         }
 
         let shifted_req = PrayerScheduleRequest {
