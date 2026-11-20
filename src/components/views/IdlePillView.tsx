@@ -40,6 +40,7 @@ import { formatDurationClock } from '../../features/timer/timerUtils';
 import { useSettingsStore } from '../../stores/useSettingsStore';
 
 const snapEvenWidth = (width: number): number => Math.max(88, Math.ceil(width / 2) * 2);
+const EMPTY_TODOS: TodoItem[] = [];
 
 interface IdlePillViewProps {
   isDualBubble?: boolean;
@@ -292,7 +293,7 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
   // Akses langsung state timer dari store
   const timerState = useSkillStore((s) => s.skillStates['core.timer']);
   const { addFiveMinutes, dismissAlarm, completeFocusedTodoAndDismiss } = useTimerState();
-  const todos: TodoItem[] = useSkillStore((s) => s.skillStates['core.todo']?.todos || []);
+  const todos: TodoItem[] = useSkillStore((s) => s.skillStates['core.todo']?.todos ?? EMPTY_TODOS);
   const isTimerActive = Boolean(timerState?.isActive);
   const isAlarmRinging = Boolean(timerState?.isAlarmRinging);
   const isTimerPaused = Boolean(timerState?.isPaused);
