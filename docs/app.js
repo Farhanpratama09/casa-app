@@ -2747,10 +2747,6 @@
       authorEl.className = 'review-author-name';
       authorEl.textContent = item.author_name || 'Pengguna';
 
-      const versionEl = document.createElement('span');
-      versionEl.className = 'review-version-badge';
-      versionEl.textContent = item.app_version || 'v2.1.0';
-
       const starsWrap = document.createElement('span');
       starsWrap.className = 'reviews-stars-row';
       starsWrap.setAttribute('aria-label', `${item.rating || 5} dari 5 bintang`);
@@ -2758,7 +2754,6 @@
 
       authorGroup.appendChild(authorEl);
       authorGroup.appendChild(starsWrap);
-      authorGroup.appendChild(versionEl);
 
       const dateEl = document.createElement('time');
       dateEl.className = 'review-date';
@@ -2849,7 +2844,7 @@
           : 'created_at.desc';
 
       const params = [
-        'select=id,author_name,rating,comment,app_version,creator_reply,replied_at,created_at',
+        'select=id,author_name,rating,comment,creator_reply,replied_at,created_at',
         `order=${encodeURIComponent(sortExpr)}`,
         `limit=${REVIEWS_PAGE_SIZE + 1}`,
         `offset=${reviewState.offset}`,
@@ -3020,7 +3015,6 @@
               comment,
               website_hp: websiteHp,
               elapsed_ms: elapsedMs,
-              app_version: 'v2.1.0',
             }),
           });
 

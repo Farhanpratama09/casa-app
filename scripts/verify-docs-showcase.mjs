@@ -917,11 +917,14 @@ async function main() {
     );
     const beforeFilterAudit = await mockPage.evaluate(() => {
       const dates = Array.from(document.querySelectorAll('#reviews-list .review-item > .review-item-head .review-date'));
+      const heads = Array.from(document.querySelectorAll('#reviews-list .review-item > .review-item-head'));
       return {
         downloadSubtext: document.querySelector('#download .section-desc')?.textContent?.trim() || '',
         feedbackSubtext: document.querySelector('#feedback .section-desc')?.textContent?.trim() || '',
         dateTexts: dates.map((d) => d.textContent?.trim() || ''),
         dateTitles: dates.map((d) => d.getAttribute('title') || ''),
+        versionBadgeCount: document.querySelectorAll('#reviews-list .review-version-badge').length,
+        headTexts: heads.map((h) => h.textContent?.trim() || ''),
         replyDateText:
           document.querySelector('#reviews-list .creator-reply-box .review-date')?.textContent?.trim() ||
           '',
@@ -969,8 +972,14 @@ async function main() {
       `Evergreen #download copy, TikTok subtitle & hybrid review timestamps + tooltips verified`
     );
 
+    const hasNoVersionBadges =
+      beforeFilterAudit.versionBadgeCount === 0 &&
+      beforeFilterAudit.headTexts.length === 5 &&
+      beforeFilterAudit.headTexts.every((t) => !/\bv\d+\.\d+\.\d+\b/i.test(t));
+
     check(
       headerSafetyOk &&
+        hasNoVersionBadges &&
         liveMockAudit.avgScore === '4.6' &&
         liveMockAudit.totalText === '5 ulasan' &&
         liveMockAudit.creatorBadge === 'Creator' &&
@@ -980,8 +989,8 @@ async function main() {
         typeof postedReviewBody?.elapsed_ms === 'number' &&
         Number.isFinite(postedReviewBody.elapsed_ms) &&
         postedReviewBody.elapsed_ms >= 0 &&
-        postedReviewBody?.app_version === 'v2.1.0',
-      `Supabase apikey-only fetch, Play Store summary (${liveMockAudit.avgScore}), Creator reply, 5★ filter & submit-review verified`
+        !('app_version' in (postedReviewBody || {})),
+      `Supabase apikey-only fetch, Play Store summary (${liveMockAudit.avgScore}), Creator reply, 5★ filter, hidden version badges & submit-review (no app_version) verified`
     );
 
     check(

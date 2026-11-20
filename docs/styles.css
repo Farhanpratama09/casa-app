@@ -3081,16 +3081,6 @@ textarea {
   color: #ffffff;
 }
 
-.review-version-badge {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  padding: 2px 7px;
-  border-radius: 9999px;
-  border: 1px solid var(--border-subtle);
-  background: #000000;
-  color: var(--text-secondary);
-}
-
 .review-date {
   font-family: var(--font-mono);
   font-size: 11px;
