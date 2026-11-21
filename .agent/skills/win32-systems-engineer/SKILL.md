@@ -12,6 +12,7 @@ description: Spesialis backend Rust, Win32 API, 50Hz multi-rect hitbox, global s
 3. **50Hz Multi-Rect Hitbox Poller & DPI Awareness (`hitbox.rs`, `lib.rs`):**
    - Hitung posisi monitor lewat `position_window_top` (`left` | `center` | `right`) menggunakan `SetWindowPos` (`SWP_NOACTIVATE | SWP_NOZORDER`) pada kanvas tetap `1100×340`.
    - `update_island_hitboxes` menerima maksimal 6 `HitRect` aktif dan 50Hz poller men-toggle `WS_EX_TRANSPARENT` secara dinamis di luar hitbox aktif.
-4. **Non-Blocking Guard & Z-Order:**
+4. **Non-Blocking Guard, Z-Order & Roadmap (`ROADMAP_CASA.md`):**
    - Panggilan GSMTC & hardware (`media/mod.rs`, `system_hardware.rs`) dibungkus `spawn_blocking` + `tokio::time::timeout` (`800ms` standar / `1200ms` quick swap).
    - Dorong jendela desktop Spotify (`>300×300 px`) ke `HWND_BOTTOM` dengan `SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE` (`providers/spotify_win32.rs`).
+   - Implementasi Win32 OLE drag (`CF_HDROP`/`CF_UNICODETEXT` + `DRAGDROP_S_DROP`), perbaikan flicker floating mode, dan server LAN ephemereal (`v2.1.3`–`v2.3.0`) wajib berpedoman pada [.agent/ROADMAP_CASA.md](../../ROADMAP_CASA.md).

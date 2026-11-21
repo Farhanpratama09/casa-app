@@ -11,6 +11,7 @@ triggers:
 
 ### 1. ATURAN EMAS: BUILD PASS BUKAN BERARTI BEBAS BUG
 - Status kompilasi hijau (`tsc` 0 error, `cargo check` 0 error) HANYA membuktikan ketiadaan typo/syntax error, BUKAN bukti bahwa logika aplikasi sudah benar.
+- Dilarang mengubah status milestone di `.agent/ROADMAP_CASA.md` dari `[PLANNED]` menjadi `[DONE]` sebelum `tsc`, `cargo check`, serta pengujian UX/logika terkait dan paritas `docs/` terbukti lulus nyata.
 - Dilarang membuat klaim lulus sebelum menjalankan seluruh skrip uji nyata terkait dan membaca langsung output aktualnya.
 - **Strict Anti-Overfitting Rule:** Dilarang keras membuat skrip uji yang menguji data sempit atau hardcoded personal path (`C:\Users\<username_asli>\`). Pengujian wajib parametrik, universal, dan bebas dari pencetakan token/kredensial apa pun di stdout.
 - **No Self-Serving Mock Tests:** Skrip uji dilarang memvalidasi variabel buatannya sendiri tanpa menguji relasi state yang nyata di komponen atau simulasi `docs/`.

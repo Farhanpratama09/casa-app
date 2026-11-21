@@ -33,7 +33,9 @@ asaverse/
 ├─ CASA_CONTEXT.md           ← file ini (Single Source of Truth)
 ├─ LICENSE                   ← MIT License (Copyright © 2026 Farhan Pratama)
 ├─ .env.example              ← template SPOTIFY_* & VITE_SPOTIFY_* (.env* terblokir Git)
-├─ .agent/skills/*/SKILL.md  ← domain guardrails & SOP spesialis CASA
+├─ .agent/
+│  ├─ ROADMAP_CASA.md        ← cetak biru roadmap pengembangan bertahap v2.1.3–v2.5.0
+│  └─ skills/*/SKILL.md      ← domain guardrails & SOP spesialis CASA
 ├─ docs/                     ← Web Showcase 1:1 (farhanpratama09.github.io/casa-app/)
 │  ├─ index.html             ← Pure Monochrome OLED showcase, SHA-256 download, Play Store Reviews & strict CSP
 │  ├─ app.js                 ← Virtual Monitor parity simulator, clean path router, release hub & Supabase reviews

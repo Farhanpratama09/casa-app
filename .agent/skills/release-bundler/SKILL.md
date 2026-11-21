@@ -19,3 +19,5 @@ description: Spesialis bundling installer Windows NSIS/MSI bertanda tangan Minis
 4. **Web Showcase Checksum & Counter Sync (`docs/index.html` & `docs/app.js`):**
    - Hitung SHA-256 uppercase dan ukuran `MB` terbaru dari `CASA_<ver>_x64-setup.exe`, lalu perbarui `#sha-value-exe`, baris metadata subteks **`#download-size-text`** (`v<ver> · NSIS Setup (.exe) · <MB> MB`), URL tautan `#primary-download-btn`, serta ekspektasi versi metadata pada `scripts/verify-docs-showcase.mjs` (jangan masukkan versi ke label tombol `#primary-download-label`).
    - Jaga logika `initSmartReleaseHub` (`download_count` khusus `.exe` + `.msi`, cache `localStorage` 15 menit) dan cooldown tombol 6 detik tetap berfungsi tanpa error.
+5. **Roadmap Status Lockstep (`.agent/ROADMAP_CASA.md`):**
+   - Setiap selesai memverifikasi & mempublikasikan rilis sesuai `.agent/ROADMAP_CASA.md`, perbarui status versi terkait pada roadmap menjadi `[DONE]`.

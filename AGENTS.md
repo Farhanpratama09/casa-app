@@ -45,8 +45,10 @@ node scripts/verify-reviews-security.mjs
 
 ---
 
-## 5. Sinkronisasi Dokumentasi
-Setiap kali arsitektur, daftar IPC `invoke_handler`, dimensi pulau, atau alur rilis berubah, perbarui pula:
-- [CASA_CONTEXT.md](./CASA_CONTEXT.md)
-- [docs/PRD.md](./docs/PRD.md)
-- Domain skill terkait pada [.agent/skills/](./.agent/skills/)
+## 5. Sinkronisasi Dokumentasi & Roadmap Bertahap
+1. Cetak biru pengembangan bertahap pasca-`v2.1.2` (`v2.1.3` s.d. `v2.5.0`) mengacu penuh pada [.agent/ROADMAP_CASA.md](./.agent/ROADMAP_CASA.md). Saat mengerjakan versi tertentu dari roadmap, agen wajib mematuhi prinsip arsitektur & menyelesaikan seluruh gate verifikasi (`npx tsc --noEmit`, `cargo check`, E2E `docs/`, & uji UX fitur terkait) sebelum mengubah statusnya dari `[PLANNED]` menjadi `[DONE]`.
+2. Setiap kali arsitektur, daftar IPC `invoke_handler`, dimensi pulau, atau alur rilis berubah, perbarui pula:
+   - [.agent/ROADMAP_CASA.md](./.agent/ROADMAP_CASA.md)
+   - [CASA_CONTEXT.md](./CASA_CONTEXT.md)
+   - [docs/PRD.md](./docs/PRD.md)
+   - Domain skill terkait pada [.agent/skills/](./.agent/skills/)
