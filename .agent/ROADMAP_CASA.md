@@ -33,7 +33,7 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 |---|---|---|---|
 | `v2.1.2` | *Prayer T-0 Sky Perimeter & Mode 6 Update Pop-Up* | Baseline rilis stabil saat ini | `[DONE]` |
 | `v2.1.3` | *Hotfix Stability — Drop-Out & Floating Pill* | Native OS drag-out (`CF_HDROP`) dengan verifikasi `DRAGDROP_S_DROP` + anti-flicker floating mode | `[PLANNED]` |
-| `v2.1.4` | *CASA Player — Smart Queue & Search Album/Playlist* | Auto-queue relasi lagu (`videoId`/`trackId` + fallback `artistId`), region dinamis `gl`/`hl`, serta kategori Top Songs, Album & Playlist | `[PLANNED]` |
+| `v2.1.4` | *CASA Player — Smart Queue & Search Album/Playlist* | Auto-queue relasi lagu (`videoId`/`trackId` + `artistId`), transisi playlist→Smart Queue & *session-seeded* queue, region `gl`/`hl`, serta kategori Top Songs, Album & Playlist | `[PLANNED]` |
 | `v2.2.0` | *Dropzone 2.0 — Papan Teks Ephemeral* | Drag-in teks/link/file tanpa shortcut (`dragDropEnabled: false`) + auto-hapus pasca drag-out/tutup | `[PLANNED]` |
 | `v2.3.0` | *Connect HP — Zero-App Local Web Drop* | Server `axum` HTTP+WebSocket sementara, QR token acak, transfer 2 arah Wi-Fi/Hotspot, auto-shutdown | `[PLANNED]` |
 | `v2.4.0` | *Quick Calculator & Instant Converter* | Kalkulator ekspresi inline aman di pil, salin hasil 1 klik, serta konversi satuan/kurs ringkas | `[PLANNED]` |
@@ -63,6 +63,8 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 
 1. **Auto-Queue Berbasis Relasi Lagu (`native_audio.rs`, `musicQueueEngine.ts`, `nativeAudioService.ts`):**
    - Ganti mekanisme *auto-queue* yang sebelumnya mengandalkan pencarian teks bebas nama artis dengan endpoint relasi lagu resmi (**`Up Next` / `Watch Playlist`** berbasis `videoId` / `trackId`), disertai *fallback* ke **`artistId`** resmi jika daftar relasi belum tersedia, agar rekomendasi otomatis selalu mengikuti ekosistem musik lagu yang sedang diputar (baik katalog lokal Indonesia maupun internasional).
+   - **Transisi Playlist ke Smart Queue (Anti-Loop Paksa):** Saat memutar dari playlist tersimpan dan mode *Repeat* dalam keadaan **Off**, begitu lagu terakhir di playlist selesai diputar, CASA Player **tidak boleh mengulang/loop isi playlist dari awal**, melainkan otomatis melanjutkan pemutaran dengan menarik rekomendasi *Smart Queue* berdasarkan *seed* lagu-lagu di playlist tersebut (hanya mengulang dari awal apabila pengguna secara eksplisit mengaktifkan mode *Repeat All*).
+   - **Session-Seeded Smart Queue (Anti-Personal Mix Fallback):** Saat pengguna menambahkan lagu secara manual ke antrian dan seluruh antrian habis, *auto-queue* **wajib** menggunakan **riwayat *seed* sesi aktif** (`videoId` dan `artistId` dari beberapa lagu terakhir yang diputar/diantrekan di sesi tersebut) untuk memanggil endpoint relasi *Up Next / Watch Playlist*—bukan jatuh ke *fallback* *personal mix* / riwayat putar harian pengguna—agar rekomendasi lanjutan tetap konsisten dengan nuansa dan artis lagu yang baru didengarkan.
 
 2. **Parameter Wilayah Dinamis (`gl` & `hl`):**
    - Terapkan parameter wilayah (**`gl`** & **`hl`**) secara dinamis mengikuti locale/region OS pengguna, dilengkapi opsi pemilih region manual di pengaturan Player (**`Auto`**, **`ID`**, **`US`**, **`KR`**, **`JP`**) sehingga hasil pencarian kata ambigu tetap relevan tanpa mengunci katalog ke satu negara saja.
