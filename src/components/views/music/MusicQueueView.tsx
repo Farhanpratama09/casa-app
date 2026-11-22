@@ -1,7 +1,7 @@
 import React from 'react';
-import { Repeat, Shuffle, Sparkles, Trash2, X } from 'lucide-react';
+import { Repeat, Repeat1, Shuffle, Sparkles, Trash2, X } from 'lucide-react';
 import { NativeTrack } from '../../../services/nativeAudioService';
-import { normalizeTrackMetadata } from '../../../utils/musicQueueEngine';
+import { normalizeTrackMetadata, RepeatMode } from '../../../utils/musicQueueEngine';
 import { AddToPlaylistPopover } from './AddToPlaylistPopover';
 import { formatDuration } from './constants';
 
@@ -13,7 +13,7 @@ export interface MusicQueueViewProps {
   isPlaying?: boolean;
   isResolving?: boolean;
   isShuffle: boolean;
-  isRepeat: boolean;
+  repeatMode: RepeatMode;
   isFetchingSmart?: boolean;
   onToggleShuffle: () => void;
   onToggleRepeat: () => void;
@@ -32,7 +32,7 @@ export const MusicQueueView: React.FC<MusicQueueViewProps> = ({
   isPlaying = false,
   isResolving = false,
   isShuffle,
-  isRepeat,
+  repeatMode,
   isFetchingSmart = false,
   onToggleShuffle,
   onToggleRepeat,
@@ -69,14 +69,24 @@ export const MusicQueueView: React.FC<MusicQueueViewProps> = ({
             type="button"
             onClick={onToggleRepeat}
             className={`h-5 px-2 rounded-full flex items-center gap-1 text-[9.5px] font-semibold border transition-colors ${
-              isRepeat
+              repeatMode !== 'off'
                 ? 'bg-white text-black border-white'
                 : 'bg-[#0a0a0a] text-zinc-400 border-white/15 hover:text-white'
             }`}
-            title="Repeat current track"
+            title={
+              repeatMode === 'one'
+                ? 'Repeat One (loop current track)'
+                : repeatMode === 'all'
+                ? 'Repeat All (loop playlist / queue)'
+                : 'Repeat Off (auto Smart Queue)'
+            }
           >
-            <Repeat className="w-2.5 h-2.5" />
-            <span>Repeat</span>
+            {repeatMode === 'one' ? (
+              <Repeat1 className="w-2.5 h-2.5" />
+            ) : (
+              <Repeat className="w-2.5 h-2.5" />
+            )}
+            <span>{repeatMode === 'all' ? 'Repeat All' : repeatMode === 'one' ? 'Repeat 1' : 'Repeat'}</span>
           </button>
         </div>
 
@@ -208,14 +218,22 @@ export const MusicQueueView: React.FC<MusicQueueViewProps> = ({
               </span>
             </div>
             <span className="text-[8.5px] font-mono text-zinc-500">
-              {isRepeat ? 'PAUSED' : isFetchingSmart ? 'FILLING...' : `${smartQueue.length}/5`}
+              {repeatMode === 'one'
+                ? 'REPEAT 1'
+                : repeatMode === 'all'
+                ? 'REPEAT ALL'
+                : isFetchingSmart
+                ? 'FILLING...'
+                : `${smartQueue.length}/5`}
             </span>
           </div>
 
           {smartQueue.length === 0 ? (
             <div className="px-2 py-1.5 rounded-lg bg-[#0a0a0a] border border-white/[0.06] text-[9.5px] text-zinc-500">
-              {isRepeat
-                ? 'Repeat is active · Smart Queue paused.'
+              {repeatMode === 'one'
+                ? 'Repeat One active · looping current track.'
+                : repeatMode === 'all'
+                ? 'Repeat All active · looping playlist/queue.'
                 : manualQueue.length >= 2
                 ? 'Auto-fills when Up Next drops below 2.'
                 : isFetchingSmart

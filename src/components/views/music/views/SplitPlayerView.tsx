@@ -16,6 +16,7 @@ import type { LyricLine } from '../../../../utils/lyricsService';
 import type { SpotifyTrackItem, SpotifyPlaylistItem } from '../../../../utils/spotifyService';
 import type { AudioDeviceType } from '../../../../hooks/useSystemHardware';
 import type { NativeTrack } from '../../../../services/nativeAudioService';
+import type { RepeatMode } from '../../../../utils/musicQueueEngine';
 
 export type NativeTab = 'lyrics' | 'queue' | 'search';
 
@@ -61,7 +62,7 @@ export interface SplitPlayerViewProps {
   durationSeconds: number;
   isShuffle: boolean;
   isSmartShuffle: boolean;
-  isRepeat?: boolean;
+  repeatMode?: RepeatMode;
   onToggleRepeat?: () => void;
 
   // Right column contextual title & loaders
@@ -170,7 +171,7 @@ export const SplitPlayerView: React.FC<SplitPlayerViewProps> = memo(({
   durationSeconds,
   isShuffle,
   isSmartShuffle,
-  isRepeat = false,
+  repeatMode = 'off',
   onToggleRepeat,
   queueContextTitle,
   isLoadingPlaylists,
@@ -372,7 +373,7 @@ export const SplitPlayerView: React.FC<SplitPlayerViewProps> = memo(({
               isShuffle={isShuffle}
               isSmartShuffle={isSmartShuffle}
               onToggleShuffle={onToggleShuffle}
-              isRepeat={isRepeat}
+              repeatMode={repeatMode}
               onToggleRepeat={onToggleRepeat}
               onPrev={onPrev}
               onTogglePlay={onTogglePlay}

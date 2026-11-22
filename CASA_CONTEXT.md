@@ -1,4 +1,4 @@
-# CASA_CONTEXT.md — Single Source of Truth (`v2.1.2`)
+# CASA_CONTEXT.md — Single Source of Truth (`v2.1.4`)
 
 > Dibuat dari implementasi nyata pada `src/`, `src-tauri/`, dan `docs/` (bukan asumsi). Wajib diperbarui setiap kali kode atau arsitektur berubah.  
 > **CASA** — *Dynamic Rabbit Island for Windows* (`com.farhanpratama.casa`) · MIT License.
@@ -10,12 +10,12 @@
 | Aspek | Detail |
 |---|---|
 | Form factor | Window Tauri transparan, frameless, `alwaysOnTop`, `skipTaskbar`, `shadow:false`, dipusatkan di tepi atas monitor aktif |
-| Identifier / Versi | `com.farhanpratama.casa` / **`2.1.2`** (`tauri.conf.json`, `Cargo.toml`, `package.json`, `docs/`) |
+| Identifier / Versi | `com.farhanpratama.casa` / **`2.1.4`** (`tauri.conf.json`, `Cargo.toml`, `package.json`, `docs/`) |
 | Window utama | `1100×340` terkunci (kanvas logis 1100 px menghindari *DWM swapchain ResizeBuffers hitch*; hitbox dinamis via `WS_EX_TRANSPARENT` per `HitRect`) |
 | Settings window | Window sekunder `settings` (`DesktopSettingsWindow.tsx`) berarsitektur flat OLED 2-kolom (5 tab sidebar termasuk **`Ibadah & Lokasi`**) + tombol **`Quit CASA`** |
-| Frontend | React 19, TypeScript 5.7 (`strict`), Vite 6 (dev `127.0.0.1:1420`), Tailwind 3.4, framer-motion 12, zustand 5, lucide-react |
-| Backend | Rust (edition 2021), Tauri 2.2 (`tray-icon`, `protocol-asset`), `tauri-plugin-{drag,global-shortcut,autostart,process,updater}`, tokio, reqwest 0.13, sysinfo 0.33, chrono 0.4, salah 0.7, serde |
-| Windows API | `windows` 0.62 (`Media_Control`, `Storage_Streams`, `Devices_Radios/Bluetooth/Geolocation`, `Win32_Media_Audio`, Wi-Fi/Power/WMI) + `windows-sys` 0.59 (`SetWindowPos`, `GetWindowLongPtrW`, `Toolhelp`) |
+| Frontend | React 19, TypeScript 5.7 (`strict`), Vite 6 (dev `127.0.0.1:1420`, `manualChunks` & lazy `Settings`), Tailwind 3.4, framer-motion 12, zustand 5, lucide-react |
+| Backend | Rust (edition 2021, `[profile.release]` `opt-level="z"`, `lto="thin"`, `strip="symbols"`, `panic="abort"`), Tauri 2.2 (`tray-icon`, `protocol-asset`), `tauri-plugin-{drag,global-shortcut,autostart,process,updater}`, tokio, reqwest 0.13, sysinfo 0.33, chrono 0.4, salah 0.7, serde |
+| Windows API | `windows` 0.62 (`Media_Control`, `Storage_Streams`, `Devices_Radios/Bluetooth/Geolocation`, `Win32_Media_Audio`, `Win32_Globalization`, Wi-Fi/Power/WMI) + `windows-sys` 0.59 (`SetWindowPos`, `GetWindowLongPtrW`, `Toolhelp`) |
 | Eksternal | LRCLIB (`lrclib.net/api/search`); Spotify Web API (`spotify_oauth.rs` loopback `127.0.0.1:8888`); YouTube native resolve; Open-Meteo Geocoding & BigDataCloud reverse-geocode via Rust `reqwest` (tanpa membuka CSP WebView); GitHub Releases API (`latest.json` OTA); Supabase (`casa_reviews` + Edge Functions) & Telegram Bot API |
 | Web Showcase | `docs/` (HTML/CSS/JS statis zero-dependency + Play Store-style **Ratings & Reviews** + E2E Puppeteer `scripts/verify-docs-showcase.mjs`) |
 | Cek wajib | `npx tsc --noEmit`, `npm run build`, `cargo check --manifest-path src-tauri/Cargo.toml`, `node scripts/verify-docs-showcase.mjs`, `node scripts/verify-reviews-security.mjs` |
@@ -42,7 +42,7 @@ asaverse/
 │  ├─ styles.css             ← Pure OLED theme + native Mode 6 capsule & Play Store reviews styling
 │  ├─ 404.html               ← Clean SPA sub-route restoration (/playground, /arsitektur, /unduh, /feedback)
 │  ├─ favicon.svg            ← Obsidian Bunny icon (`× ♥`)
-│  ├─ PRD.md                 ← Product Requirements Document v2.1.2
+│  ├─ PRD.md                 ← Product Requirements Document v2.1.4
 │  └─ sasha-character-spec.md
 ├─ supabase/                 ← Backend moderasi ulasan publik (`ivlyujaafwqziogajjtk.supabase.co`)
 │  ├─ config.toml            ← `verify_jwt = false` untuk `submit-review` & `telegram-webhook`
@@ -54,9 +54,11 @@ asaverse/
 │  ├─ verify-reviews-security.mjs     ← Unit test Node untuk anti-spam NFKC/word-boundary, IPv6 /64 HMAC & webhook crypto
 │  ├─ verify-todo-persistence.mjs     ← Verifikasi persistensi To-Do antar-sesi, initial empty [], & validasi focusedTaskId
 │  ├─ verify-search-playlist-flow.mjs ← Verifikasi Search Drawer & Playlist popover flow
+│  ├─ verify-floating-drop-v213.mjs   ← Verifikasi Floating Mode anti-flicker & native CF_HDROP drag-out
+│  ├─ verify-player-v214.mjs         ← Verifikasi Smart Queue, Anti-Loop Playlist, Session Seeding, Region, Search & Lazy Bundle
 │  └─ verify-*.{ts,js}                ← Logic test suite (lyrics, queue, browser sanitizer, time-sync, hitbox)
 ├─ src-tauri/
-│  ├─ tauri.conf.json        ← v2.1.2, com.farhanpratama.casa, 1100x340, CSP, updater pubkey + endpoints
+│  ├─ tauri.conf.json        ← v2.1.4, com.farhanpratama.casa, 1100x340, CSP, updater pubkey + endpoints
 │  ├─ capabilities/default.json
 │  └─ src/
 │     ├─ main.rs / lib.rs    ← DPI window align (`position_window_top`), 50Hz hitbox, `Alt+Space`, tray EN, `quit_app`, updater
@@ -64,7 +66,7 @@ asaverse/
 │     ├─ update_monitor.rs   ← Lightweight ETag (`If-None-Match`) background `latest.json` / release check (5s launch, `online` reconnect, focus/wake, 45m) + 6px pulse dot & changelog payload
 │     ├─ hitbox.rs           ← Multi-rect `HitRect` poller 50Hz + `set_island_pinned`
 │     ├─ spotify_oauth.rs    ← OAuth 2.0 loopback :8888 (`start_spotify_login`, `refresh_spotify_user_token`)
-│     ├─ native_audio.rs     ← Pencarian & stream resolution native audio (`search_tracks_native`, `resolve_track_stream`)
+│     ├─ native_audio.rs     ← InnerTube dinamis region (`gl`/`hl`), search multi-kategori (`search_catalog_native`), `Up Next / Watch Playlist` (`get_up_next_native`), `browse_collection_tracks_native`, & stream resolution (`resolve_track_stream`)
 │     ├─ system_hardware.rs  ← WASAPI volume/mute, Display brightness WMI, Stay-Awake, Wi-Fi, Bluetooth devices/battery, audio endpoints
 │     ├─ system_stats.rs     ← CPU, RAM, & hardware telemetry (`get_system_telemetry`)
 │     ├─ drop_zone.rs        ← Drop shelf metadata, clipboard files/image, launch/reveal/open actions
@@ -107,13 +109,13 @@ asaverse/
 ### 3.2 Ringkasan IPC Commands (`invoke_handler` di `lib.rs`)
 - **Window & Lifecycle:** `set_ignore_cursor_events`, `align_window_top`, `adjust_window_size`, `focus_island_window`, `set_window_visibility`, `toggle_gaming_mode`, `quit_app`, `update_island_hitbox`, `update_island_hitboxes`, `set_island_pinned`.
 - **System & OTA:** `get_global_shortcut_status`, `get_autostart_enabled`, `set_autostart_enabled`, `check_app_update`, `install_app_update`, `get_update_notification_status`, `trigger_background_update_check`, `dismiss_update_badge`, `clear_update_notification`.
-- **Media & Spotify:** `media_play_pause`, `media_next_track`, `media_prev_track`, `control_media_session`, `quick_swap_session`, `seek_media_session`, `get_current_media`, `spotify_play_track`, `spotify_play_uri_stealth`, `minimize_spotify_stealth`, `is_spotify_running`, `ensure_spotify_running_silent`, `focus_spotify_window`, `launch_spotify_process_clean`, `quit_spotify_app`, `start_spotify_login`, `refresh_spotify_user_token`, `search_tracks_native`, `resolve_track_stream`.
+- **Media & Spotify:** `media_play_pause`, `media_next_track`, `media_prev_track`, `control_media_session`, `quick_swap_session`, `seek_media_session`, `get_current_media`, `spotify_play_track`, `spotify_play_uri_stealth`, `minimize_spotify_stealth`, `is_spotify_running`, `ensure_spotify_running_silent`, `focus_spotify_window`, `launch_spotify_process_clean`, `quit_spotify_app`, `start_spotify_login`, `refresh_spotify_user_token`, `search_tracks_native`, `search_catalog_native`, `get_up_next_native`, `browse_collection_tracks_native`, `get_player_region_info`, `resolve_track_stream`.
 - **Hardware & Drop Zone:** `get_system_metrics`, `get_system_telemetry`, `get_hardware_telemetry`, `set_master_volume`, `toggle_audio_mute`, `set_display_brightness`, `set_stay_awake`, `get_stay_awake`, `get_radio_states`, `toggle_wifi`, `toggle_bluetooth`, `scan_wifi_networks`, `connect_wifi_network`, `list_paired_bluetooth`, `toggle_bluetooth_device`, `get_audio_output_devices`, `set_default_audio_endpoint`, `get_file_metadata`, `register_drop_zone_files`, `read_clipboard_text`, `read_clipboard_files`, `save_clipboard_image`, `copy_files_to_clipboard`, `native_drag_drop_files`, `pick_drop_zone_files`, `launch_file_item`, `reveal_in_folder`, `open_file_item`, `open_url_item`.
 - **Pengingat Ibadah & Lokasi (`prayer.rs`):** `get_prayer_times`, `detect_windows_location`, `search_prayer_city`, `open_windows_location_settings`.
 
 ---
 
-## 4. Arsitektur Frontend & UX `v2.1.2` (`src/` & `docs/`)
+## 4. Arsitektur Frontend & UX `v2.1.4` (`src/` & `docs/`)
 
 ### 4.1 Dimensi Kapsul (`islandLayoutState.ts`)
 - **Smart-Tuck:** `120×4 px` (sensor hover Docked `136×12 px`, Floating `140×18 px`), cooldown hysteresis hover/transisi terpadu **`220 ms`** (`HOVER_TRANSITION_HYSTERESIS_MS`), dan kompensasi *top-bridge* `0..12 px` di Floating Mode (`computePrimaryIslandHitboxAndSensor`) untuk transisi `tucked ↔ tucked_peek ↔ idle ↔ idle_peek`, plus cooldown pasca-fullscreen `450 ms`.
@@ -126,7 +128,11 @@ asaverse/
   - Drop Zone `580×192 px`.
 
 ### 4.2 Sub-Navigasi Musik & Tema (`Mode6MusicLayout.tsx`, `Mode6ControlCenterView.tsx`, `BatteryPill.tsx`)
-- **Sub-Navigasi:** Hanya **`Player | Playlists`** (tab `Queue` redundan dihapus); daftar antrean diakses melalui tombol toggle pod kanan ber-header **`QUEUE`**.
+- **Sub-Navigasi:** Hanya **`Player | Playlists`** (tab `Queue` redundan dihapus); daftar antrean diakses melalui tombol toggle pod kanan ber-header **`QUEUE`**, lengkap dengan kontrol Repeat 3-mode **`Off | All | One`** (`repeatMode` di `useQueueStore.ts`, `CasaAudioContext.tsx`, dan `docs/`).
+- **CASA Player Smart Queue, Anti-Loop, & Search Multi-Kategori (`v2.1.4`):**
+  - *Smart Queue Relasi & Session Seeding (`native_audio.rs`, `radioEngine.ts`, `useQueueStore.ts`):* Memakai InnerTube `youtubei/v1/next` (*Up Next / Watch Playlist* via `videoId` dengan fallback resmi `artistId` melalui `browse`), mempertahankan seed sesi aktif (`sessionSeeds` + playlist aktif) tanpa fallback ke riwayat putar 30 hari (*personal mix*), mematikan pengulangan playlist paksa (`wrapAround: false`) saat `repeatMode === 'off'`, dan melindungi skip cepat lewat `radioEpoch` + `AbortController` + `playbackSeqRef`.
+  - *Region Dinamis & Pencarian Terstruktur:* Parameter `gl`/`hl` dibaca dinamis dari Windows locale OS (`Win32_Globalization`) dengan override manual `Auto | ID | US | KR | JP` (`settings.playerRegion` di `Timer, Audio & Player`); Search Pod kiri menampilkan **Top Songs Artis**, **Albums**, **Playlists**, dan **Songs** lengkap dengan tombol **Play All** / **+ Antrian** 1-klik yang memutar lagu utuh tanpa menunggu lirik sinkron LRCLIB.
+  - *Hygiene RAM & Ukuran Biner:* `DesktopSettingsWindow` di-lazy-load via `React.lazy` (dikeluarkan dari `modulePreload` utama lewat `vite.config.ts`), dan `Cargo.toml` mengonfigurasi `[profile.release]` (`opt-level = "z"`, `lto = "thin"`, `strip = "symbols"`, `panic = "abort"`, `codegen-units = 1`).
 - **Pure Monochrome Fidelity:** Saat `settings.theme === 'monochrome'`, seluruh elemen (`BatteryPill`, ikon `Speaker` / `Headphones` / `Bluetooth`, cincin CPU/RAM/Focus, status Wi-Fi/BT) wajib membaca token dari `CASA_THEME_PALETTES` (`#FFFFFF` / zinc) tanpa kelas warna statis Tailwind (`text-emerald-*`, `text-green-*`, dll.).
 
 - **Single Clock Sync, `Unsynced` Auto-Scroll & To-Do Alarm `v2.0.4`:**

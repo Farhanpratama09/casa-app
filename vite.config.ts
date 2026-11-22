@@ -33,5 +33,34 @@ export default defineConfig({
     target: 'esnext',
     minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    modulePreload: {
+      resolveDependencies: (_filename, deps) =>
+        deps.filter((dep) => !dep.includes('settings-window')),
+    },
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (
+            id.includes('DesktopSettingsWindow') ||
+            id.includes('IbadahSettingsSection')
+          ) {
+            return 'settings-window';
+          }
+          if (id.includes('node_modules')) {
+            if (id.includes('framer-motion')) return 'vendor-motion';
+            if (id.includes('lucide-react')) return 'vendor-icons';
+            if (
+              id.includes('node_modules/react/') ||
+              id.includes('node_modules/react-dom/') ||
+              id.includes('node_modules\\react\\') ||
+              id.includes('node_modules\\react-dom\\') ||
+              id.includes('zustand')
+            ) {
+              return 'vendor-core';
+            }
+          }
+        },
+      },
+    },
   },
 });

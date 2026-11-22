@@ -657,7 +657,7 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
 export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   if (!isTauriEnv) {
     return {
-      currentVersion: '2.1.2',
+      currentVersion: '2.1.4',
       available: false,
       version: null,
       body: null,
@@ -672,7 +672,7 @@ export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
 export async function getUpdateNotificationStatus(): Promise<UpdateNotificationStatus> {
   if (!isTauriEnv) {
     return {
-      currentVersion: '2.1.2',
+      currentVersion: '2.1.4',
       latestVersion: null,
       releaseUrl: null,
       releaseNotes: null,
@@ -685,7 +685,7 @@ export async function getUpdateNotificationStatus(): Promise<UpdateNotificationS
     return await invoke<UpdateNotificationStatus>('get_update_notification_status');
   } catch {
     return {
-      currentVersion: '2.1.2',
+      currentVersion: '2.1.4',
       latestVersion: null,
       releaseUrl: null,
       releaseNotes: null,

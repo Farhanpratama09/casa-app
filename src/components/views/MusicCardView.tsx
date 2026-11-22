@@ -12,7 +12,7 @@ import { markPlaybackManualSeekLock } from '../../features/media/playbackClock';
 import { useSkillStore } from '../../skills/store';
 import { useSystemHardware } from '../../hooks/useSystemHardware';
 import { useCasaAudio } from '../../context/CasaAudioContext';
-import { useQueueStore } from '../../stores/useQueueStore';
+import { useQueueStore, PlaybackContextKind } from '../../stores/useQueueStore';
 import { useMusicAffinityStore } from '../../hooks/useMusicAffinity';
 import { normalizeTrackMetadata } from '../../utils/musicQueueEngine';
 import { listen } from '@tauri-apps/api/event';
@@ -307,12 +307,13 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     handlePrevTrack: handlePrevNativeTrack,
     handleSeekNative,
     addToQueue: handleAddToNativeQueue,
+    addCollectionToQueue: handleAddCollectionToNativeQueue,
     removeFromQueue: handleRemoveFromNativeQueue,
     clearQueue: handleClearNativeQueue,
     setQueueAndPlay,
     isShuffle: nativeIsShuffle,
-    isRepeat: nativeIsRepeat,
-    setRepeat: setNativeRepeat,
+    repeatMode: nativeRepeatMode,
+    toggleRepeat: toggleNativeRepeat,
     playSmartQueueTrack,
     removeSmartQueueTrack,
   } = useCasaAudio();
@@ -587,7 +588,11 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     setPlaybackSource(source);
   };
 
-  const handleSelectNativeTrack = (track: NativeTrack, customList?: NativeTrack[]) => {
+  const handleSelectNativeTrack = (
+    track: NativeTrack,
+    customList?: NativeTrack[],
+    options?: { contextKind?: PlaybackContextKind }
+  ) => {
     playChimeCue('tap');
     setIsNativeSearchOpen(false);
 
@@ -600,7 +605,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     }
 
     setPlaybackSource('native');
-    setQueueAndPlay(listToUse, idx);
+    setQueueAndPlay(listToUse, idx, options);
   };
 
   useEffect(() => {
@@ -1309,11 +1314,10 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
     onSubPanelChange?.(next);
   };
 
-  const isRepeat = nativeIsRepeat;
+  const repeatMode = nativeRepeatMode;
   const handleToggleRepeat = () => {
     playChimeCue('tap');
-    const next = !nativeIsRepeat;
-    setNativeRepeat(next);
+    toggleNativeRepeat();
   };
 
   const [isSearchFocused, setIsSearchFocused] = useState<boolean>(false);
@@ -2504,6 +2508,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           nativeQueueIndex={nativeQueueIndex}
           onPlayNativeSearchTrack={handleSelectNativeTrack}
           onAddToNativeQueue={handleAddToNativeQueue}
+          onAddCollectionToNativeQueue={handleAddCollectionToNativeQueue}
           addedNativeTrackId={addedNativeTrackId}
           onSelectNativeQueueTrack={playTrackAtIndex}
           onRemoveNativeQueueTrack={handleRemoveFromNativeQueue}
@@ -2511,7 +2516,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           onOpenLocalFile={handleOpenLocalFiles}
           isShuffle={playbackSource === 'native' ? nativeIsShuffle : isShuffle}
           onToggleShuffle={handleShuffleToggle}
-          isRepeat={nativeIsRepeat}
+          repeatMode={nativeRepeatMode}
           onToggleRepeat={handleToggleRepeat}
           onPlaySmartQueueTrack={playSmartQueueTrack}
           onRemoveSmartQueueTrack={removeSmartQueueTrack}
@@ -2589,7 +2594,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           durationSeconds={normalizedDurationSec}
           isShuffle={isShuffle}
           isSmartShuffle={isSmartShuffle}
-          isRepeat={isRepeat}
+          repeatMode={repeatMode}
           onToggleRepeat={handleToggleRepeat}
           audioOutput={audioOutput}
           audioDeviceType={systemTelemetry.audio_device_type}
@@ -2703,7 +2708,7 @@ export const MusicCardView: React.FC<MusicCardViewProps> = ({
           durationSeconds={normalizedDurationSec}
           isShuffle={isShuffle}
           isSmartShuffle={isSmartShuffle}
-          isRepeat={isRepeat}
+          repeatMode={repeatMode}
           onToggleRepeat={handleToggleRepeat}
           queueContextTitle={queueContextTitle}
           isLoadingPlaylists={isLoadingPlaylists}

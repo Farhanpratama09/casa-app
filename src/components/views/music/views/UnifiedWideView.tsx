@@ -9,6 +9,7 @@ import { PlayerControls } from '../PlayerControls';
 import type { MusicSubPanel } from '../constants';
 import type { AudioDeviceType } from '../../../../hooks/useSystemHardware';
 import type { NativeTrack } from '../../../../services/nativeAudioService';
+import type { RepeatMode } from '../../../../utils/musicQueueEngine';
 
 export interface UnifiedWideViewProps {
   // Playback & Session status
@@ -39,7 +40,7 @@ export interface UnifiedWideViewProps {
   durationSeconds: number;
   isShuffle: boolean;
   isSmartShuffle: boolean;
-  isRepeat?: boolean;
+  repeatMode?: RepeatMode;
   onToggleRepeat?: () => void;
 
   // Audio output device & System Hardware Telemetry
@@ -101,7 +102,7 @@ export const UnifiedWideView: React.FC<UnifiedWideViewProps> = memo(({
   durationSeconds,
   isShuffle,
   isSmartShuffle,
-  isRepeat = false,
+  repeatMode = 'off',
   onToggleRepeat,
   audioOutput = 'speaker',
   audioDeviceType = 'speaker',
@@ -288,7 +289,7 @@ export const UnifiedWideView: React.FC<UnifiedWideViewProps> = memo(({
           isShuffle={isShuffle}
           isSmartShuffle={isSmartShuffle}
           onToggleShuffle={onToggleShuffle}
-          isRepeat={isRepeat}
+          repeatMode={repeatMode}
           onToggleRepeat={onToggleRepeat}
           onPrev={onPrev}
           onTogglePlay={onTogglePlay}

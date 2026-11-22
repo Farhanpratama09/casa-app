@@ -1,13 +1,18 @@
-import React, { useState, useEffect, useLayoutEffect } from 'react';
+import React, { Suspense, useState, useEffect, useLayoutEffect } from 'react';
 import { CasaAudioProvider } from './context/CasaAudioContext';
 import { CasaIsland } from './components/CasaIsland';
 import { DevTriggerBar } from './components/views/DevTriggerBar';
-import { DesktopSettingsWindow } from './components/settings/DesktopSettingsWindow';
 import { IslandMode, CompactSubtype } from './types/island';
 import { toggleGamingMode, playChimeCue } from './utils/tauriBridge';
 import { getCurrentWindowLabel } from './utils/settingsWindow';
 import { initializeSkillsEngine } from './skills';
 import { startPrayerSchedulerEngine } from './features/ibadah/prayerStore';
+
+const DesktopSettingsWindow = React.lazy(() =>
+  import('./components/settings/DesktopSettingsWindow').then((mod) => ({
+    default: mod.DesktopSettingsWindow,
+  }))
+);
 
 const IS_SETTINGS_WINDOW = getCurrentWindowLabel() === 'settings';
 
@@ -110,7 +115,11 @@ export function App() {
   }, []);
 
   if (IS_SETTINGS_WINDOW) {
-    return <DesktopSettingsWindow />;
+    return (
+      <Suspense fallback={<div className="w-screen h-screen bg-[#070708]" />}>
+        <DesktopSettingsWindow />
+      </Suspense>
+    );
   }
 
   return <MainIslandApp />;

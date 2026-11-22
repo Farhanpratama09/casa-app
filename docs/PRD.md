@@ -1,4 +1,4 @@
-# Product Requirements Document (PRD) — CASA `v2.1.2`
+# Product Requirements Document (PRD) — CASA `v2.1.4`
 
 **CASA — Dynamic Rabbit Island for Windows** (`com.farhanpratama.casa`)  
 Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + Rust + React 19 + TypeScript + Vite)  
@@ -8,7 +8,7 @@ Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + R
 
 ## 1. Identitas & Filosofi Produk
 - **Nama Produk:** CASA (*Dynamic Rabbit Island for Windows*)
-- **Versi Acuan:** `2.1.2` (tersinkron di [package.json](../package.json), [Cargo.toml](../src-tauri/Cargo.toml), [tauri.conf.json](../src-tauri/tauri.conf.json), sidebar Settings, dan [docs/index.html](./index.html))
+- **Versi Acuan:** `2.1.4` (tersinkron di [package.json](../package.json), [Cargo.toml](../src-tauri/Cargo.toml), [tauri.conf.json](../src-tauri/tauri.conf.json), sidebar Settings, dan [docs/index.html](./index.html))
 - **Konsep Inti:** Kapsul *top-flush Dynamic Island* berlatar OLED hitam murni (`#000000`) di tepi atas monitor Windows 10/11 yang hening (*non-intrusive*, `WS_EX_NOACTIVATE`), menyatukan pemutar musik & lirik sinkron milidetik, *Focus Timer & To-Do Ring*, kontrol cepat sistem, *Drag & Drop Shelf*, dan ekspresi maskot **Obsidian Bunny** (`× ♥`).
 
 ---
@@ -17,6 +17,9 @@ Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + R
 
 ### 2.1 Mode 6 Musik, Sub-Navigasi & Pop-up `QUEUE`
 - **Navigasi Sub-Tab:** Menggunakan tepat **2 sub-tab utama** bertajuk **`Player | Playlists`** pada bar kontrol musik (`Mode6MusicLayout.tsx`) — tanpa tab `Queue` redundan pada sub-navigasi.
+- **Smart Queue Relasi, Anti-Loop & Search Multi-Kategori (`v2.1.4`):**
+  - Auto-queue menggunakan InnerTube `youtubei/v1/next` (*Up Next / Watch Playlist* via `videoId` dengan fallback `artistId` resmi), memakai seed sesi aktif (`sessionSeeds`) tanpa fallback ke *personal mix* 30 hari, mematikan loop playlist saat `repeatMode === 'off'` (berlanjut ke Smart Queue seeded dari playlist kecuali `repeatMode === 'all'`), dan mendukung **Repeat 3-mode (`Off | All | One`)** tersinkron ke `docs/`.
+  - Pencarian CASA Player memakai parameter region dinamis (`gl`/`hl` OS + opsi `Auto | ID | US | KR | JP` di Settings) serta menampilkan kategori **Top Songs Artis**, **Albums**, **Playlists**, dan **Songs** dengan aksi **Play All / + Antrian** 1-klik (tetap memutar penuh meski lirik sinkron LRCLIB tidak tersedia), disertai lazy loading Settings (`React.lazy` + `manualChunks`) dan optimasi biner Rust (`[profile.release]`).
 - **Pop-up Satelit Kanan `QUEUE`:** Dipicu oleh tombol ikon ke-4 pada kontrol `Player`, menampilkan kartu satelit sebelah kanan (`width: 204px`, celah `10px` dari kapsul utama) dengan header monospace ringkas **`QUEUE`** + jumlah antrean.
 - **Search Drawer & Playlist Popover:** Kartu satelit kiri (*Search CASA Player*) wajib mengunci popover `SAVE TO PLAYLIST` (`AddToPlaylistPopover`) di dalam batas horizontal & vertikal drawer (`searchDrawerBounds`) dan melaporkannya lewat `update_island_hitboxes` agar terbebas dari *click-through* Windows.
 - **Context-Aware Queue Playback & Instant Invalidation:**
@@ -69,7 +72,7 @@ Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + R
 - **Navigasi Clean Path Tanpa `#`:** Menggunakan `History API` (`pushState` / `replaceState`) untuk `/casa-app/`, `/casa-app/playground`, `/casa-app/arsitektur`, `/casa-app/unduh`, `/casa-app/feedback` (+ alias `/casa-app/discussions`) disertai pemulihan SPA lewat [404.html](./404.html).
 - **Smart Download Counter & Cooldown:**
   - `initSmartReleaseHub()` mengambil statistik dari GitHub Releases API, menjumlahkan khusus biner installer (`.exe` dan `.msi`; mengecualikan `.sig` & `latest.json`), menyimpannya pada `localStorage` (`casa_dl_count_cache`) selama **15 menit** (`DL_CACHE_TTL_MS`), dan sembunyi anggun bila offline.
-  - Tombol unduh utama `#primary-download-btn` berlabel ringkas **`Download CASA for Windows`**, dengan versi dan ukuran pada subteks monospace `#download-size-text` (`v2.1.2 · NSIS Setup (.exe)`), serta **cooldown 6 detik** (`DL_COOLDOWN_MS = 6000`).
+  - Tombol unduh utama `#primary-download-btn` berlabel ringkas **`Download CASA for Windows`**, dengan versi dan ukuran pada subteks monospace `#download-size-text` (`v2.1.4 · NSIS Setup (.exe)`), serta **cooldown 6 detik** (`DL_COOLDOWN_MS = 6000`).
 - **Ratings & Reviews Ala Play Store (`#feedback`, Supabase + Telegram Moderation):**
   - Bagian `#feedback` menampilkan ringkasan skor rata-rata & 5 progress bar distribusi bintang, filter rating (`All`, `5 ★`..`1 ★`) + sort (`Newest`, `Highest`, `Lowest`), form tulis ulasan tanpa login (star picker `1–5`, Name max 40 char, Review `3–500` char, honeypot `website_hp`, `elapsed_ms`), dan balasan resmi **`Creator`**, disertai satu tautan ke **GitHub Discussions** (`https://github.com/Farhanpratama09/casa-app/discussions`).
   - **Arsitektur Database & Keamanan (`supabase/`):**

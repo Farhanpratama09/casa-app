@@ -33,7 +33,7 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 |---|---|---|---|
 | `v2.1.2` | *Prayer T-0 Sky Perimeter & Mode 6 Update Pop-Up* | Baseline rilis stabil saat ini | `[DONE]` |
 | `v2.1.3` | *Hotfix Stability — Drop-Out & Floating Pill* | Native OS drag-out (`CF_HDROP`) dengan verifikasi `DRAGDROP_S_DROP` + anti-flicker floating mode | `[DONE]` |
-| `v2.1.4` | *CASA Player — Smart Queue & Search Album/Playlist* | Auto-queue relasi lagu (`videoId`/`trackId` + `artistId`), transisi playlist→Smart Queue & *session-seeded* queue, region `gl`/`hl`, serta kategori Top Songs, Album & Playlist | `[PLANNED]` |
+| `v2.1.4` | *CASA Player — Smart Queue & Search Album/Playlist* | Auto-queue relasi lagu (`videoId`/`trackId` + `artistId`), transisi playlist→Smart Queue & *session-seeded* queue, region `gl`/`hl`, kategori Top Songs, Album & Playlist, 3-mode Repeat, & hygiene RAM/binary | `[DONE]` |
 | `v2.2.0` | *Dropzone 2.0 — Papan Teks Ephemeral* | Drag-in teks/link/file tanpa shortcut (`dragDropEnabled: false`) + auto-hapus pasca drag-out/tutup | `[PLANNED]` |
 | `v2.3.0` | *Connect HP — Zero-App Local Web Drop* | Server `axum` HTTP+WebSocket sementara, QR token acak, transfer 2 arah Wi-Fi/Hotspot, auto-shutdown | `[PLANNED]` |
 | `v2.4.0` | *Quick Calculator & Instant Converter* | Kalkulator ekspresi inline aman di pil, salin hasil 1 klik, serta konversi satuan/kurs ringkas | `[PLANNED]` |
@@ -58,7 +58,7 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 
 ---
 
-### `v2.1.4` — CASA Player: Smart Queue & Search Album/Playlist `[PLANNED]`
+### `v2.1.4` — CASA Player: Smart Queue & Search Album/Playlist `[DONE]`
 **Tujuan:** Meningkatkan akurasi rekomendasi antrean otomatis (*Auto-Queue*) dan memperkaya pencarian CASA Player agar mendukung kategori Artis, Album, serta Playlist secara lintas-katalog.
 
 1. **Auto-Queue Berbasis Relasi Lagu (`native_audio.rs`, `musicQueueEngine.ts`, `nativeAudioService.ts`):**

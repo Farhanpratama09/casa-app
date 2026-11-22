@@ -1,14 +1,20 @@
 /**
  * radioEngine.ts
- * Auto-Radio Recommendation Engine
- * 
- * Generates continuous contextual recommendations to keep playback active:
- * - Native Source: Invokes Rust/InnerTube search with contextual queries (`${artist} similar tracks`)
- * - Spotify Source: Invokes Spotify /v1/recommendations endpoint with fallback search
- * - Deduplication: Prevents repeating tracks present in history, manual queue, or current playback.
+ * Auto-Radio / Smart Queue Recommendation Engine (v2.1.4)
+ *
+ * Generates continuous contextual recommendations:
+ * - Native Source: Official InnerTube `youtubei/v1/next` (Up Next / Watch Playlist) by `videoId`,
+ *   with fallback to official `artistId` browse Top Songs, supporting multi-seed active session blending.
+ * - Spotify Source: Spotify /v1/recommendations -> Artist Top Tracks -> clean fallback.
+ * - Deduplication: Prevents repeating tracks present in active session history, manual queue, or current playback.
  */
 
-import { searchTracks, NativeTrack } from './nativeAudioService';
+import {
+  getUpNextTracks,
+  NativeTrack,
+  searchTracks,
+} from './nativeAudioService';
+import { CasaPlayerRegion, getSettingsSnapshot } from '../stores/useSettingsStore';
 import {
   getEffectiveToken,
   searchSpotifyTracks,
@@ -27,9 +33,28 @@ export interface RadioTrackItem {
   streamUrl?: string;
   candidates?: string[];
   album?: string;
+  albumTitle?: string;
+  artistId?: string;
   uri?: string;
   source: 'native' | 'spotify';
   isRadio: true;
+}
+
+export interface AutoRadioSeed {
+  id?: string;
+  artistId?: string;
+  title: string;
+  artist: string;
+  uri?: string;
+  albumTitle?: string;
+  isLocal?: boolean;
+  source?: string;
+}
+
+export interface AutoRadioOptions {
+  sessionSeeds?: AutoRadioSeed[];
+  region?: CasaPlayerRegion;
+  signal?: AbortSignal;
 }
 
 /**
@@ -78,76 +103,118 @@ export function isDuplicateTrack(
   });
 }
 
+const YT_VIDEO_ID_RE = /^[a-zA-Z0-9_-]{11}$/;
+const YT_ARTIST_ID_RE = /^UC[a-zA-Z0-9_-]{4,}$/;
+
+function isCleanArtistName(artist?: string): boolean {
+  const clean = (artist || '').trim().toLowerCase();
+  return (
+    Boolean(clean) &&
+    clean !== 'unknown' &&
+    clean !== 'unknown artist' &&
+    clean !== 'local audio' &&
+    clean !== 'casa native player' &&
+    clean !== 'various artists' &&
+    clean.length >= 2
+  );
+}
+
 /**
- * Fetches auto-radio tracks for CASA Native (via Rust InnerTube backend)
+ * Fetches auto-radio tracks for CASA Native using official InnerTube `Up Next / Watch Playlist`
+ * (`videoId`) with official `artistId` browse fallback and active session multi-seed blending.
  */
 async function fetchNativeRadioTracks(
-  currentTrack: { id?: string; title: string; artist: string },
-  exclusionList: Array<{ id?: string; title: string; artist: string }>
+  currentTrack: AutoRadioSeed,
+  exclusionList: Array<{ id?: string; title: string; artist: string; uri?: string }>,
+  options?: AutoRadioOptions
 ): Promise<RadioTrackItem[]> {
-  const artistName = (currentTrack.artist || '').trim();
-  const rawTitle = (currentTrack.title || '').trim();
-  // Strip parentheses and brackets for a cleaner search query (e.g. "XXL (Official Video)" -> "XXL")
-  const cleanTitle = rawTitle.replace(/[\(\[\{].*?[\)\]\}]/g, '').trim();
+  if (options?.signal?.aborted) return [];
 
-  const queries: string[] = [];
+  const effectiveRegion =
+    options?.region ??
+    (() => {
+      try {
+        return getSettingsSnapshot().playerRegion || 'auto';
+      } catch {
+        return 'auto';
+      }
+    })();
 
-  const isValidArtist =
-    artistName &&
-    artistName.toLowerCase() !== 'unknown artist' &&
-    artistName.toLowerCase() !== 'unknown' &&
-    artistName.toLowerCase() !== 'casa native player' &&
-    artistName.length >= 2;
-
-  if (isValidArtist) {
-    // Format Kueri Utama: "${currentTrack.artist} popular songs official audio"
-    queries.push(`${artistName} popular songs official audio`);
-    // Format Kueri Alternatif: "${currentTrack.artist} best tracks"
-    queries.push(`${artistName} best tracks`);
-  } else {
-    // DILARANG melakukan pencarian hanya dengan string ${currentTrack.title} jika panjang kata < 4 karakter atau tanpa nama artis!
-    if (cleanTitle.length >= 4) {
-      queries.push(`${cleanTitle} official audio`);
-    } else {
-      console.warn(`[radioEngine] Rejected raw short title query "${cleanTitle}" without valid artist`);
-      return [];
+  // Build ordered unique seed list starting with currentTrack, followed by active session seeds
+  const rawSeeds: AutoRadioSeed[] = [currentTrack, ...(options?.sessionSeeds || [])];
+  const orderedSeeds: AutoRadioSeed[] = [];
+  for (const seed of rawSeeds) {
+    if (!seed || (!seed.id && !seed.title && !seed.artist)) continue;
+    if (
+      orderedSeeds.some(
+        (existing) =>
+          (existing.id && seed.id && existing.id === seed.id) ||
+          isDuplicateTrack(seed, [existing])
+      )
+    ) {
+      continue;
     }
+    orderedSeeds.push(seed);
+    if (orderedSeeds.length >= 4) break;
   }
 
-  let rawCandidates: NativeTrack[] = [];
+  const rawCandidates: NativeTrack[] = [];
 
-  for (const q of queries) {
-    if (!q) continue;
+  for (let idx = 0; idx < orderedSeeds.length; idx++) {
+    if (options?.signal?.aborted) return [];
+    const seed = orderedSeeds[idx];
+
+    let videoId = seed.id && YT_VIDEO_ID_RE.test(seed.id) ? seed.id : undefined;
+    let artistId = seed.artistId && YT_ARTIST_ID_RE.test(seed.artistId) ? seed.artistId : undefined;
+    const artistName = isCleanArtistName(seed.artist) ? seed.artist.trim() : undefined;
+
+    // For local audio / non-YT tracks without videoId/artistId, resolve canonical song metadata first
+    if (!videoId && !artistId && seed.title) {
+      const lookup = artistName ? `${artistName} ${seed.title}` : seed.title;
+      const cleanLookup = lookup.replace(/[\(\[\{].*?[\)\]\}]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (cleanLookup.length >= 4) {
+        try {
+          const resolved = await searchTracks(cleanLookup, effectiveRegion);
+          if (options?.signal?.aborted) return [];
+          const best = resolved.find((t) => YT_VIDEO_ID_RE.test(t.id));
+          if (best) {
+            videoId = best.id;
+            artistId = best.artistId || artistId;
+          }
+        } catch (err) {
+          console.warn('[radioEngine] Seed videoId lookup warning:', err);
+        }
+      }
+    }
+
+    if (!videoId && !artistId && !artistName) {
+      continue;
+    }
+
     try {
-      const results = await searchTracks(q);
-      if (Array.isArray(results) && results.length > 0) {
-        rawCandidates = [...rawCandidates, ...results];
-        if (rawCandidates.length >= 15) break;
+      const related = await getUpNextTracks({
+        videoId,
+        artistId,
+        artistName,
+        region: effectiveRegion,
+        limit: 12,
+      });
+      if (options?.signal?.aborted) return [];
+      if (related.length > 0) {
+        rawCandidates.push(...related);
       }
     } catch (err) {
-      console.warn(`[radioEngine] Native search failed for query "${q}":`, err);
+      console.warn('[radioEngine] Native getUpNextTracks warning:', err);
     }
-  }
 
-  // Prioritas utama: Urutkan kandidat yang artis atau judulnya mengandung nama penyanyi aktif
-  if (isValidArtist) {
-    const targetArtistLower = artistName.toLowerCase();
-    rawCandidates.sort((a, b) => {
-      const aArtistMatch = (a.artist || '').toLowerCase().includes(targetArtistLower);
-      const aTitleMatch = (a.title || '').toLowerCase().includes(targetArtistLower);
-      const bArtistMatch = (b.artist || '').toLowerCase().includes(targetArtistLower);
-      const bTitleMatch = (b.title || '').toLowerCase().includes(targetArtistLower);
-
-      const aScore = (aArtistMatch ? 2 : 0) + (aTitleMatch ? 1 : 0);
-      const bScore = (bArtistMatch ? 2 : 0) + (bTitleMatch ? 1 : 0);
-      return bScore - aScore;
-    });
+    // Once we have plenty of diverse candidates and already inspected up to 2 session seeds, stop early
+    if (rawCandidates.length >= 12 && idx >= 1) {
+      break;
+    }
   }
 
   const filtered: RadioTrackItem[] = [];
   const seenIds = new Set<string>();
-
-  // Filter video kompilasi/podcast/panjang > 8 menit (480s)
   const BAD_PATTERNS = [
     /\b(?:podcast|compilation|full\s*album|1\s*hour|10\s*hours|marathon|loop|asmr|soundtrack\s*suite|ost\s*full)\b/i,
   ];
@@ -155,30 +222,13 @@ async function fetchNativeRadioTracks(
   for (const t of rawCandidates) {
     if (!t || !t.title) continue;
 
-    // Filter durasi: Buang video berdurasi > 8 menit (480 detik) atau < 30 detik
     const dur = t.durationSeconds || 0;
     if (dur > 480 || (dur > 0 && dur < 30)) {
       continue;
     }
 
-    // Filter pola video kompilasi/podcast
     if (BAD_PATTERNS.some((p) => p.test(t.title))) {
       continue;
-    }
-
-    // Relevansi nama: cegah judul pendek mencocokkan nama band acak (misal judul "XXL" mencocokkan "Banda XXI")
-    if (isValidArtist && cleanTitle.length <= 4) {
-      const normTargetArtist = artistName.toLowerCase();
-      const normTrackArtist = (t.artist || '').toLowerCase();
-      const normTrackTitle = (t.title || '').toLowerCase();
-
-      if (
-        !normTrackArtist.includes(normTargetArtist) &&
-        !normTrackTitle.includes(normTargetArtist) &&
-        normTrackArtist.includes(cleanTitle.toLowerCase())
-      ) {
-        continue;
-      }
     }
 
     if (seenIds.has(t.id)) continue;
@@ -191,7 +241,7 @@ async function fetchNativeRadioTracks(
     filtered.push({
       id: t.id,
       title: t.title,
-      artist: t.artist || artistName || 'Unknown Artist',
+      artist: t.artist || currentTrack.artist || 'Unknown Artist',
       durationSeconds: durationSec,
       durationMs: durationSec * 1000,
       thumbnailUrl: t.thumbnailUrl || t.albumArt || '',
@@ -199,6 +249,9 @@ async function fetchNativeRadioTracks(
       artworkUrl: t.artworkUrl || t.thumbnailUrl || '',
       streamUrl: t.streamUrl,
       candidates: t.candidates,
+      album: t.albumTitle || '',
+      albumTitle: t.albumTitle,
+      artistId: t.artistId,
       source: 'native',
       isRadio: true,
     });
@@ -320,10 +373,11 @@ async function fetchSpotifyRadioTracks(
  * @param existingQueue Existing queues to avoid queuing duplicates
  */
 export async function fetchAutoRadioRecommendations(
-  currentTrack: { id?: string; title: string; artist: string; uri?: string } | null,
+  currentTrack: AutoRadioSeed | null,
   source: 'native' | 'spotify',
   history: Array<{ id?: string; title: string; artist: string; uri?: string }> = [],
-  existingQueue: Array<{ id?: string; title: string; artist: string; uri?: string }> = []
+  existingQueue: Array<{ id?: string; title: string; artist: string; uri?: string }> = [],
+  options?: AutoRadioOptions
 ): Promise<RadioTrackItem[]> {
   if (!currentTrack || (!currentTrack.title && !currentTrack.artist)) {
     return [];
@@ -333,7 +387,7 @@ export async function fetchAutoRadioRecommendations(
 
   try {
     if (source === 'native') {
-      return await fetchNativeRadioTracks(currentTrack, exclusionList);
+      return await fetchNativeRadioTracks(currentTrack, exclusionList, options);
     } else {
       return await fetchSpotifyRadioTracks(currentTrack, exclusionList);
     }

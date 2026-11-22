@@ -41,6 +41,7 @@ import {
   CasaHoverDelayMs,
   CasaIdlePillStyle,
   CasaPlacementMode,
+  CasaPlayerRegion,
   CasaSettings,
   CasaThemeId,
   CasaThemePalette,
@@ -48,6 +49,10 @@ import {
   updateSettings,
   useSettingsStore,
 } from '../../stores/useSettingsStore';
+import {
+  getPlayerRegionInfo,
+  RegionLocaleInfo,
+} from '../../services/nativeAudioService';
 import {
   previewAlarmChime,
   processAndSaveCustomAlarm,
@@ -93,8 +98,8 @@ const SIDEBAR_ITEMS: Array<{
   },
   {
     id: 'audio',
-    label: 'Timer & Audio',
-    subtitle: 'Nada dering 15s & siklus fokus',
+    label: 'Timer, Audio & Player',
+    subtitle: 'Nada dering 15s, siklus & region musik',
     icon: Volume2,
   },
   {
@@ -144,6 +149,14 @@ const THEME_CARDS: Array<{
 const PLACEMENT_OPTIONS: Array<{ value: CasaPlacementMode; label: string }> = [
   { value: 'docked', label: 'Docked Notch' },
   { value: 'floating', label: 'Floating Pill' },
+];
+
+const PLAYER_REGION_OPTIONS: Array<{ value: CasaPlayerRegion; label: string }> = [
+  { value: 'auto', label: 'Auto (OS)' },
+  { value: 'ID', label: 'ID' },
+  { value: 'US', label: 'US' },
+  { value: 'KR', label: 'KR' },
+  { value: 'JP', label: 'JP' },
 ];
 
 const ALIGN_OPTIONS: Array<{ value: CasaHorizontalAlign; label: string }> = [
@@ -461,6 +474,17 @@ export const DesktopSettingsWindow: React.FC = () => {
     kind: 'ok' | 'err';
     text: string;
   } | null>(null);
+  const [regionInfo, setRegionInfo] = useState<RegionLocaleInfo | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getPlayerRegionInfo(settings.playerRegion).then((info) => {
+      if (active) setRegionInfo(info);
+    });
+    return () => {
+      active = false;
+    };
+  }, [settings.playerRegion]);
 
   // System & Signed Updater states
   const [shortcutRegistered, setShortcutRegistered] = useState<boolean | null>(null);
@@ -643,7 +667,7 @@ export const DesktopSettingsWindow: React.FC = () => {
     void updateNotification.dismissBadge();
     if (!isTauriRuntime()) {
       setUpdateResult({
-        currentVersion: '2.1.2',
+        currentVersion: '2.1.4',
         available: false,
         version: null,
         body: null,
@@ -675,13 +699,13 @@ export const DesktopSettingsWindow: React.FC = () => {
       } else {
         void updateNotification.clearNotification();
         setUpdateResult({
-          currentVersion: '2.1.2',
+          currentVersion: '2.1.4',
           available: false,
           version: null,
           body: null,
           date: null,
           statusKind: 'up-to-date',
-          message: 'CASA sudah menggunakan versi terbaru (v2.1.2).',
+          message: 'CASA sudah menggunakan versi terbaru (v2.1.4).',
         });
       }
     } catch (err) {
@@ -697,7 +721,7 @@ export const DesktopSettingsWindow: React.FC = () => {
         lower.includes('network');
 
       setUpdateResult({
-        currentVersion: '2.1.2',
+        currentVersion: '2.1.4',
         available: false,
         version: null,
         body: msg,
@@ -733,7 +757,7 @@ export const DesktopSettingsWindow: React.FC = () => {
       if (!update) {
         void updateNotification.clearNotification();
         setUpdateResult({
-          currentVersion: '2.1.2',
+          currentVersion: '2.1.4',
           available: false,
           version: null,
           body: null,
@@ -775,7 +799,7 @@ export const DesktopSettingsWindow: React.FC = () => {
       await relaunch();
     } catch (err) {
       setUpdateResult((prev) => ({
-        currentVersion: prev?.currentVersion ?? '2.1.2',
+        currentVersion: prev?.currentVersion ?? '2.1.4',
         available: prev?.available ?? false,
         version: prev?.version ?? null,
         body: null,
@@ -874,7 +898,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                   CASA
                 </span>
                 <span className="px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.10] text-[10px] font-mono text-white/75">
-                  v2.1.2
+                  v2.1.4
                 </span>
               </div>
               <div className="text-[10px] font-mono text-white/40 mt-0.5 truncate">
@@ -1311,6 +1335,25 @@ export const DesktopSettingsWindow: React.FC = () => {
                     onChange={(next) => updateSettings({ autoStartNextCycle: next })}
                   />
                 </SettingFlatRow>
+
+                <SettingFlatRow
+                  title="Region Pencarian & Smart Queue Player"
+                  description={
+                    regionInfo
+                      ? `Parameter katalog aktif: gl=${regionInfo.gl}, hl=${regionInfo.hl}${
+                          settings.playerRegion === 'auto'
+                            ? ` (OS: ${regionInfo.detectedGl}/${regionInfo.detectedHl})`
+                            : ''
+                        }`
+                      : 'Pilih wilayah katalog musik YouTube InnerTube (Auto membaca locale OS).'
+                  }
+                >
+                  <SegmentedControl<CasaPlayerRegion>
+                    value={settings.playerRegion}
+                    options={PLAYER_REGION_OPTIONS}
+                    onChange={(next) => updateSettings({ playerRegion: next })}
+                  />
+                </SettingFlatRow>
               </div>
             )}
 
@@ -1498,7 +1541,7 @@ export const DesktopSettingsWindow: React.FC = () => {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[13px] font-semibold text-white">
-                            CASA v{updateResult?.currentVersion ?? '2.1.2'}
+                            CASA v{updateResult?.currentVersion ?? '2.1.4'}
                           </span>
                           <span className="text-[10px] font-mono text-white/45 px-1.5 py-0.5 rounded border border-white/[0.08] bg-[#08080A]">
                             Signed Updater

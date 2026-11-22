@@ -19,6 +19,7 @@ export type CasaHorizontalAlign = 'left' | 'center' | 'right';
 export type CasaHoverDelayMs = 0 | 300 | -1;
 export type CasaIdlePillStyle = 'eyes' | 'clock';
 export type CasaFullscreenBehavior = 'smart-tuck' | 'total-hide' | 'always-visible';
+export type CasaPlayerRegion = 'auto' | 'ID' | 'US' | 'KR' | 'JP';
 
 export interface CustomAlarmMetadata {
   fileName: string;
@@ -74,6 +75,7 @@ export interface CasaSettings {
   autoStartNextCycle: boolean;
   customAlarmMeta: CustomAlarmMetadata | null;
   launchAtStartup: boolean;
+  playerRegion: CasaPlayerRegion;
   ibadah: IbadahSettings;
 }
 
@@ -181,6 +183,7 @@ export const DEFAULT_CASA_SETTINGS: CasaSettings = {
   autoStartNextCycle: false,
   customAlarmMeta: null,
   launchAtStartup: false,
+  playerRegion: 'auto',
   ibadah: DEFAULT_IBADAH_SETTINGS,
 };
 
@@ -317,6 +320,15 @@ function sanitizeSettings(raw: unknown): CasaSettings {
       ? input.fullscreenBehavior
       : DEFAULT_CASA_SETTINGS.fullscreenBehavior;
 
+  const playerRegion: CasaPlayerRegion =
+    input.playerRegion === 'auto' ||
+    input.playerRegion === 'ID' ||
+    input.playerRegion === 'US' ||
+    input.playerRegion === 'KR' ||
+    input.playerRegion === 'JP'
+      ? input.playerRegion
+      : DEFAULT_CASA_SETTINGS.playerRegion;
+
   const alarmVolume =
     typeof input.alarmVolume === 'number' && !Number.isNaN(input.alarmVolume)
       ? Math.max(0, Math.min(100, Math.round(input.alarmVolume)))
@@ -358,6 +370,7 @@ function sanitizeSettings(raw: unknown): CasaSettings {
       typeof input.launchAtStartup === 'boolean'
         ? input.launchAtStartup
         : DEFAULT_CASA_SETTINGS.launchAtStartup,
+    playerRegion,
     ibadah: sanitizeIbadahSettings(input.ibadah),
   };
 }

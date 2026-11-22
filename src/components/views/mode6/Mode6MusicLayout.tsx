@@ -20,9 +20,12 @@ import {
   Trash2,
   Shuffle,
   Repeat,
+  Repeat1,
   Volume2,
   Bluetooth,
   Headphones,
+  ListPlus,
+  Disc3,
 } from 'lucide-react';
 import { useSystemHardware, formatAudioOutputLabel } from '../../../hooks/useSystemHardware';
 import { LyricsPanel } from '../music/LyricsPanel';
@@ -32,15 +35,22 @@ import { MusicQueueView } from '../music/MusicQueueView';
 import { formatDuration } from '../music/constants';
 import { LyricLine } from '../../../utils/lyricsService';
 import { SpotifyTrackItem } from '../../../utils/spotifyService';
-import { NativeTrack, searchTracks } from '../../../services/nativeAudioService';
+import {
+  browseCollectionTracks,
+  CatalogSearchResponse,
+  NativeTrack,
+  searchCatalog,
+  SearchCollectionItem,
+} from '../../../services/nativeAudioService';
 import { playChimeCue, focusIslandWindow } from '../../../utils/tauriBridge';
 import { useMusicAffinity } from '../../../hooks/useMusicAffinity';
-import { useQueueStore } from '../../../stores/useQueueStore';
+import { PlaybackContextKind, useQueueStore } from '../../../stores/useQueueStore';
 import { CASA_THEME_PALETTES, useSettingsStore } from '../../../stores/useSettingsStore';
 import { setSearchDrawerExtraHeight } from '../../../utils/islandLayoutState';
 import {
   normalizeTrackForPlaylist,
   normalizeTrackMetadata,
+  RepeatMode,
 } from '../../../utils/musicQueueEngine';
 
 const SpotifyCornerLogo: React.FC<{ className?: string }> = ({ className = 'w-3 h-3' }) => (
@@ -122,8 +132,13 @@ export interface Mode6MusicLayoutProps {
   nativeTrack: NativeTrack | null;
   nativeQueue: NativeTrack[];
   nativeQueueIndex: number;
-  onPlayNativeSearchTrack: (track: NativeTrack, currentList: NativeTrack[]) => void;
+  onPlayNativeSearchTrack: (
+    track: NativeTrack,
+    currentList?: NativeTrack[],
+    options?: { contextKind?: PlaybackContextKind }
+  ) => void;
   onAddToNativeQueue: (e: React.MouseEvent | null, track: NativeTrack) => void;
+  onAddCollectionToNativeQueue?: (tracks: NativeTrack[]) => void;
   addedNativeTrackId: string | null;
   onSelectNativeQueueTrack: (index: number) => void;
   onRemoveNativeQueueTrack: (e: React.MouseEvent, index: number) => void;
@@ -133,7 +148,7 @@ export interface Mode6MusicLayoutProps {
   // Phase 6.0 Unified Transport, Playlist & Smart Queue Controls
   isShuffle?: boolean;
   onToggleShuffle?: () => void;
-  isRepeat?: boolean;
+  repeatMode?: RepeatMode;
   onToggleRepeat?: () => void;
   onPlaySmartQueueTrack?: (index: number) => void;
   onRemoveSmartQueueTrack?: (index: number) => void;
@@ -204,14 +219,15 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
   nativeQueueIndex,
   onPlayNativeSearchTrack,
   onAddToNativeQueue,
+  onAddCollectionToNativeQueue,
   addedNativeTrackId,
   onSelectNativeQueueTrack,
-  onRemoveNativeQueueTrack,
+  onRemoveNativeQueueTrack: _onRemoveNativeQueueTrack,
   onClearNativeQueue,
   onOpenLocalFile,
   isShuffle,
   onToggleShuffle,
-  isRepeat,
+  repeatMode,
   onToggleRepeat,
   onPlaySmartQueueTrack,
   onRemoveSmartQueueTrack,
@@ -288,7 +304,8 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
   const storeSmartQueue = useQueueStore((s) => s.radioQueue) as unknown as NativeTrack[];
   const storeIsShuffle = useQueueStore((s) => s.isShuffle);
   const storeToggleShuffle = useQueueStore((s) => s.toggleShuffle);
-  const storeIsRepeat = useQueueStore((s) => s.isRepeat);
+  const storeRepeatMode = useQueueStore((s) => s.repeatMode);
+  const storeToggleRepeat = useQueueStore((s) => s.toggleRepeat);
   const storeIsFetchingSmart = useQueueStore((s) => s.isFetchingRadio);
   const storeRemoveManualTrack = useQueueStore((s) => s.removeFromManualQueue);
   const storeRemoveSmartTrack = useQueueStore((s) => s.removeFromRadioQueue);
@@ -296,12 +313,18 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
   // Mode 6 compact sub-navigation: Player | Playlists
   const [musicSubTab, setMusicSubTab] = useState<'player' | 'playlists'>('player');
 
-  // Native Search state scoped inside Search Pod when in CASA Player / Standby
+  // Native Categorized Search state scoped inside Search Pod when in CASA Player / Standby
   const [nativeQuery, setNativeQuery] = useState('');
-  const [nativeResults, setNativeResults] = useState<NativeTrack[]>([]);
+  const [nativeCatalog, setNativeCatalog] = useState<CatalogSearchResponse | null>(null);
+  const [nativeSearchTab, setNativeSearchTab] = useState<
+    'all' | 'top' | 'albums' | 'playlists' | 'songs'
+  >('all');
   const [isSearchingNative, setIsSearchingNative] = useState(false);
+  const [loadingCollectionId, setLoadingCollectionId] = useState<string | null>(null);
+  const [queuedCollectionId, setQueuedCollectionId] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const leftSearchPodRef = useRef<HTMLElement | null>(null);
+  const searchSeqRef = useRef<number>(0);
 
   useEffect(() => {
     if (!isSearchPodOpen || !canShowSearchAndQueue) {
@@ -327,35 +350,48 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
   useEffect(() => {
     if (!isCasaLibraryMode) {
       setNativeQuery('');
-      setNativeResults([]);
+      setNativeCatalog(null);
+      setNativeSearchTab('all');
       setIsSearchingNative(false);
     }
   }, [isCasaLibraryMode]);
 
-  // Debounced InnerTube Search when Search Pod is open in CASA Player or Standby
+  // Debounced InnerTube Multi-Category Search (dynamic region & race protection)
   useEffect(() => {
     if (!isSearchPodOpen || !canShowSearchAndQueue || !isCasaLibraryMode) return;
     const q = nativeQuery.trim();
     if (!q) {
-      setNativeResults([]);
+      searchSeqRef.current += 1;
+      setNativeCatalog(null);
+      setNativeSearchTab('all');
       setIsSearchingNative(false);
       return;
     }
 
+    const reqSeq = ++searchSeqRef.current;
     setIsSearchingNative(true);
     const timer = setTimeout(async () => {
       try {
-        const res = await searchTracks(q);
-        setNativeResults(res);
+        const res = await searchCatalog(q, settings.playerRegion);
+        if (searchSeqRef.current !== reqSeq) return;
+        setNativeCatalog(res);
       } catch (err) {
-        console.warn('[Mode6MusicLayout] native searchTracks error:', err);
+        console.warn('[Mode6MusicLayout] native searchCatalog error:', err);
       } finally {
-        setIsSearchingNative(false);
+        if (searchSeqRef.current === reqSeq) {
+          setIsSearchingNative(false);
+        }
       }
     }, 320);
 
     return () => clearTimeout(timer);
-  }, [nativeQuery, isSearchPodOpen, canShowSearchAndQueue, isCasaLibraryMode]);
+  }, [
+    nativeQuery,
+    isSearchPodOpen,
+    canShowSearchAndQueue,
+    isCasaLibraryMode,
+    settings.playerRegion,
+  ]);
 
   useEffect(() => {
     setIsScrubbing(false);
@@ -428,7 +464,7 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
     : 'Pilih lagu atau putar media';
 
   const effectiveShuffle = isShuffle ?? storeIsShuffle;
-  const effectiveRepeat = isRepeat ?? storeIsRepeat;
+  const effectiveRepeatMode: RepeatMode = repeatMode ?? storeRepeatMode;
   const handleShuffleAction = () => {
     playChimeCue('tap');
     if (onToggleShuffle) {
@@ -442,7 +478,59 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
     if (onToggleRepeat) {
       onToggleRepeat();
     } else {
-      useQueueStore.getState().setRepeat(!storeIsRepeat);
+      storeToggleRepeat();
+    }
+  };
+
+  const queueCollectionTracks = (tracks: NativeTrack[]) => {
+    if (!tracks || tracks.length === 0) return;
+    if (onAddCollectionToNativeQueue) {
+      onAddCollectionToNativeQueue(tracks);
+      return;
+    }
+    const qStore = useQueueStore.getState();
+    for (const tr of tracks) {
+      qStore.addToManualQueue(tr);
+    }
+  };
+
+  const handlePlayAllTracks = (tracks: NativeTrack[]) => {
+    if (!tracks || tracks.length === 0) return;
+    playChimeCue('tap');
+    if (nativeQuery.trim()) {
+      recordSearchQuery(nativeQuery);
+    }
+    onPlayNativeSearchTrack(tracks[0], tracks, { contextKind: 'collection' });
+  };
+
+  const handleCollectionAction = async (
+    coll: SearchCollectionItem,
+    action: 'play' | 'queue'
+  ) => {
+    if (loadingCollectionId) return;
+    playChimeCue('tap');
+    setLoadingCollectionId(coll.id);
+    try {
+      const tracks = await browseCollectionTracks({
+        browseId: coll.browseId,
+        playlistId: coll.playlistId,
+        region: settings.playerRegion,
+      });
+      if (tracks.length === 0) return;
+      if (nativeQuery.trim()) {
+        recordSearchQuery(nativeQuery);
+      }
+      if (action === 'play') {
+        onPlayNativeSearchTrack(tracks[0], tracks, { contextKind: 'collection' });
+      } else {
+        queueCollectionTracks(tracks);
+        setQueuedCollectionId(coll.id);
+        setTimeout(() => setQueuedCollectionId(null), 1500);
+      }
+    } catch (err) {
+      console.warn('[Mode6MusicLayout] Collection action failed:', err);
+    } finally {
+      setLoadingCollectionId(null);
     }
   };
 
@@ -457,6 +545,8 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
         streamUrl: nativeTrack?.streamUrl,
         candidates: nativeTrack?.candidates,
         isLocal: nativeTrack?.isLocal,
+        artistId: nativeTrack?.artistId,
+        albumTitle: nativeTrack?.albumTitle,
         source: isCasaLibraryMode ? 'native' : 'spotify',
       })
     : null;
@@ -471,10 +561,23 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
     streamUrl: t.streamUrl,
     candidates: t.candidates,
     isLocal: t.isLocal,
+    artistId: t.artistId,
+    albumTitle: t.albumTitle,
     source: t.source,
   }));
 
-  const displayedNativeList = nativeQuery.trim() ? nativeResults : affinityAsNativeTracks;
+  const catalogTopSongs = nativeCatalog?.topSongs ?? [];
+  const catalogAlbums = nativeCatalog?.albums ?? [];
+  const catalogPlaylists = nativeCatalog?.playlists ?? [];
+  const catalogSongs = nativeCatalog?.songs ?? [];
+  const hasAnyCatalogResult =
+    catalogTopSongs.length > 0 ||
+    catalogAlbums.length > 0 ||
+    catalogPlaylists.length > 0 ||
+    catalogSongs.length > 0;
+  const displayedNativeList = nativeQuery.trim()
+    ? [...catalogTopSongs, ...catalogSongs]
+    : affinityAsNativeTracks;
   const resolvedMainWidth = mainBoxWidth ?? (isLyricsOpen ? 640 : 480);
   const podHeight = isLyricsOpen ? 177 : 171;
   const POD_WIDTH = 204;
@@ -759,77 +862,426 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
                     );
                   })}
                 </div>
-              ) : displayedNativeList.length === 0 && !isSearchingNative ? (
+              ) : !hasAnyCatalogResult && !isSearchingNative ? (
                 <div className="h-full flex items-center justify-center text-[10px] text-white/35">
                   Tidak ada hasil ditemukan
                 </div>
               ) : (
-                displayedNativeList.map((track) => {
-                  const isCurrent = nativeTrack?.id === track.id;
-                  const isAdded = addedNativeTrackId === track.id;
-                  return (
-                    <div
-                      key={track.id}
-                      className={`flex items-center justify-between gap-1 p-1 rounded-lg transition-colors ${
-                        isCurrent ? 'bg-white/[0.12]' : 'hover:bg-white/[0.07]'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          playChimeCue('tap');
-                          if (nativeQuery.trim()) {
-                            recordSearchQuery(nativeQuery);
-                          }
-                          onPlayNativeSearchTrack(track, displayedNativeList);
-                        }}
-                        className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer"
-                      >
-                        <div className="w-7 h-7 rounded-md bg-[#121215] border border-white/[0.10] overflow-hidden shrink-0 flex items-center justify-center">
-                          {track.thumbnailUrl ? (
-                            <img src={track.thumbnailUrl} alt={track.title} className="w-full h-full object-cover" />
-                          ) : (
-                            <Music className="w-3 h-3 text-white/35" />
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[10.5px] font-medium text-white truncate leading-tight">
-                            {track.title}
-                          </div>
-                          <div className="text-[9px] text-white/45 truncate leading-tight">
-                            {track.artist}
-                            {track.durationSeconds > 0 ? ` · ${formatDuration(track.durationSeconds)}` : ''}
-                          </div>
-                        </div>
-                      </button>
+                <div className="space-y-2 pb-1">
+                  {/* Category Filter Pills when multi-category results are available */}
+                  <div className="flex items-center gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden">
+                    {(
+                      [
+                        { id: 'all', label: 'All', show: true },
+                        { id: 'top', label: 'Top', show: catalogTopSongs.length > 0 },
+                        { id: 'albums', label: 'Albums', show: catalogAlbums.length > 0 },
+                        { id: 'playlists', label: 'Playlists', show: catalogPlaylists.length > 0 },
+                        { id: 'songs', label: 'Songs', show: catalogSongs.length > 0 },
+                      ] as const
+                    )
+                      .filter((t) => t.show)
+                      .map((tab) => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setNativeSearchTab(tab.id);
+                          }}
+                          className={`px-1.5 py-0.5 rounded-full text-[8.5px] font-semibold uppercase tracking-wider shrink-0 border transition-colors cursor-pointer ${
+                            nativeSearchTab === tab.id
+                              ? 'bg-white text-black border-white'
+                              : 'bg-[#0d0d10] text-zinc-400 border-white/15 hover:text-white'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                  </div>
 
-                      <AddToPlaylistPopover
-                        track={normalizeTrackForPlaylist(track)}
-                        containerRef={leftSearchPodRef}
-                        containedInCard
-                        reportSearchDrawerHitbox
-                        compact
-                      />
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onAddToNativeQueue(e, track);
-                        }}
-                        className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
-                          isAdded
-                            ? 'bg-white text-black'
-                            : 'bg-white/[0.06] text-white/55 hover:bg-white/[0.16] hover:text-white'
-                        }`}
-                        title="Tambah ke Antrean"
-                        aria-label="Tambah ke Antrean"
-                      >
-                        {isAdded ? <Check className="w-2.5 h-2.5" /> : <Plus className="w-3 h-3" />}
-                      </button>
-                    </div>
-                  );
-                })
+                  {/* Section 1: Top Songs Artis */}
+                  {catalogTopSongs.length > 0 &&
+                    (nativeSearchTab === 'all' || nativeSearchTab === 'top') && (
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between gap-1 px-0.5">
+                          <span className="text-[8.5px] font-bold uppercase tracking-[0.12em] text-zinc-400 truncate">
+                            Top Songs
+                            {nativeCatalog?.topArtistName
+                              ? ` · ${nativeCatalog.topArtistName}`
+                              : ''}
+                          </span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handlePlayAllTracks(catalogTopSongs);
+                              }}
+                              className="px-1.5 py-0.5 rounded-full bg-white text-black text-[8.5px] font-bold flex items-center gap-0.5 hover:bg-zinc-200 transition-colors cursor-pointer"
+                              title="Play All Top Songs"
+                              aria-label="Play All Top Songs"
+                            >
+                              <Play className="w-2 h-2 fill-current" />
+                              <span>Play All</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                playChimeCue('tap');
+                                queueCollectionTracks(catalogTopSongs);
+                                setQueuedCollectionId('__top_songs__');
+                                setTimeout(() => setQueuedCollectionId(null), 1500);
+                              }}
+                              className={`w-4 h-4 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+                                queuedCollectionId === '__top_songs__'
+                                  ? 'bg-white text-black'
+                                  : 'bg-white/[0.08] text-white/70 hover:bg-white/20 hover:text-white'
+                              }`}
+                              title="Muat Top Songs ke Antrian"
+                              aria-label="Muat Top Songs ke Antrian"
+                            >
+                              {queuedCollectionId === '__top_songs__' ? (
+                                <Check className="w-2.5 h-2.5" />
+                              ) : (
+                                <ListPlus className="w-2.5 h-2.5" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        {catalogTopSongs.slice(0, nativeSearchTab === 'top' ? 8 : 4).map((track) => {
+                          const isCurrent = nativeTrack?.id === track.id;
+                          const isAdded = addedNativeTrackId === track.id;
+                          return (
+                            <div
+                              key={`top-${track.id}`}
+                              className={`flex items-center justify-between gap-1 p-1 rounded-lg transition-colors ${
+                                isCurrent ? 'bg-white/[0.12]' : 'hover:bg-white/[0.07]'
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  playChimeCue('tap');
+                                  if (nativeQuery.trim()) recordSearchQuery(nativeQuery);
+                                  onPlayNativeSearchTrack(track, [track], {
+                                    contextKind: 'single',
+                                  });
+                                }}
+                                className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer"
+                              >
+                                <div className="w-7 h-7 rounded-md bg-[#121215] border border-white/[0.10] overflow-hidden shrink-0 flex items-center justify-center">
+                                  {track.thumbnailUrl ? (
+                                    <img
+                                      src={track.thumbnailUrl}
+                                      alt={track.title}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    <Music className="w-3 h-3 text-white/35" />
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-[10.5px] font-medium text-white truncate leading-tight">
+                                    {track.title}
+                                  </div>
+                                  <div className="text-[9px] text-white/45 truncate leading-tight">
+                                    {track.artist}
+                                    {track.durationSeconds > 0
+                                      ? ` · ${formatDuration(track.durationSeconds)}`
+                                      : ''}
+                                  </div>
+                                </div>
+                              </button>
+                              <AddToPlaylistPopover
+                                track={normalizeTrackForPlaylist(track)}
+                                containerRef={leftSearchPodRef}
+                                containedInCard
+                                reportSearchDrawerHitbox
+                                compact
+                              />
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onAddToNativeQueue(e, track);
+                                }}
+                                className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
+                                  isAdded
+                                    ? 'bg-white text-black'
+                                    : 'bg-white/[0.06] text-white/55 hover:bg-white/[0.16] hover:text-white'
+                                }`}
+                                title="Tambah ke Antrean"
+                                aria-label="Tambah ke Antrean"
+                              >
+                                {isAdded ? <Check className="w-2.5 h-2.5" /> : <Plus className="w-3 h-3" />}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                  {/* Section 2: Albums */}
+                  {catalogAlbums.length > 0 &&
+                    (nativeSearchTab === 'all' || nativeSearchTab === 'albums') && (
+                      <div className="space-y-1">
+                        <div className="px-0.5 text-[8.5px] font-bold uppercase tracking-[0.12em] text-zinc-400">
+                          Albums
+                        </div>
+                        {catalogAlbums.slice(0, nativeSearchTab === 'albums' ? 6 : 3).map((album) => {
+                          const isBusy = loadingCollectionId === album.id;
+                          const isQueued = queuedCollectionId === album.id;
+                          return (
+                            <div
+                              key={`alb-${album.id}`}
+                              className="flex items-center justify-between gap-1 p-1 rounded-lg hover:bg-white/[0.07] transition-colors"
+                            >
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleCollectionAction(album, 'play');
+                                }}
+                                className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer disabled:opacity-60"
+                                title={`Play All: ${album.title}`}
+                              >
+                                <div className="w-7 h-7 rounded-md bg-[#121215] border border-white/[0.10] overflow-hidden shrink-0 flex items-center justify-center">
+                                  {album.thumbnailUrl ? (
+                                    <img
+                                      src={album.thumbnailUrl}
+                                      alt={album.title}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    <Disc3 className="w-3 h-3 text-white/45" />
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-[10.5px] font-medium text-white truncate leading-tight">
+                                    {album.title}
+                                  </div>
+                                  <div className="text-[9px] text-white/45 truncate leading-tight">
+                                    {album.subtitle || 'Album'}
+                                  </div>
+                                </div>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleCollectionAction(album, 'play');
+                                }}
+                                className="px-1.5 h-5 rounded-full bg-white text-black hover:bg-zinc-200 text-[8.5px] font-bold flex items-center gap-0.5 shrink-0 cursor-pointer disabled:opacity-50"
+                                title={`Play All Album: ${album.title}`}
+                                aria-label={`Play All ${album.title}`}
+                              >
+                                {isBusy ? (
+                                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                ) : (
+                                  <Play className="w-2 h-2 fill-current" />
+                                )}
+                                <span>Play</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleCollectionAction(album, 'queue');
+                                }}
+                                className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 transition-colors cursor-pointer disabled:opacity-50 ${
+                                  isQueued
+                                    ? 'bg-white text-black'
+                                    : 'bg-white/[0.06] text-white/55 hover:bg-white/[0.16] hover:text-white'
+                                }`}
+                                title={`Muat Album ke Antrian: ${album.title}`}
+                                aria-label={`Queue Album ${album.title}`}
+                              >
+                                {isQueued ? <Check className="w-2.5 h-2.5" /> : <Plus className="w-3 h-3" />}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                  {/* Section 3: Playlists */}
+                  {catalogPlaylists.length > 0 &&
+                    (nativeSearchTab === 'all' || nativeSearchTab === 'playlists') && (
+                      <div className="space-y-1">
+                        <div className="px-0.5 text-[8.5px] font-bold uppercase tracking-[0.12em] text-zinc-400">
+                          Playlists
+                        </div>
+                        {catalogPlaylists
+                          .slice(0, nativeSearchTab === 'playlists' ? 6 : 3)
+                          .map((pl) => {
+                            const isBusy = loadingCollectionId === pl.id;
+                            const isQueued = queuedCollectionId === pl.id;
+                            return (
+                              <div
+                                key={`pl-${pl.id}`}
+                                className="flex items-center justify-between gap-1 p-1 rounded-lg hover:bg-white/[0.07] transition-colors"
+                              >
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void handleCollectionAction(pl, 'play');
+                                  }}
+                                  className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer disabled:opacity-60"
+                                  title={`Play All: ${pl.title}`}
+                                >
+                                  <div className="w-7 h-7 rounded-md bg-[#121215] border border-white/[0.10] overflow-hidden shrink-0 flex items-center justify-center">
+                                    {pl.thumbnailUrl ? (
+                                      <img
+                                        src={pl.thumbnailUrl}
+                                        alt={pl.title}
+                                        className="w-full h-full object-cover"
+                                      />
+                                    ) : (
+                                      <ListMusic className="w-3 h-3 text-white/45" />
+                                    )}
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-[10.5px] font-medium text-white truncate leading-tight">
+                                      {pl.title}
+                                    </div>
+                                    <div className="text-[9px] text-white/45 truncate leading-tight">
+                                      {pl.subtitle || 'Playlist'}
+                                    </div>
+                                  </div>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void handleCollectionAction(pl, 'play');
+                                  }}
+                                  className="px-1.5 h-5 rounded-full bg-white text-black hover:bg-zinc-200 text-[8.5px] font-bold flex items-center gap-0.5 shrink-0 cursor-pointer disabled:opacity-50"
+                                  title={`Play All Playlist: ${pl.title}`}
+                                  aria-label={`Play All ${pl.title}`}
+                                >
+                                  {isBusy ? (
+                                    <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                  ) : (
+                                    <Play className="w-2 h-2 fill-current" />
+                                  )}
+                                  <span>Play</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void handleCollectionAction(pl, 'queue');
+                                  }}
+                                  className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 transition-colors cursor-pointer disabled:opacity-50 ${
+                                    isQueued
+                                      ? 'bg-white text-black'
+                                      : 'bg-white/[0.06] text-white/55 hover:bg-white/[0.16] hover:text-white'
+                                  }`}
+                                  title={`Muat Playlist ke Antrian: ${pl.title}`}
+                                  aria-label={`Queue Playlist ${pl.title}`}
+                                >
+                                  {isQueued ? <Check className="w-2.5 h-2.5" /> : <Plus className="w-3 h-3" />}
+                                </button>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
+
+                  {/* Section 4: Songs */}
+                  {catalogSongs.length > 0 &&
+                    (nativeSearchTab === 'all' || nativeSearchTab === 'songs') && (
+                      <div className="space-y-1">
+                        <div className="px-0.5 text-[8.5px] font-bold uppercase tracking-[0.12em] text-zinc-400">
+                          Songs
+                        </div>
+                        {catalogSongs.map((track) => {
+                          const isCurrent = nativeTrack?.id === track.id;
+                          const isAdded = addedNativeTrackId === track.id;
+                          return (
+                            <div
+                              key={track.id}
+                              className={`flex items-center justify-between gap-1 p-1 rounded-lg transition-colors ${
+                                isCurrent ? 'bg-white/[0.12]' : 'hover:bg-white/[0.07]'
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  playChimeCue('tap');
+                                  if (nativeQuery.trim()) {
+                                    recordSearchQuery(nativeQuery);
+                                  }
+                                  onPlayNativeSearchTrack(track, [track], {
+                                    contextKind: 'single',
+                                  });
+                                }}
+                                className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer"
+                              >
+                                <div className="w-7 h-7 rounded-md bg-[#121215] border border-white/[0.10] overflow-hidden shrink-0 flex items-center justify-center">
+                                  {track.thumbnailUrl ? (
+                                    <img
+                                      src={track.thumbnailUrl}
+                                      alt={track.title}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    <Music className="w-3 h-3 text-white/35" />
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-[10.5px] font-medium text-white truncate leading-tight">
+                                    {track.title}
+                                  </div>
+                                  <div className="text-[9px] text-white/45 truncate leading-tight">
+                                    {track.artist}
+                                    {track.durationSeconds > 0
+                                      ? ` · ${formatDuration(track.durationSeconds)}`
+                                      : ''}
+                                  </div>
+                                </div>
+                              </button>
+
+                              <AddToPlaylistPopover
+                                track={normalizeTrackForPlaylist(track)}
+                                containerRef={leftSearchPodRef}
+                                containedInCard
+                                reportSearchDrawerHitbox
+                                compact
+                              />
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onAddToNativeQueue(e, track);
+                                }}
+                                className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
+                                  isAdded
+                                    ? 'bg-white text-black'
+                                    : 'bg-white/[0.06] text-white/55 hover:bg-white/[0.16] hover:text-white'
+                                }`}
+                                title="Tambah ke Antrean"
+                                aria-label="Tambah ke Antrean"
+                              >
+                                {isAdded ? <Check className="w-2.5 h-2.5" /> : <Plus className="w-3 h-3" />}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                </div>
               )}
             </div>
           </motion.aside>
@@ -962,7 +1414,7 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
                   isPlaying={isEffectivePlaying}
                   isResolving={isResolvingAudio}
                   isShuffle={effectiveShuffle}
-                  isRepeat={effectiveRepeat}
+                  repeatMode={effectiveRepeatMode}
                   isFetchingSmart={storeIsFetchingSmart}
                   onToggleShuffle={handleShuffleAction}
                   onToggleRepeat={handleRepeatAction}
@@ -1067,13 +1519,24 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
                   handleRepeatAction();
                 }}
                 className={`w-[18px] h-[18px] rounded-full border flex items-center justify-center transition-colors cursor-pointer ${
-                  effectiveRepeat
+                  effectiveRepeatMode !== 'off'
                     ? 'bg-white text-black border-white'
                     : 'bg-[#0a0a0a] text-zinc-400 border-white/10 hover:text-white'
                 }`}
-                title={effectiveRepeat ? 'Repeat: ON' : 'Repeat: OFF'}
+                title={
+                  effectiveRepeatMode === 'one'
+                    ? 'Repeat: One (Lagu ini)'
+                    : effectiveRepeatMode === 'all'
+                    ? 'Repeat: All (Playlist / Antrean)'
+                    : 'Repeat: Off (Smart Queue aktif)'
+                }
+                aria-label="Toggle Repeat Mode"
               >
-                <Repeat className="w-2.5 h-2.5" />
+                {effectiveRepeatMode === 'one' ? (
+                  <Repeat1 className="w-2.5 h-2.5" />
+                ) : (
+                  <Repeat className="w-2.5 h-2.5" />
+                )}
               </button>
             </div>
           </div>
@@ -1084,7 +1547,7 @@ export const Mode6MusicLayout: React.FC<Mode6MusicLayoutProps> = ({
                 compact
                 currentTrack={activeTrackPayload}
                 onPlayPlaylistTrack={(track, list) => {
-                  onPlayNativeSearchTrack(track, list);
+                  onPlayNativeSearchTrack(track, list, { contextKind: 'playlist' });
                   setMusicSubTab('player');
                 }}
                 onAddToQueue={onAddToNativeQueue}

@@ -5,6 +5,8 @@
 
 import { NativeTrack } from '../services/nativeAudioService';
 
+export type RepeatMode = 'off' | 'all' | 'one';
+
 export interface MusicTrackLike {
   id?: string;
   title?: string;
@@ -22,7 +24,11 @@ export interface MusicTrackLike {
   candidates?: string[];
   album?: string;
   albumName?: string;
+  albumTitle?: string;
   uri?: string;
+  artistId?: string;
+  browseId?: string;
+  playlistId?: string;
   source?: 'native' | 'spotify' | 'local';
   isLocal?: boolean;
   isRadio?: boolean;
@@ -230,7 +236,11 @@ export function normalizeTrackMetadata(
     url: resolvedUrl,
     path: raw.path,
     candidates: raw.candidates,
-    album: raw.album || raw.albumName || '',
+    album: raw.album || raw.albumName || raw.albumTitle || '',
+    albumTitle: raw.albumTitle || raw.album || raw.albumName || undefined,
+    artistId: raw.artistId,
+    browseId: raw.browseId,
+    playlistId: raw.playlistId,
     uri: raw.uri,
     source,
     isLocal,
@@ -314,15 +324,16 @@ export interface OrderedQueueResult {
 }
 
 /**
- * Builds deterministic queue ordering when clicking a track in a playlist, local batch, or search list:
+ * Builds deterministic queue ordering when clicking a track in a playlist, local batch, or single track:
  * - Clicked track always becomes the first active track.
- * - Remaining tracks preserve sequential order (`after` + `before`).
+ * - Remaining tracks preserve sequential order (`after`, and only wraps `before` when `wrapAround: true`).
  * - When Shuffle is enabled, applies Fisher-Yates ONLY to `upNext`, keeping `currentTrack` untouched.
  */
 export function buildOrderedQueue(
   tracks: MusicTrackLike[],
   clickedIndexOrTrack: number | MusicTrackLike,
-  isShuffle: boolean = false
+  isShuffle: boolean = false,
+  options?: { wrapAround?: boolean }
 ): OrderedQueueResult {
   if (!tracks || tracks.length === 0) {
     return { currentTrack: null, upNext: [], fullQueue: [] };
@@ -352,10 +363,10 @@ export function buildOrderedQueue(
   }
 
   const currentTrack = normalized[startIndex];
-  const sequentialCandidates = [
-    ...normalized.slice(startIndex + 1),
-    ...normalized.slice(0, startIndex),
-  ];
+  const shouldWrap = Boolean(options?.wrapAround);
+  const sequentialCandidates = shouldWrap
+    ? [...normalized.slice(startIndex + 1), ...normalized.slice(0, startIndex)]
+    : normalized.slice(startIndex + 1);
 
   // Deduplicate remaining tracks while preserving exact sequential order
   const sequentialRest: NormalizedMusicTrack[] = [];
@@ -377,11 +388,11 @@ export function shouldTriggerSmartFill(params: {
   currentTrack: MusicTrackLike | null;
   manualQueueLength: number;
   smartQueueLength: number;
-  isRepeat: boolean;
+  repeatMode: RepeatMode;
 }): boolean {
   return (
     Boolean(params.currentTrack) &&
-    !params.isRepeat &&
+    params.repeatMode === 'off' &&
     params.manualQueueLength < 2 &&
     params.smartQueueLength < 5
   );

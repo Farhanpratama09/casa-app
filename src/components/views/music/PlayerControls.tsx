@@ -6,6 +6,7 @@ import {
   SkipForward,
   Shuffle,
   Repeat,
+  Repeat1,
   Library,
   Loader2,
 } from 'lucide-react';
@@ -16,6 +17,7 @@ import {
 } from '../../system/CosmicIcons';
 import { playChimeCue } from '../../../utils/tauriBridge';
 import { MusicSubPanel } from './constants';
+import { RepeatMode } from '../../../utils/musicQueueEngine';
 
 export interface PlayerControlsProps {
   isCompact?: boolean;
@@ -31,7 +33,7 @@ export interface PlayerControlsProps {
   isShuffle?: boolean;
   isSmartShuffle?: boolean;
   onToggleShuffle?: () => void;
-  isRepeat?: boolean;
+  repeatMode?: RepeatMode;
   onToggleRepeat?: () => void;
   onPrev: () => void;
   onTogglePlay: () => void;
@@ -60,7 +62,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
   isShuffle = false,
   isSmartShuffle = false,
   onToggleShuffle,
-  isRepeat = false,
+  repeatMode = 'off',
   onToggleRepeat,
   onPrev,
   onTogglePlay,
@@ -270,21 +272,31 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
             <SkipForward className="w-3.5 h-3.5 shrink-0 fill-current" />
           </button>
 
-          {/* 5. Repeat Button */}
+          {/* 5. Repeat Button (Off -> All -> One) */}
           <button
             onClick={onToggleRepeat}
             disabled={!hasActiveSession || !onToggleRepeat}
             className={`relative w-[24px] h-[24px] rounded-full flex items-center justify-center transition-all cursor-pointer ${
-              isRepeat
+              repeatMode !== 'off'
                 ? isSpotifySession
                   ? 'text-[#10b981] drop-shadow-[0_0_6px_rgba(16,185,129,0.5)] bg-emerald-950/40 border border-emerald-500/30'
-                  : 'text-cyan-400 drop-shadow-[0_0_6px_rgba(34,211,238,0.5)] bg-cyan-950/40 border border-cyan-500/30'
+                  : 'text-white bg-white/15 border border-white/30'
                 : 'text-zinc-500 hover:text-zinc-300 bg-transparent border-transparent'
             } disabled:opacity-30 disabled:cursor-not-allowed`}
-            title={isRepeat ? 'Repeat Aktif' : 'Repeat Mati'}
+            title={
+              repeatMode === 'one'
+                ? 'Repeat: One'
+                : repeatMode === 'all'
+                ? 'Repeat: All'
+                : 'Repeat: Off'
+            }
             aria-label="Toggle Repeat"
           >
-            <Repeat className="w-3.5 h-3.5 shrink-0" />
+            {repeatMode === 'one' ? (
+              <Repeat1 className="w-3.5 h-3.5 shrink-0" />
+            ) : (
+              <Repeat className="w-3.5 h-3.5 shrink-0" />
+            )}
           </button>
 
           {/* 6. Vertical Divider */}
@@ -377,21 +389,31 @@ export const PlayerControls: React.FC<PlayerControlsProps> = memo(({
             <SkipForward className="w-3 h-3 shrink-0 fill-current" />
           </button>
 
-          {/* 5. Repeat Button */}
+          {/* 5. Repeat Button (Off -> All -> One) */}
           <button
             onClick={onToggleRepeat}
             disabled={!hasActiveSession || !onToggleRepeat}
             className={`relative w-[20px] h-[20px] rounded-full flex items-center justify-center transition-all cursor-pointer ${
-              isRepeat
+              repeatMode !== 'off'
                 ? isSpotifySession
                   ? 'text-[#10b981] drop-shadow-[0_0_6px_rgba(16,185,129,0.5)] bg-emerald-950/40 border border-emerald-500/30'
-                  : 'text-cyan-400 drop-shadow-[0_0_6px_rgba(34,211,238,0.5)] bg-cyan-950/40 border border-cyan-500/30'
+                  : 'text-white bg-white/15 border border-white/30'
                 : 'text-zinc-500 hover:text-zinc-300 bg-transparent border-transparent'
             } disabled:opacity-30 disabled:cursor-not-allowed`}
-            title={isRepeat ? 'Repeat Aktif' : 'Repeat Mati'}
+            title={
+              repeatMode === 'one'
+                ? 'Repeat: One'
+                : repeatMode === 'all'
+                ? 'Repeat: All'
+                : 'Repeat: Off'
+            }
             aria-label="Toggle Repeat"
           >
-            <Repeat className="w-2.5 h-2.5 shrink-0" />
+            {repeatMode === 'one' ? (
+              <Repeat1 className="w-2.5 h-2.5 shrink-0" />
+            ) : (
+              <Repeat className="w-2.5 h-2.5 shrink-0" />
+            )}
           </button>
 
           {/* 6. Micro Divider */}

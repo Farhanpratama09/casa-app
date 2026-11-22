@@ -168,6 +168,7 @@
     prayerCountdownSeconds: (15 * 60 + 14 - (12 * 60 + 15)) * 60,
     idleLyricMinimized: false,
     musicSubTab: 'player', // 'player' | 'playlists'
+    repeatMode: 'off', // 'off' | 'all' | 'one'
     isLyricsOpen: true,
     isQueuePopoutOpen: false,
     activePlaylistId: 'pl-focus',
@@ -285,6 +286,8 @@
     musicSubPlaylists: $('vm-music-sub-playlists'),
     expPlaylistList: $('vm-exp-playlist-list'),
     expAudioLabel: $('vm-exp-audio-label'),
+    expRepeatBtn: $('vm-exp-repeat-btn'),
+    expRepeatLabel: $('vm-exp-repeat-label'),
     expTrackTitle: $('vm-exp-track-title'),
     expTrackArtist: $('vm-exp-track-artist'),
     expSaveBtn: $('vm-exp-save-btn'),
@@ -1555,6 +1558,19 @@
 
     // Mode 6 Music Player Metadata
     if (el.expAudioLabel) el.expAudioLabel.textContent = state.audioOutputLabel;
+    if (el.expRepeatBtn) {
+      el.expRepeatBtn.setAttribute('aria-pressed', state.repeatMode !== 'off' ? 'true' : 'false');
+      el.expRepeatBtn.title =
+        state.repeatMode === 'one'
+          ? 'Repeat: One'
+          : state.repeatMode === 'all'
+          ? 'Repeat: All'
+          : 'Repeat: Off (Smart Queue)';
+    }
+    if (el.expRepeatLabel) {
+      el.expRepeatLabel.textContent =
+        state.repeatMode === 'one' ? '1' : state.repeatMode === 'all' ? 'All' : 'Off';
+    }
     if (el.expTrackTitle) el.expTrackTitle.textContent = track.title;
     if (el.expTrackArtist) el.expTrackArtist.textContent = track.artist;
     if (el.scrubElapsed) el.scrubElapsed.textContent = track.elapsed;
@@ -2175,6 +2191,14 @@
         syncUI();
       });
     }
+    if (el.expRepeatBtn) {
+      el.expRepeatBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.repeatMode =
+          state.repeatMode === 'off' ? 'all' : state.repeatMode === 'all' ? 'one' : 'off';
+        syncCapsuleUI();
+      });
+    }
     if (el.expQueueToggle) {
       el.expQueueToggle.addEventListener('click', (ev) => {
         ev.stopPropagation();
@@ -2443,7 +2467,7 @@
           ? exeVersion.trim().startsWith('v')
             ? exeVersion.trim()
             : `v${exeVersion.trim()}`
-          : 'v2.1.2';
+          : 'v2.1.4';
       el.downloadSizeText.textContent = `${versionTag} · NSIS Setup (.exe) · ${exeSize}`;
     }
     if (el.downloadCountText) {
@@ -2545,13 +2569,13 @@
       let exeSize = null;
       let exeVersion = null;
       if (v2Release && Array.isArray(v2Release.assets)) {
-        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.1.2';
+        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.1.4';
         const exeAsset = v2Release.assets.find(
           (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
         );
         if (exeAsset && isSafeGitHubUrl(exeAsset.browser_download_url)) {
           exeUrl = exeAsset.browser_download_url;
-          exeSize = formatMegabytes(exeAsset.size) || '6.42 MB';
+          exeSize = formatMegabytes(exeAsset.size) || '4.49 MB';
         }
       }
 
@@ -2570,7 +2594,7 @@
         );
       } catch (_err) {}
     } catch (_err) {
-      // Keep static v2.1.2 fallback link & hide download count gracefully when offline/rate-limited
+      // Keep static v2.1.4 fallback link & hide download count gracefully when offline/rate-limited
     }
   }
 

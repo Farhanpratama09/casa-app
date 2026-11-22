@@ -40,7 +40,7 @@
     href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
     rel="stylesheet"
   />
-  <link rel="stylesheet" href="./styles.css?v=2.1.2" />
+  <link rel="stylesheet" href="./styles.css?v=2.1.4" />
 
   <script type="application/ld+json">
     {
@@ -53,7 +53,7 @@
       "description": "Ambient desktop notch & companion for Windows featuring monochrome OLED capsule interactions, synchronized lyrics, focus timer, brightness/Bluetooth telemetry, and drag-and-drop shelf.",
       "url": "https://farhanpratama09.github.io/casa-app/",
       "downloadUrl": "https://github.com/Farhanpratama09/casa-app/releases/latest",
-      "softwareVersion": "2.1.2",
+      "softwareVersion": "2.1.4",
       "license": "https://opensource.org/licenses/MIT",
       "author": {
         "@type": "Person",
@@ -411,9 +411,20 @@
                                 <button type="button" class="casa-sub-pill" data-music-sub="player" aria-pressed="true">Player</button>
                                 <button type="button" class="casa-sub-pill" data-music-sub="playlists" aria-pressed="false">Playlists</button>
                               </div>
-                              <span class="casa-output-pill" id="vm-exp-audio-pill">
-                                <span id="vm-exp-audio-label">Speakers</span>
-                              </span>
+                              <div class="casa-music-subnav-right">
+                                <span class="casa-output-pill" id="vm-exp-audio-pill">
+                                  <span id="vm-exp-audio-label">Speakers</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  id="vm-exp-repeat-btn"
+                                  class="casa-mini-round-btn"
+                                  title="Repeat: Off (Smart Queue)"
+                                  aria-label="Toggle Repeat Mode"
+                                >
+                                  <span id="vm-exp-repeat-label">Off</span>
+                                </button>
+                              </div>
                             </div>
 
                             <div class="casa-music-player" id="vm-music-sub-player">
@@ -1062,7 +1073,7 @@
 
             <div class="download-cta-col">
               <a
-                href="https://github.com/Farhanpratama09/casa-app/releases/download/v2.1.2/CASA_2.1.2_x64-setup.exe"
+                href="https://github.com/Farhanpratama09/casa-app/releases/download/v2.1.4/CASA_2.1.4_x64-setup.exe"
                 target="_blank"
                 rel="noopener noreferrer"
                 id="primary-download-btn"
@@ -1071,7 +1082,7 @@
                 <span id="primary-download-label">Download CASA for Windows</span>
               </a>
               <span class="download-size-note tabular" id="download-size-note">
-                <span id="download-size-text">v2.1.2 · NSIS Setup (.exe) · 6.42 MB</span><span id="download-count-text" class="download-count-meta" hidden></span>
+                <span id="download-size-text">v2.1.4 · NSIS Setup (.exe) · 4.49 MB</span><span id="download-count-text" class="download-count-meta" hidden></span>
               </span>
             </div>
           </div>
@@ -1087,11 +1098,11 @@
             <summary class="sha-summary">Verify SHA-256 checksum</summary>
             <div class="checksum-box">
               <div class="checksum-header">
-                <span>SHA-256 · CASA_2.1.2_x64-setup.exe</span>
+                <span>SHA-256 · CASA_2.1.4_x64-setup.exe</span>
                 <button type="button" id="copy-sha-btn" class="copy-mini-btn">Salin Hash</button>
               </div>
               <p class="checksum-code" id="sha-value-exe">
-                0DCB03B3B64B6B170D733AADE9EF77E35114FC082EBC536ACD979CFC0FAF012B
+                D13B5ECFEA34979C7BAEC095603D8CBFE10B4737DA1471E20E948DEA611E1906
               </p>
             </div>
           </details>
@@ -1336,6 +1347,6 @@
     </div>
   </footer>
 
-  <script src="./app.js?v=2.1.2" defer></script>
+  <script src="./app.js?v=2.1.4" defer></script>
 </body>
 </html>

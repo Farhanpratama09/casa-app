@@ -1,31 +1,32 @@
 /**
  * useQueueStore.ts
- * Unified Dual-Tier Smart Queue Store
+ * Unified Dual-Tier Smart Queue Store (v2.1.4)
  *
  * Manages:
- * 1. `manualQueue`: Explicit user-queued tracks (deterministic sequential or pure Fisher-Yates up-next when shuffled).
- * 2. `radioQueue`: Smart Queue auto-filled tracks (up to 5 relevant tracks when manualQueue < 2 and !isRepeat).
- * 3. `history`: Past played tracks (prevents radio loops & supports previous-track stepping).
- * 4. Title-First Identity: Matches strictly via `id` and `(normalizedTitle + normalizedArtist)` — never artist-only.
+ * 1. `manualQueue`: Explicit user-queued tracks or active playlist tail (sequential or Fisher-Yates when shuffled; NO forced loop on repeatMode === 'off').
+ * 2. `radioQueue`: Smart Queue auto-filled tracks (up to 5 relevant tracks when manualQueue < 2 and repeatMode === 'off').
+ * 3. `sessionSeeds`: Active session seed pool (`videoId` & `artistId`) updated when tracks play or are manually queued, or from active playlist. Never falls back to 30-day personal mix.
+ * 4. `history`: Past played tracks in current session (strict deduplication & previous stepping).
+ * 5. `repeatMode`: `'off' | 'all' | 'one'`.
  */
 
 import { create } from 'zustand';
 import { fetchAutoRadioRecommendations, RadioTrackItem } from '../services/radioEngine';
 import { NativeTrack } from '../services/nativeAudioService';
 import { SpotifyTrackItem } from '../utils/spotifyService';
+import { getSettingsSnapshot } from './useSettingsStore';
 import {
   buildOrderedQueue,
   fisherYatesShuffle,
   isSameTrack,
   MusicTrackLike,
   normalizeTrackMetadata,
-  selectSmartFillCandidates,
+  RepeatMode,
   shouldTriggerSmartFill,
 } from '../utils/musicQueueEngine';
-import { useMusicAffinityStore } from '../hooks/useMusicAffinity';
-import { usePlaylistStore } from './usePlaylistStore';
 
 export type QueueTrackSource = 'native' | 'spotify';
+export type PlaybackContextKind = 'single' | 'playlist' | 'collection';
 
 export interface SmartQueueTrack {
   id: string;
@@ -39,6 +40,10 @@ export interface SmartQueueTrack {
   streamUrl?: string;
   candidates?: string[];
   album?: string;
+  albumTitle?: string;
+  artistId?: string;
+  browseId?: string;
+  playlistId?: string;
   uri?: string;
   source: QueueTrackSource;
   isLocal?: boolean;
@@ -70,6 +75,10 @@ export function toSmartQueueTrack(
     streamUrl: norm.streamUrl,
     candidates: norm.candidates,
     album: norm.album || '',
+    albumTitle: norm.albumTitle || track?.albumTitle || norm.album || '',
+    artistId: norm.artistId || track?.artistId,
+    browseId: norm.browseId || track?.browseId,
+    playlistId: norm.playlistId || track?.playlistId,
     uri: norm.uri || (resolvedSource === 'spotify' ? `spotify:track:${norm.id}` : undefined),
     source: resolvedSource,
     isLocal: norm.isLocal,
@@ -78,22 +87,61 @@ export function toSmartQueueTrack(
   };
 }
 
+function mergeSessionSeeds(
+  existing: SmartQueueTrack[],
+  incoming: SmartQueueTrack[],
+  maxSeeds = 8
+): SmartQueueTrack[] {
+  const result: SmartQueueTrack[] = [];
+  for (const cand of [...incoming, ...existing]) {
+    if (!cand || (!cand.id && !cand.title)) continue;
+    if (result.some((item) => isSameTrack(item, cand))) continue;
+    result.push(cand);
+    if (result.length >= maxSeeds) break;
+  }
+  return result;
+}
+
+const NEXT_REPEAT_MODE: Record<RepeatMode, RepeatMode> = {
+  off: 'all',
+  all: 'one',
+  one: 'off',
+};
+
+let activeRadioAbort: AbortController | null = null;
+let activeRadioPromise: Promise<void> | null = null;
+let activeRadioEpoch = -1;
+
+function cancelInFlightRadio(): void {
+  if (activeRadioAbort) {
+    try {
+      activeRadioAbort.abort();
+    } catch {}
+    activeRadioAbort = null;
+  }
+}
+
 export interface QueueStoreState {
   manualQueue: SmartQueueTrack[];
   unshuffledManualQueue: SmartQueueTrack[];
   radioQueue: SmartQueueTrack[];
   history: SmartQueueTrack[];
+  sessionSeeds: SmartQueueTrack[];
+  activeCollectionTracks: SmartQueueTrack[];
+  playbackContextKind: PlaybackContextKind;
   currentTrack: SmartQueueTrack | null;
   activeSource: QueueTrackSource;
   isShuffle: boolean;
-  isRepeat: boolean;
+  repeatMode: RepeatMode;
   isFetchingRadio: boolean;
   suppressAutoFill: boolean;
   clearVersion: number;
+  radioEpoch: number;
 
   // Configuration Actions
   setActiveSource: (source: QueueTrackSource) => void;
-  setRepeat: (val: boolean) => void;
+  setRepeatMode: (mode: RepeatMode) => void;
+  toggleRepeat: () => RepeatMode;
   setCurrentTrack: (track: SmartQueueTrack | NativeTrack | SpotifyTrackItem | null) => void;
 
   // Manual Queue Actions
@@ -104,7 +152,8 @@ export interface QueueStoreState {
   setManualQueue: (tracks: Array<SmartQueueTrack | NativeTrack | SpotifyTrackItem>) => void;
   setOrderedPlaylistQueue: (
     tracks: Array<SmartQueueTrack | NativeTrack | SpotifyTrackItem>,
-    clickedIndexOrTrack: number | SmartQueueTrack | NativeTrack | SpotifyTrackItem
+    clickedIndexOrTrack: number | SmartQueueTrack | NativeTrack | SpotifyTrackItem,
+    options?: { contextKind?: PlaybackContextKind }
   ) => { currentTrack: SmartQueueTrack | null; upNext: SmartQueueTrack[] };
 
   // Smart Queue / Auto-Fill Actions
@@ -120,7 +169,7 @@ export interface QueueStoreState {
   setShuffle: (val: boolean) => void;
 
   // Playback Progression & Smart Auto-Fill
-  getNextTrack: () => Promise<SmartQueueTrack | null>;
+  getNextTrack: (options?: { awaitSmartFill?: boolean }) => Promise<SmartQueueTrack | null>;
   triggerAutoRadio: (force?: boolean) => Promise<void>;
 }
 
@@ -129,21 +178,34 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
   unshuffledManualQueue: [],
   radioQueue: [],
   history: [],
+  sessionSeeds: [],
+  activeCollectionTracks: [],
+  playbackContextKind: 'single',
   currentTrack: null,
   activeSource: 'native',
   isShuffle: false,
-  isRepeat: false,
+  repeatMode: 'off',
   isFetchingRadio: false,
   suppressAutoFill: false,
   clearVersion: 0,
+  radioEpoch: 0,
 
   setActiveSource: (source: QueueTrackSource) => {
     set({ activeSource: source });
   },
 
-  setRepeat: (val: boolean) => {
-    set({ isRepeat: val });
-    if (!val) {
+  setRepeatMode: (mode: RepeatMode) => {
+    const nextEpoch = get().radioEpoch + 1;
+    if (mode !== 'off') {
+      cancelInFlightRadio();
+    }
+    set((state) => ({
+      repeatMode: mode,
+      radioEpoch: mode !== 'off' ? nextEpoch : state.radioEpoch,
+      isFetchingRadio: mode !== 'off' ? false : state.isFetchingRadio,
+    }));
+
+    if (mode === 'off') {
       const s = get();
       if (
         !s.suppressAutoFill &&
@@ -151,7 +213,7 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
           currentTrack: s.currentTrack,
           manualQueueLength: s.manualQueue.length,
           smartQueueLength: s.radioQueue.length,
-          isRepeat: false,
+          repeatMode: 'off',
         })
       ) {
         void get().triggerAutoRadio();
@@ -159,15 +221,33 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
     }
   },
 
+  toggleRepeat: () => {
+    const next = NEXT_REPEAT_MODE[get().repeatMode] || 'off';
+    get().setRepeatMode(next);
+    return next;
+  },
+
   setCurrentTrack: (track) => {
     if (!track) {
-      set({ currentTrack: null });
+      cancelInFlightRadio();
+      set((state) => ({
+        currentTrack: null,
+        radioEpoch: state.radioEpoch + 1,
+        isFetchingRadio: false,
+      }));
       return;
     }
     const smart = toSmartQueueTrack(track, get().activeSource);
+    const sameAsCurrent = isSameTrack(get().currentTrack, smart);
+    if (!sameAsCurrent) {
+      cancelInFlightRadio();
+    }
     set((state) => ({
       currentTrack: smart,
       suppressAutoFill: false,
+      radioEpoch: sameAsCurrent ? state.radioEpoch : state.radioEpoch + 1,
+      isFetchingRadio: sameAsCurrent ? state.isFetchingRadio : false,
+      sessionSeeds: mergeSessionSeeds(state.sessionSeeds, [smart]),
       manualQueue: state.manualQueue.filter((t) => !isSameTrack(t, smart)),
       unshuffledManualQueue: state.unshuffledManualQueue.filter(
         (t) => !isSameTrack(t, smart)
@@ -182,7 +262,7 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
         currentTrack: updated.currentTrack,
         manualQueueLength: updated.manualQueue.length,
         smartQueueLength: updated.radioQueue.length,
-        isRepeat: updated.isRepeat,
+        repeatMode: updated.repeatMode,
       })
     ) {
       void get().triggerAutoRadio();
@@ -193,6 +273,7 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
     const track = toSmartQueueTrack(rawTrack, get().activeSource, false);
     set((state) => ({
       suppressAutoFill: false,
+      sessionSeeds: mergeSessionSeeds(state.sessionSeeds, [track]),
       manualQueue: [...state.manualQueue, track],
       unshuffledManualQueue: [...state.unshuffledManualQueue, track],
     }));
@@ -201,6 +282,8 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
   prependToManualQueue: (rawTrack) => {
     const track = toSmartQueueTrack(rawTrack, get().activeSource, false);
     set((state) => ({
+      suppressAutoFill: false,
+      sessionSeeds: mergeSessionSeeds(state.sessionSeeds, [track]),
       manualQueue: [
         track,
         ...state.manualQueue.filter((t) => !isSameTrack(t, track)),
@@ -230,7 +313,7 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
         currentTrack: s.currentTrack,
         manualQueueLength: s.manualQueue.length,
         smartQueueLength: s.radioQueue.length,
-        isRepeat: s.isRepeat,
+        repeatMode: s.repeatMode,
       })
     ) {
       void get().triggerAutoRadio();
@@ -245,11 +328,12 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
     const source = get().activeSource;
     const sequential = rawTracks.map((t) => toSmartQueueTrack(t, source, false));
     const finalTracks = get().isShuffle ? fisherYatesShuffle(sequential) : sequential;
-    set({
+    set((state) => ({
       suppressAutoFill: false,
+      sessionSeeds: mergeSessionSeeds(state.sessionSeeds, sequential.slice(0, 6)),
       manualQueue: finalTracks,
       unshuffledManualQueue: sequential,
-    });
+    }));
 
     const s = get();
     if (
@@ -257,19 +341,28 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
         currentTrack: s.currentTrack,
         manualQueueLength: s.manualQueue.length,
         smartQueueLength: s.radioQueue.length,
-        isRepeat: s.isRepeat,
+        repeatMode: s.repeatMode,
       })
     ) {
       void get().triggerAutoRadio();
     }
   },
 
-  setOrderedPlaylistQueue: (rawTracks, clickedIndexOrTrack) => {
+  setOrderedPlaylistQueue: (rawTracks, clickedIndexOrTrack, options) => {
     const source = get().activeSource;
-    const ordered = buildOrderedQueue(rawTracks, clickedIndexOrTrack, false);
+    const contextKind: PlaybackContextKind =
+      options?.contextKind ?? (rawTracks.length > 1 ? 'playlist' : 'single');
+
+    // Never wrap [0..startIndex-1] into manualQueue: Repeat All loops at queue exhaustion cleanly,
+    // while Repeat Off finishes forward and transitions into Smart Queue seeded from playlist tracks.
+    const ordered = buildOrderedQueue(rawTracks, clickedIndexOrTrack, false, {
+      wrapAround: false,
+    });
     if (!ordered.currentTrack) {
       return { currentTrack: null, upNext: [] };
     }
+
+    cancelInFlightRadio();
 
     const currentSmart = toSmartQueueTrack(ordered.currentTrack, source, false);
     const sequentialUpNext = ordered.upNext.map((t) => toSmartQueueTrack(t, source, false));
@@ -277,16 +370,30 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
       ? fisherYatesShuffle(sequentialUpNext)
       : sequentialUpNext;
 
+    const fullCollection =
+      contextKind !== 'single' && rawTracks.length > 0
+        ? rawTracks.map((t) => toSmartQueueTrack(t, source, false))
+        : [currentSmart];
+
+    const seedBatch =
+      contextKind !== 'single'
+        ? [currentSmart, ...fullCollection.filter((t) => !isSameTrack(t, currentSmart)).slice(0, 4)]
+        : [currentSmart];
+
     set((state) => ({
       currentTrack: currentSmart,
       suppressAutoFill: false,
+      playbackContextKind: contextKind,
+      activeCollectionTracks: fullCollection,
+      sessionSeeds:
+        contextKind !== 'single'
+          ? seedBatch.slice(0, 8)
+          : mergeSessionSeeds(state.sessionSeeds, seedBatch),
       manualQueue: activeUpNext,
       unshuffledManualQueue: sequentialUpNext,
-      radioQueue: state.radioQueue.filter(
-        (r) =>
-          !isSameTrack(r, currentSmart) &&
-          !activeUpNext.some((m) => isSameTrack(m, r))
-      ),
+      radioQueue: [],
+      radioEpoch: state.radioEpoch + 1,
+      isFetchingRadio: false,
     }));
     get().recordHistory(currentSmart);
 
@@ -296,7 +403,7 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
         currentTrack: updated.currentTrack,
         manualQueueLength: updated.manualQueue.length,
         smartQueueLength: updated.radioQueue.length,
-        isRepeat: updated.isRepeat,
+        repeatMode: updated.repeatMode,
       })
     ) {
       void get().triggerAutoRadio();
@@ -320,7 +427,12 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
   },
 
   clearRadioQueue: () => {
-    set({ radioQueue: [] });
+    cancelInFlightRadio();
+    set((state) => ({
+      radioQueue: [],
+      radioEpoch: state.radioEpoch + 1,
+      isFetchingRadio: false,
+    }));
   },
 
   setRadioQueue: (rawTracks) => {
@@ -331,12 +443,18 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
   },
 
   clearAllQueues: () => {
+    cancelInFlightRadio();
     set((state) => ({
       manualQueue: [],
       unshuffledManualQueue: [],
       radioQueue: [],
+      activeCollectionTracks: state.currentTrack ? [state.currentTrack] : [],
+      playbackContextKind: 'single',
+      sessionSeeds: state.currentTrack ? [state.currentTrack] : [],
       suppressAutoFill: true,
       clearVersion: state.clearVersion + 1,
+      radioEpoch: state.radioEpoch + 1,
+      isFetchingRadio: false,
     }));
   },
 
@@ -359,7 +477,6 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
   setShuffle: (val: boolean) => {
     set((state) => {
       if (val) {
-        // Pure Fisher-Yates ONLY on upcoming tracks; currentTrack remains untouched
         const baseSequential =
           state.unshuffledManualQueue.length > 0
             ? state.unshuffledManualQueue
@@ -373,7 +490,6 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
           radioQueue: shuffledSmart,
         };
       } else {
-        // Restore sequential order for remaining tracks still present in manualQueue
         const restoredManual =
           state.unshuffledManualQueue.length > 0
             ? state.unshuffledManualQueue.filter((t) =>
@@ -388,28 +504,68 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
     });
   },
 
-  getNextTrack: async () => {
-    const { manualQueue, radioQueue } = get();
+  getNextTrack: async (options) => {
+    const {
+      manualQueue,
+      radioQueue,
+      repeatMode,
+      activeCollectionTracks,
+      currentTrack,
+      isShuffle,
+      suppressAutoFill,
+    } = get();
     let nextTrack: SmartQueueTrack | null = null;
 
     if (manualQueue.length > 0) {
       const [first, ...rest] = manualQueue;
       nextTrack = first;
+      cancelInFlightRadio();
       set((state) => ({
         manualQueue: rest,
         unshuffledManualQueue: state.unshuffledManualQueue.filter(
           (t) => !isSameTrack(t, first)
         ),
+        radioEpoch: state.radioEpoch + 1,
+        isFetchingRadio: false,
       }));
+    } else if (repeatMode === 'all') {
+      const loopPool =
+        activeCollectionTracks.length > 0
+          ? activeCollectionTracks
+          : currentTrack
+          ? [currentTrack]
+          : [];
+      if (loopPool.length > 0) {
+        const orderedLoop = isShuffle ? fisherYatesShuffle(loopPool) : [...loopPool];
+        const [first, ...rest] = orderedLoop;
+        nextTrack = first;
+        set({
+          manualQueue: rest,
+          unshuffledManualQueue: loopPool.slice(1),
+        });
+      }
     } else if (radioQueue.length > 0) {
       const [first, ...rest] = radioQueue;
       nextTrack = first;
       set({ radioQueue: rest });
+    } else if (options?.awaitSmartFill && repeatMode === 'off' && !suppressAutoFill && currentTrack) {
+      const epochBeforeAwait = get().radioEpoch;
+      await get().triggerAutoRadio(true);
+      const afterWait = get();
+      if (afterWait.radioEpoch === epochBeforeAwait && afterWait.manualQueue.length === 0 && afterWait.radioQueue.length > 0) {
+        const [first, ...rest] = afterWait.radioQueue;
+        nextTrack = first;
+        set({ radioQueue: rest });
+      }
     }
 
     if (nextTrack) {
       get().recordHistory(nextTrack);
-      set({ currentTrack: nextTrack, suppressAutoFill: false });
+      set((state) => ({
+        currentTrack: nextTrack,
+        suppressAutoFill: false,
+        sessionSeeds: mergeSessionSeeds(state.sessionSeeds, [nextTrack!]),
+      }));
     }
 
     const after = get();
@@ -419,7 +575,7 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
         currentTrack: after.currentTrack,
         manualQueueLength: after.manualQueue.length,
         smartQueueLength: after.radioQueue.length,
-        isRepeat: after.isRepeat,
+        repeatMode: after.repeatMode,
       })
     ) {
       void get().triggerAutoRadio();
@@ -429,21 +585,26 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
   },
 
   /**
-   * Smart Auto-Fill (`Up Next` < 2 & !isRepeat):
-   * Fills up to 5 relevant tracks from local library/playlists/affinity history first,
-   * then tops up online recommendations when available.
+   * Session-Seeded Smart Auto-Fill (`Up Next` < 2 & repeatMode === 'off'):
+   * Draws recommendations exclusively via official `Up Next / Watch Playlist` (`videoId`) and
+   * official `artistId` fallback using active session seeds (`sessionSeeds` / `activeCollectionTracks`).
+   * Never falls back to 30-day personal history (`trackRecords`).
    */
   triggerAutoRadio: async (force = false) => {
     const state = get();
-    if (state.isFetchingRadio && !force) return;
+    if (state.isFetchingRadio && activeRadioEpoch === state.radioEpoch && activeRadioPromise) {
+      if (force) {
+        return activeRadioPromise;
+      }
+      return;
+    }
     if (!force && state.suppressAutoFill) return;
     if (
-      !force &&
       !shouldTriggerSmartFill({
         currentTrack: state.currentTrack,
         manualQueueLength: state.manualQueue.length,
         smartQueueLength: state.radioQueue.length,
-        isRepeat: state.isRepeat,
+        repeatMode: state.repeatMode,
       })
     ) {
       return;
@@ -455,75 +616,113 @@ export const useQueueStore = create<QueueStoreState>((set, get) => ({
     const needed = Math.max(0, 5 - state.radioQueue.length);
     if (needed === 0) return;
 
-    const versionAtStart = state.clearVersion;
+    const epochAtStart = state.radioEpoch;
+    const clearVersionAtStart = state.clearVersion;
+
+    cancelInFlightRadio();
+    const controller = new AbortController();
+    activeRadioAbort = controller;
+    activeRadioEpoch = epochAtStart;
+
     set({ isFetchingRadio: true });
 
-    try {
-      const affinityState = useMusicAffinityStore.getState();
-      const playlistState = usePlaylistStore.getState();
-
-      // Build candidate pool from local uploads, custom playlists, and affinity history
-      const pool: Array<MusicTrackLike & { score?: number; playCount?: number }> = [];
-      for (const rec of Object.values(affinityState.trackRecords)) {
-        const liveTrack = affinityState.sessionTrackCache[rec.key] || rec.track;
-        pool.push({
-          ...liveTrack,
-          score: rec.score,
-          playCount: rec.playCount,
-        });
-      }
-      for (const pl of playlistState.customPlaylists) {
-        for (const t of pl.tracks) {
-          pool.push(t);
+    const runPromise = (async () => {
+      try {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          return;
         }
-      }
 
-      const exclusion = [current, ...state.manualQueue, ...state.radioQueue, ...state.history.slice(0, 8)];
+        // Session seeds: prioritize active playlist/collection tracks and active session tracks only
+        const seedCandidates = mergeSessionSeeds(
+          state.activeCollectionTracks,
+          [current, ...state.sessionSeeds],
+          6
+        ).filter((s) => !isSameTrack(s, current));
 
-      const localCandidates = selectSmartFillCandidates({
-        seedTrack: current,
-        candidatePool: pool,
-        exclusionList: exclusion,
-        maxCount: needed,
-      }).map((t) => toSmartQueueTrack(t, state.activeSource, true));
+        let region: 'auto' | 'ID' | 'US' | 'KR' | 'JP' = 'auto';
+        try {
+          region = getSettingsSnapshot().playerRegion || 'auto';
+        } catch {
+          region = 'auto';
+        }
 
-      let filled = [...localCandidates];
+        const existingAll = [
+          current,
+          ...state.manualQueue,
+          ...state.radioQueue,
+          ...state.history,
+        ];
 
-      // Top up remaining slots via online search/recommendations when below 5
-      if (filled.length < needed && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
-        const remoteNeeded = needed - filled.length;
         const remoteItems = await fetchAutoRadioRecommendations(
           current,
           state.activeSource,
-          [...state.history, ...filled],
-          [...state.manualQueue, ...state.radioQueue, ...filled]
-        );
-        for (const item of remoteItems.slice(0, remoteNeeded)) {
-          const mapped = toSmartQueueTrack(item, state.activeSource, true);
-          if (
-            !isSameTrack(mapped, current) &&
-            !exclusion.some((e) => isSameTrack(e, mapped)) &&
-            !filled.some((f) => isSameTrack(f, mapped))
-          ) {
-            filled.push(mapped);
+          state.history,
+          [...state.manualQueue, ...state.radioQueue],
+          {
+            sessionSeeds: seedCandidates,
+            region,
+            signal: controller.signal,
           }
+        );
+
+        // Cancel cleanly if queue/track/clear epoch shifted while awaiting network response
+        if (
+          controller.signal.aborted ||
+          get().radioEpoch !== epochAtStart ||
+          get().clearVersion !== clearVersionAtStart
+        ) {
+          return;
+        }
+
+        const latest = get();
+        const latestExclusions = [
+          latest.currentTrack || current,
+          ...latest.manualQueue,
+          ...latest.radioQueue,
+          ...latest.history,
+          ...existingAll,
+        ];
+
+        const picked: SmartQueueTrack[] = [];
+        for (const item of remoteItems) {
+          if (picked.length >= needed) break;
+          const mapped = toSmartQueueTrack(item, latest.activeSource, true);
+          if (
+            latestExclusions.some((ex) => isSameTrack(ex, mapped)) ||
+            picked.some((p) => isSameTrack(p, mapped))
+          ) {
+            continue;
+          }
+          picked.push(mapped);
+        }
+
+        if (picked.length > 0) {
+          const formattedItems = latest.isShuffle ? fisherYatesShuffle(picked) : picked;
+          set((s) => {
+            if (s.radioEpoch !== epochAtStart || s.clearVersion !== clearVersionAtStart) {
+              return s;
+            }
+            return {
+              radioQueue: [...s.radioQueue, ...formattedItems].slice(0, 5),
+            };
+          });
+        }
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          console.error('[useQueueStore] triggerAutoRadio failed:', err);
+        }
+      } finally {
+        if (activeRadioAbort === controller) {
+          activeRadioAbort = null;
+          activeRadioPromise = null;
+        }
+        if (get().radioEpoch === epochAtStart && get().clearVersion === clearVersionAtStart) {
+          set({ isFetchingRadio: false });
         }
       }
+    })();
 
-      if (get().clearVersion !== versionAtStart) {
-        return;
-      }
-
-      if (filled.length > 0) {
-        const formattedItems = get().isShuffle ? fisherYatesShuffle(filled) : filled;
-        set((s) => ({
-          radioQueue: [...s.radioQueue, ...formattedItems].slice(0, 5),
-        }));
-      }
-    } catch (err) {
-      console.error('[useQueueStore] triggerAutoRadio failed:', err);
-    } finally {
-      set({ isFetchingRadio: false });
-    }
+    activeRadioPromise = runPromise;
+    return runPromise;
   },
 }));

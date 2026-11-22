@@ -7,6 +7,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { CasaPlayerRegion, getSettingsSnapshot } from '../stores/useSettingsStore';
 
 export interface NativeTrack {
   id: string;
@@ -20,6 +21,41 @@ export interface NativeTrack {
   candidates?: string[];
   isLocal?: boolean;
   source?: 'native' | 'spotify' | 'local';
+  artistId?: string;
+  albumTitle?: string;
+  browseId?: string;
+  playlistId?: string;
+  resultKind?: 'song' | 'top_song' | 'album' | 'playlist';
+}
+
+export interface SearchCollectionItem {
+  id: string;
+  title: string;
+  subtitle: string;
+  kind: 'album' | 'playlist';
+  browseId: string;
+  playlistId?: string;
+  artistId?: string;
+  thumbnailUrl: string;
+}
+
+export interface CatalogSearchResponse {
+  query: string;
+  gl: string;
+  hl: string;
+  topSongs: NativeTrack[];
+  songs: NativeTrack[];
+  albums: SearchCollectionItem[];
+  playlists: SearchCollectionItem[];
+  topArtistName?: string;
+  topArtistId?: string;
+}
+
+export interface RegionLocaleInfo {
+  gl: string;
+  hl: string;
+  detectedGl: string;
+  detectedHl: string;
 }
 
 interface ResolvedStreamResponse {
@@ -115,32 +151,186 @@ export function parseTrackTitleAndArtist(
   };
 }
 
+function resolveEffectivePlayerRegion(region?: CasaPlayerRegion): CasaPlayerRegion {
+  if (region) return region;
+  try {
+    return getSettingsSnapshot().playerRegion || 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+
+function normalizeNativeTrackResult(t: NativeTrack): NativeTrack {
+  return {
+    ...t,
+    artworkUrl: t.artworkUrl || t.thumbnailUrl,
+    albumArt: t.albumArt || t.thumbnailUrl,
+    source: t.source || (t.isLocal ? 'local' : 'native'),
+  };
+}
+
 /**
  * Searches official music tracks via the local Rust InnerTube backend (`search_tracks_native`).
  * Zero dependency on public Invidious/Piped servers; completes in <250ms with 500x500 square covers.
  */
-export async function searchTracks(query: string): Promise<NativeTrack[]> {
+export async function searchTracks(
+  query: string,
+  region?: CasaPlayerRegion
+): Promise<NativeTrack[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
+
+  const effectiveRegion = resolveEffectivePlayerRegion(region);
 
   try {
     const tracks = await invoke<NativeTrack[]>('search_tracks_native', {
       query: trimmed,
+      region: effectiveRegion,
     });
 
     if (Array.isArray(tracks) && tracks.length > 0) {
       return tracks
         .filter((t) => !isBlacklistedTitle(t.title, t.artist))
-        .map((t) => ({
-          ...t,
-          artworkUrl: t.artworkUrl || t.thumbnailUrl,
-        }));
+        .map(normalizeNativeTrackResult);
     }
   } catch (err) {
     console.error('[NativeAudio] Rust search_tracks_native failed:', err);
   }
 
   return [];
+}
+
+/**
+ * Multi-category YT Music search returning Top Songs, Albums, Playlists, and Songs
+ * using the configured or OS-detected dynamic region/locale (`gl` & `hl`).
+ */
+export async function searchCatalog(
+  query: string,
+  region?: CasaPlayerRegion
+): Promise<CatalogSearchResponse> {
+  const trimmed = query.trim();
+  const effectiveRegion = resolveEffectivePlayerRegion(region);
+  const empty: CatalogSearchResponse = {
+    query: trimmed,
+    gl: effectiveRegion === 'auto' ? 'US' : effectiveRegion,
+    hl: 'en',
+    topSongs: [],
+    songs: [],
+    albums: [],
+    playlists: [],
+  };
+
+  if (!trimmed) return empty;
+
+  try {
+    const res = await invoke<CatalogSearchResponse>('search_catalog_native', {
+      query: trimmed,
+      region: effectiveRegion,
+    });
+    if (res && typeof res === 'object') {
+      return {
+        ...res,
+        topSongs: Array.isArray(res.topSongs)
+          ? res.topSongs
+              .filter((t) => !isBlacklistedTitle(t.title, t.artist))
+              .map(normalizeNativeTrackResult)
+          : [],
+        songs: Array.isArray(res.songs)
+          ? res.songs
+              .filter((t) => !isBlacklistedTitle(t.title, t.artist))
+              .map(normalizeNativeTrackResult)
+          : [],
+        albums: Array.isArray(res.albums) ? res.albums : [],
+        playlists: Array.isArray(res.playlists) ? res.playlists : [],
+      };
+    }
+  } catch (err) {
+    console.error('[NativeAudio] Rust search_catalog_native failed:', err);
+  }
+
+  // Fallback to flat song search if structured catalog endpoint errored
+  const fallbackSongs = await searchTracks(trimmed, effectiveRegion);
+  return {
+    ...empty,
+    songs: fallbackSongs,
+  };
+}
+
+/**
+ * Queries official InnerTube `youtubei/v1/next` (Up Next / Watch Playlist) by `videoId`,
+ * falling back to official `artistId` browse Top Songs when unavailable.
+ */
+export async function getUpNextTracks(params: {
+  videoId?: string;
+  artistId?: string;
+  artistName?: string;
+  playlistId?: string;
+  region?: CasaPlayerRegion;
+  limit?: number;
+}): Promise<NativeTrack[]> {
+  const effectiveRegion = resolveEffectivePlayerRegion(params.region);
+  try {
+    const tracks = await invoke<NativeTrack[]>('get_up_next_native', {
+      videoId: params.videoId || null,
+      artistId: params.artistId || null,
+      artistName: params.artistName || null,
+      playlistId: params.playlistId || null,
+      region: effectiveRegion,
+      limit: params.limit ?? 15,
+    });
+    if (Array.isArray(tracks)) {
+      return tracks
+        .filter((t) => !isBlacklistedTitle(t.title, t.artist))
+        .map(normalizeNativeTrackResult);
+    }
+  } catch (err) {
+    console.error('[NativeAudio] Rust get_up_next_native failed:', err);
+  }
+  return [];
+}
+
+/**
+ * Loads full playable tracklist for an Artist Top Songs, Album, or Playlist (`browseId` / `playlistId`).
+ */
+export async function browseCollectionTracks(params: {
+  browseId?: string;
+  playlistId?: string;
+  region?: CasaPlayerRegion;
+}): Promise<NativeTrack[]> {
+  const effectiveRegion = resolveEffectivePlayerRegion(params.region);
+  try {
+    const tracks = await invoke<NativeTrack[]>('browse_collection_tracks_native', {
+      browseId: params.browseId || null,
+      playlistId: params.playlistId || null,
+      region: effectiveRegion,
+    });
+    if (Array.isArray(tracks)) {
+      return tracks
+        .filter((t) => !isBlacklistedTitle(t.title, t.artist))
+        .map(normalizeNativeTrackResult);
+    }
+  } catch (err) {
+    console.error('[NativeAudio] Rust browse_collection_tracks_native failed:', err);
+  }
+  return [];
+}
+
+export async function getPlayerRegionInfo(
+  region?: CasaPlayerRegion
+): Promise<RegionLocaleInfo> {
+  const effectiveRegion = resolveEffectivePlayerRegion(region);
+  try {
+    return await invoke<RegionLocaleInfo>('get_player_region_info', {
+      region: effectiveRegion,
+    });
+  } catch {
+    return {
+      gl: effectiveRegion === 'auto' ? 'ID' : effectiveRegion,
+      hl: effectiveRegion === 'ID' ? 'id' : 'en',
+      detectedGl: 'ID',
+      detectedHl: 'id',
+    };
+  }
 }
 
 /**
