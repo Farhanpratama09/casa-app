@@ -254,63 +254,110 @@ pub fn save_clipboard_image(
     Ok(file_path.to_string_lossy().to_string())
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeDragDropResult {
+    pub status: String,
+    pub effect: u32,
+}
+
+fn normalize_existing_drop_paths(paths: Vec<String>) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for raw in paths {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let replaced = trimmed.replace('/', "\\");
+        let candidate = if let Some(stripped) = replaced.strip_prefix(r"\\?\") {
+            if !stripped.starts_with("UNC\\") && stripped.len() < 260 {
+                stripped.to_string()
+            } else {
+                replaced
+            }
+        } else {
+            replaced
+        };
+        if Path::new(&candidate).exists() && !normalized.contains(&candidate) {
+            normalized.push(candidate);
+        }
+    }
+    normalized
+}
+
+fn is_accepted_external_drop(
+    hr_code: i32,
+    drop_s_drop_code: i32,
+    effect: u32,
+    dropped_on_self: bool,
+) -> bool {
+    hr_code == drop_s_drop_code && effect != 0 && !dropped_on_self
+}
+
+#[cfg(windows)]
+fn build_cf_hdrop_hglobal(
+    valid_paths: &[String],
+) -> Result<windows::Win32::Foundation::HGLOBAL, String> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Foundation::{GlobalFree, HGLOBAL};
+    use windows::Win32::System::Memory::{
+        GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT,
+    };
+    use windows::Win32::UI::Shell::DROPFILES;
+
+    let mut wide_chars: Vec<u16> = Vec::new();
+    for p in valid_paths {
+        wide_chars.extend(OsStr::new(p).encode_wide());
+        wide_chars.push(0);
+    }
+    wide_chars.push(0); // Double-null terminator
+
+    let dropfiles_size = std::mem::size_of::<DROPFILES>();
+    let payload_bytes = wide_chars.len() * std::mem::size_of::<u16>();
+    let total_bytes = dropfiles_size + payload_bytes;
+
+    unsafe {
+        let hglobal: HGLOBAL = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, total_bytes)
+            .map_err(|e| format!("GlobalAlloc gagal: {}", e))?;
+
+        let ptr = GlobalLock(hglobal);
+        if ptr.is_null() {
+            let _ = GlobalFree(Some(hglobal));
+            return Err("GlobalLock gagal".to_string());
+        }
+
+        let df = ptr as *mut DROPFILES;
+        (*df).pFiles = dropfiles_size as u32;
+        (*df).pt.x = 0;
+        (*df).pt.y = 0;
+        (*df).fNC = false.into();
+        (*df).fWide = true.into();
+
+        let data_dst = (ptr as *mut u8).add(dropfiles_size) as *mut u16;
+        std::ptr::copy_nonoverlapping(wide_chars.as_ptr(), data_dst, wide_chars.len());
+        let _ = GlobalUnlock(hglobal);
+        Ok(hglobal)
+    }
+}
+
 /// Menyalin berkas fisik asli ke clipboard Windows sebagai format CF_HDROP (siap Ctrl+V di Explorer, Browser, Discord, WhatsApp).
 #[tauri::command]
 pub fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
     #[cfg(windows)]
     {
-        use std::ffi::OsStr;
-        use std::os::windows::ffi::OsStrExt;
-        use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
+        use windows::Win32::Foundation::{GlobalFree, HANDLE};
         use windows::Win32::System::DataExchange::{EmptyClipboard, SetClipboardData};
-        use windows::Win32::System::Memory::{
-            GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT,
-        };
         use windows::Win32::System::Ole::CF_HDROP;
-        use windows::Win32::UI::Shell::DROPFILES;
 
-        let valid_paths: Vec<String> = paths
-            .into_iter()
-            .map(|p| p.trim().to_string())
-            .filter(|p| !p.is_empty() && Path::new(p).exists())
-            .collect();
-
+        let valid_paths = normalize_existing_drop_paths(paths);
         if valid_paths.is_empty() {
             return Err("Berkas tidak ditemukan di disk".to_string());
         }
 
-        let mut wide_chars: Vec<u16> = Vec::new();
-        for p in &valid_paths {
-            wide_chars.extend(OsStr::new(p).encode_wide());
-            wide_chars.push(0);
-        }
-        wide_chars.push(0); // Double-null terminator
-
-        let dropfiles_size = std::mem::size_of::<DROPFILES>();
-        let payload_bytes = wide_chars.len() * std::mem::size_of::<u16>();
-        let total_bytes = dropfiles_size + payload_bytes;
+        let hglobal = build_cf_hdrop_hglobal(&valid_paths)?;
 
         unsafe {
-            let hglobal: HGLOBAL = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, total_bytes)
-                .map_err(|e| format!("GlobalAlloc gagal: {}", e))?;
-
-            let ptr = GlobalLock(hglobal);
-            if ptr.is_null() {
-                let _ = GlobalFree(Some(hglobal));
-                return Err("GlobalLock gagal".to_string());
-            }
-
-            let df = ptr as *mut DROPFILES;
-            (*df).pFiles = dropfiles_size as u32;
-            (*df).pt.x = 0;
-            (*df).pt.y = 0;
-            (*df).fNC = false.into();
-            (*df).fWide = true.into();
-
-            let data_dst = (ptr as *mut u8).add(dropfiles_size) as *mut u16;
-            std::ptr::copy_nonoverlapping(wide_chars.as_ptr(), data_dst, wide_chars.len());
-            let _ = GlobalUnlock(hglobal);
-
             let Ok(_clipboard_guard) = open_clipboard_session() else {
                 let _ = GlobalFree(Some(hglobal));
                 return Err("Clipboard sedang digunakan oleh aplikasi lain".to_string());
@@ -336,6 +383,305 @@ pub fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
     {
         let _ = paths;
         Err("Salin file ke clipboard sistem hanya didukung di Windows".to_string())
+    }
+}
+
+#[cfg(windows)]
+mod win32_drag {
+    use super::{build_cf_hdrop_hglobal, is_accepted_external_drop, NativeDragDropResult};
+    use std::mem::ManuallyDrop;
+    use windows::Win32::Foundation::{
+        DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, DV_E_FORMATETC,
+        E_NOTIMPL, E_OUTOFMEMORY, HWND, OLE_E_ADVISENOTSUPPORTED, POINT, S_OK,
+    };
+    use windows::Win32::System::Com::{
+        IAdviseSink, IDataObject, IDataObject_Impl, IEnumFORMATETC, IEnumSTATDATA, DATADIR_GET,
+        DVASPECT_CONTENT, FORMATETC, STGMEDIUM, STGMEDIUM_0, TYMED_HGLOBAL,
+    };
+    use windows::Win32::System::Ole::{
+        DoDragDrop, IDropSource, IDropSource_Impl, OleInitialize, OleUninitialize, CF_HDROP,
+        DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_NONE,
+    };
+    use windows::Win32::System::SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON,
+    };
+    use windows::Win32::UI::Shell::{SHCreateDataObject, SHCreateStdEnumFmtEtc};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetAncestor, GetCursorPos, GetSystemMetrics, WindowFromPoint, GA_ROOT, SM_SWAPBUTTON,
+    };
+    use windows_core::{implement, Error, HRESULT, Ref, Result as WinResult, BOOL};
+
+    struct OleInitGuard(bool);
+
+    impl OleInitGuard {
+        fn acquire() -> Result<Self, String> {
+            unsafe {
+                OleInitialize(None)
+                    .map(|_| Self(true))
+                    .map_err(|e| format!("OleInitialize STA gagal: {}", e))
+            }
+        }
+    }
+
+    impl Drop for OleInitGuard {
+        fn drop(&mut self) {
+            if self.0 {
+                unsafe {
+                    OleUninitialize();
+                }
+            }
+        }
+    }
+
+    struct InternalDragOutGuard;
+
+    impl InternalDragOutGuard {
+        fn enter() -> Self {
+            crate::hitbox::set_internal_drag_out(true);
+            Self
+        }
+    }
+
+    impl Drop for InternalDragOutGuard {
+        fn drop(&mut self) {
+            crate::hitbox::set_internal_drag_out(false);
+        }
+    }
+
+    #[implement(IDropSource)]
+    struct CasaDropSource;
+
+    #[allow(non_snake_case)]
+    impl IDropSource_Impl for CasaDropSource_Impl {
+        fn QueryContinueDrag(&self, fescapepressed: BOOL, grfkeystate: MODIFIERKEYS_FLAGS) -> HRESULT {
+            if fescapepressed.as_bool() {
+                DRAGDROP_S_CANCEL
+            } else if (grfkeystate & MK_LBUTTON) == MODIFIERKEYS_FLAGS(0) {
+                DRAGDROP_S_DROP
+            } else {
+                S_OK
+            }
+        }
+
+        fn GiveFeedback(&self, _dweffect: DROPEFFECT) -> HRESULT {
+            DRAGDROP_S_USEDEFAULTCURSORS
+        }
+    }
+
+    #[implement(IDataObject)]
+    struct CasaFileDataObject {
+        paths: Vec<String>,
+        inner: Option<IDataObject>,
+    }
+
+    impl CasaFileDataObject {
+        fn new(paths: Vec<String>) -> Self {
+            let inner = unsafe { SHCreateDataObject(None, None, None::<&IDataObject>) }.ok();
+            Self { paths, inner }
+        }
+
+        fn cf_hdrop_formatetc() -> FORMATETC {
+            FORMATETC {
+                cfFormat: CF_HDROP.0,
+                ptd: std::ptr::null_mut(),
+                dwAspect: DVASPECT_CONTENT.0,
+                lindex: -1,
+                tymed: TYMED_HGLOBAL.0 as u32,
+            }
+        }
+
+        fn is_cf_hdrop(pformatetc: *const FORMATETC) -> bool {
+            let Some(fmt) = (unsafe { pformatetc.as_ref() }) else {
+                return false;
+            };
+            fmt.cfFormat == CF_HDROP.0
+                && (fmt.dwAspect & DVASPECT_CONTENT.0) != 0
+                && (fmt.tymed & (TYMED_HGLOBAL.0 as u32)) != 0
+                && (fmt.lindex == -1 || fmt.lindex == 0)
+        }
+    }
+
+    #[allow(non_snake_case)]
+    impl IDataObject_Impl for CasaFileDataObject_Impl {
+        fn GetData(&self, pformatetcin: *const FORMATETC) -> WinResult<STGMEDIUM> {
+            if CasaFileDataObject::is_cf_hdrop(pformatetcin) {
+                let hglobal = build_cf_hdrop_hglobal(&self.paths)
+                    .map_err(|_| Error::from(E_OUTOFMEMORY))?;
+                Ok(STGMEDIUM {
+                    tymed: TYMED_HGLOBAL.0 as u32,
+                    u: STGMEDIUM_0 { hGlobal: hglobal },
+                    pUnkForRelease: ManuallyDrop::new(None),
+                })
+            } else if let Some(inner) = &self.inner {
+                unsafe { inner.GetData(pformatetcin) }
+            } else {
+                Err(Error::from(DV_E_FORMATETC))
+            }
+        }
+
+        fn GetDataHere(&self, _pformatetc: *const FORMATETC, _pmedium: *mut STGMEDIUM) -> WinResult<()> {
+            Err(Error::from(DV_E_FORMATETC))
+        }
+
+        fn QueryGetData(&self, pformatetc: *const FORMATETC) -> HRESULT {
+            if CasaFileDataObject::is_cf_hdrop(pformatetc) {
+                S_OK
+            } else if let Some(inner) = &self.inner {
+                unsafe { inner.QueryGetData(pformatetc) }
+            } else {
+                DV_E_FORMATETC
+            }
+        }
+
+        fn GetCanonicalFormatEtc(
+            &self,
+            _pformatectin: *const FORMATETC,
+            pformatetcout: *mut FORMATETC,
+        ) -> HRESULT {
+            if !pformatetcout.is_null() {
+                unsafe {
+                    (*pformatetcout).ptd = std::ptr::null_mut();
+                }
+            }
+            E_NOTIMPL
+        }
+
+        fn SetData(
+            &self,
+            pformatetc: *const FORMATETC,
+            pmedium: *const STGMEDIUM,
+            frelease: BOOL,
+        ) -> WinResult<()> {
+            if let Some(inner) = &self.inner {
+                unsafe { inner.SetData(pformatetc, pmedium, frelease.as_bool()) }
+            } else {
+                Err(Error::from(E_NOTIMPL))
+            }
+        }
+
+        fn EnumFormatEtc(&self, dwdirection: u32) -> WinResult<IEnumFORMATETC> {
+            if dwdirection == DATADIR_GET.0 as u32 {
+                let fmts = [CasaFileDataObject::cf_hdrop_formatetc()];
+                unsafe { SHCreateStdEnumFmtEtc(&fmts) }
+            } else {
+                Err(Error::from(E_NOTIMPL))
+            }
+        }
+
+        fn DAdvise(
+            &self,
+            _pformatetc: *const FORMATETC,
+            _advf: u32,
+            _padvsink: Ref<IAdviseSink>,
+        ) -> WinResult<u32> {
+            Err(Error::from(OLE_E_ADVISENOTSUPPORTED))
+        }
+
+        fn DUnadvise(&self, _dwconnection: u32) -> WinResult<()> {
+            Err(Error::from(OLE_E_ADVISENOTSUPPORTED))
+        }
+
+        fn EnumDAdvise(&self) -> WinResult<IEnumSTATDATA> {
+            Err(Error::from(OLE_E_ADVISENOTSUPPORTED))
+        }
+    }
+
+    pub fn execute_drag_drop_on_sta(
+        valid_paths: Vec<String>,
+        main_hwnd: Option<HWND>,
+    ) -> Result<NativeDragDropResult, String> {
+        let _ole_guard = OleInitGuard::acquire()?;
+        let _drag_out_guard = InternalDragOutGuard::enter();
+
+        // Guard jika tombol mouse utama sudah terlepas sebelum DoDragDrop mulai berjalan
+        let primary_vk = if unsafe { GetSystemMetrics(SM_SWAPBUTTON) } != 0 {
+            VK_RBUTTON
+        } else {
+            VK_LBUTTON
+        };
+        if (unsafe { GetAsyncKeyState(primary_vk.0 as i32) } as u16 & 0x8000) == 0 {
+            return Ok(NativeDragDropResult {
+                status: "cancelled".to_string(),
+                effect: 0,
+            });
+        }
+
+        let data_object: IDataObject = CasaFileDataObject::new(valid_paths).into();
+        let drop_source: IDropSource = CasaDropSource.into();
+        let mut out_effect = DROPEFFECT_NONE;
+
+        let hr = unsafe { DoDragDrop(&data_object, &drop_source, DROPEFFECT_COPY, &mut out_effect) };
+
+        let mut dropped_on_self = false;
+        if hr == DRAGDROP_S_DROP && out_effect != DROPEFFECT_NONE {
+            if let Some(root_hwnd) = main_hwnd {
+                let mut end_pt = POINT { x: 0, y: 0 };
+                if unsafe { GetCursorPos(&mut end_pt) }.is_ok() {
+                    let target_hwnd = unsafe { WindowFromPoint(end_pt) };
+                    if !target_hwnd.0.is_null() {
+                        let target_root = unsafe { GetAncestor(target_hwnd, GA_ROOT) };
+                        dropped_on_self = target_hwnd == root_hwnd || target_root == root_hwnd;
+                    }
+                }
+            }
+        }
+
+        let accepted = is_accepted_external_drop(
+            hr.0,
+            DRAGDROP_S_DROP.0,
+            out_effect.0,
+            dropped_on_self,
+        );
+
+        Ok(NativeDragDropResult {
+            status: if accepted {
+                "dropped".to_string()
+            } else {
+                "cancelled".to_string()
+            },
+            effect: out_effect.0,
+        })
+    }
+}
+
+/// Menyeret berkas DropZone keluar ke aplikasi eksternal (Explorer, Desktop, WhatsApp Desktop)
+/// lewat Win32 OLE `DoDragDrop` (`CF_HDROP`) pada thread STA utama dengan validasi ganda `DRAGDROP_S_DROP` + `DROPEFFECT`.
+#[tauri::command]
+pub async fn native_drag_drop_files(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> Result<NativeDragDropResult, String> {
+    #[cfg(windows)]
+    {
+        let valid_paths = normalize_existing_drop_paths(paths);
+        if valid_paths.is_empty() {
+            return Err("Berkas tidak ditemukan di disk atau sudah dipindahkan.".to_string());
+        }
+
+        let main_hwnd_raw = app
+            .get_webview_window("main")
+            .and_then(|w| w.hwnd().ok())
+            .map(|h| h.0 as isize);
+
+        let (tx, rx) = tokio::sync::oneshot::channel::<Result<NativeDragDropResult, String>>();
+
+        app.run_on_main_thread(move || {
+            let main_hwnd =
+                main_hwnd_raw.map(|raw| windows::Win32::Foundation::HWND(raw as *mut _));
+            let res = win32_drag::execute_drag_drop_on_sta(valid_paths, main_hwnd);
+            let _ = tx.send(res);
+        })
+        .map_err(|e| format!("Gagal menjadwalkan drag-out di UI thread: {}", e))?;
+
+        rx.await
+            .map_err(|_| "Channel hasil DoDragDrop tertutup sebelum selesai".to_string())?
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = (app, paths);
+        Err("Native CF_HDROP drag-out hanya didukung di Windows".to_string())
     }
 }
 
@@ -504,5 +850,89 @@ pub fn open_url_item(url: String) -> Result<(), String> {
     {
         let _ = trimmed;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_nonexistent_paths_without_panicking() {
+        let missing = format!(
+            "{}\\casa_definitely_missing_{}.tmp",
+            std::env::temp_dir().display(),
+            std::process::id()
+        );
+        let res = normalize_existing_drop_paths(vec![
+            "".to_string(),
+            "   ".to_string(),
+            missing,
+        ]);
+        assert!(res.is_empty());
+    }
+
+    #[test]
+    fn normalizes_and_deduplicates_existing_paths() {
+        let temp_file = std::env::temp_dir().join(format!(
+            "casa_drop_zone_test_{}.txt",
+            std::process::id()
+        ));
+        std::fs::write(&temp_file, b"casa").expect("write temp file");
+        let raw = temp_file.to_string_lossy().to_string();
+        let slash_variant = raw.replace('\\', "/");
+        let verbatim_variant = format!(r"\\?\{}", raw);
+
+        let res = normalize_existing_drop_paths(vec![raw.clone(), slash_variant, verbatim_variant]);
+        let _ = std::fs::remove_file(&temp_file);
+
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0], raw);
+        assert!(!res[0].starts_with(r"\\?\"));
+    }
+
+    #[test]
+    fn validates_drop_outcome_strictly_with_effect_and_self_drop_guard() {
+        const S_DROP: i32 = 0x00040100;
+        const S_CANCEL: i32 = 0x00040101;
+        const EFF_NONE: u32 = 0;
+        const EFF_COPY: u32 = 1;
+
+        assert!(is_accepted_external_drop(S_DROP, S_DROP, EFF_COPY, false));
+        assert!(!is_accepted_external_drop(S_DROP, S_DROP, EFF_NONE, false));
+        assert!(!is_accepted_external_drop(S_CANCEL, S_DROP, EFF_COPY, false));
+        assert!(!is_accepted_external_drop(S_DROP, S_DROP, EFF_COPY, true));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn builds_valid_utf16_double_null_cf_hdrop_hglobal() {
+        use windows::Win32::Foundation::GlobalFree;
+        use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+        use windows::Win32::UI::Shell::DROPFILES;
+
+        let sample = vec![r"C:\Temp\alpha.png".to_string(), r"C:\Temp\beta.pdf".to_string()];
+        let hglobal = build_cf_hdrop_hglobal(&sample).expect("allocate cf_hdrop");
+
+        unsafe {
+            let total_size = GlobalSize(hglobal);
+            assert!(total_size > std::mem::size_of::<DROPFILES>());
+            let ptr = GlobalLock(hglobal) as *const u8;
+            assert!(!ptr.is_null());
+
+            let df = &*(ptr as *const DROPFILES);
+            let p_files = df.pFiles as usize;
+            let f_wide = df.fWide.as_bool();
+            assert_eq!(p_files, std::mem::size_of::<DROPFILES>());
+            assert!(f_wide);
+
+            let u16_len = (total_size - p_files) / 2;
+            let slice = std::slice::from_raw_parts(ptr.add(p_files) as *const u16, u16_len);
+            let decoded = String::from_utf16_lossy(slice);
+            assert!(decoded.starts_with("C:\\Temp\\alpha.png\0C:\\Temp\\beta.pdf\0\0"));
+
+            let _ = GlobalUnlock(hglobal);
+            let _ = GlobalFree(Some(hglobal));
+        }
     }
 }

@@ -34,6 +34,15 @@ static ACTIVE_HITBOXES: std::sync::LazyLock<Mutex<Vec<HitRect>>> = std::sync::La
 /// so the user can interact with other desktop apps while Mode 6 stays open.
 static IS_EXPANDED_PINNED: AtomicBool = AtomicBool::new(false);
 
+/// Tracks whether an OS native file drag-out (`DoDragDrop`) is currently running from DropZone.
+/// While active, transparent regions outside the DropZone card immediately stay click-through
+/// so Windows Desktop, File Explorer, and Electron targets (e.g. WhatsApp Desktop) accept drops.
+static IS_INTERNAL_DRAG_OUT: AtomicBool = AtomicBool::new(false);
+
+pub fn set_internal_drag_out(active: bool) {
+    IS_INTERNAL_DRAG_OUT.store(active, Ordering::Relaxed);
+}
+
 pub fn set_hitbox(width: f64, height: f64) {
     set_hitboxes(vec![HitRect {
         center_offset_x: 0.0,
@@ -163,14 +172,23 @@ pub fn start_hitbox_poller(window: tauri::WebviewWindow) {
                         continue;
                     }
 
-                    // 60Hz adaptive cursor polling (~16ms) inside top 140 logical px lip, 50ms elsewhere
+                    let internal_drag_out = IS_INTERNAL_DRAG_OUT.load(Ordering::Relaxed);
+
+                    // 60Hz adaptive cursor polling (~16ms) inside top 140 logical px lip (or during DropZone drag-out), 50ms elsewhere
                     let top_zone_bottom = win_rect.top + (140.0 * scale).round() as i32;
-                    poll_interval_ms = if cursor.y <= top_zone_bottom { 16 } else { 50 };
+                    poll_interval_ms = if internal_drag_out || cursor.y <= top_zone_bottom {
+                        16
+                    } else {
+                        50
+                    };
 
                     let center_x = (win_rect.left + win_rect.right) / 2;
                     let multi_rect_mode = rects.len() > 1;
-                    // Keep inter-pod gaps (10px) strictly click-through when satellite pods are open
-                    let safety_buffer = if multi_rect_mode {
+                    // Keep inter-pod gaps (10px) strictly click-through when satellite pods are open,
+                    // and keep exact bounds during native DropZone drag-out.
+                    let safety_buffer = if internal_drag_out {
+                        0
+                    } else if multi_rect_mode {
                         (2.0 * scale).round() as i32
                     } else {
                         (4.0 * scale).round() as i32
@@ -195,7 +213,8 @@ pub fn start_hitbox_poller(window: tauri::WebviewWindow) {
                         .unwrap_or(win_rect.top);
                     let notch_drag_half_w = (340.0 * scale).round() as i32;
                     let notch_drag_h = (88.0 * scale).round() as i32;
-                    let in_magnetic_top_drag_corridor = is_lbutton_down
+                    let in_magnetic_top_drag_corridor = !internal_drag_out
+                        && is_lbutton_down
                         && primary_rect.is_some()
                         && cursor.x >= (primary_center_x - notch_drag_half_w)
                         && cursor.x <= (primary_center_x + notch_drag_half_w)
@@ -226,9 +245,10 @@ pub fn start_hitbox_poller(window: tauri::WebviewWindow) {
                             && cursor.y <= bottom;
 
                         // Concave top-bezel shoulders only span the top 14px of the full-height center card,
-                        // leaving 4px tucked bezel strips and 10px pod gaps strictly click-through.
-                        let is_top_center_card = idx == 0 && r.top_offset <= 2.0 && r.height > 10.0;
-                        let in_top_shoulder = is_top_center_card
+                        // leaving tucked hover strips (<= 24px) and 10px pod gaps strictly compact.
+                        let is_top_center_card = idx == 0 && r.top_offset <= 2.0 && r.height > 24.0;
+                        let in_top_shoulder = !internal_drag_out
+                            && is_top_center_card
                             && cursor.x >= (left - shoulder_buffer)
                             && cursor.x <= (right + shoulder_buffer)
                             && cursor.y >= top
@@ -238,7 +258,8 @@ pub fn start_hitbox_poller(window: tauri::WebviewWindow) {
                             is_cursor_inside = true;
                         }
 
-                        if is_lbutton_down
+                        if !internal_drag_out
+                            && is_lbutton_down
                             && cursor.x >= (left - drag_x_margin)
                             && cursor.x <= (right + drag_x_margin)
                             && cursor.y >= top
@@ -265,7 +286,9 @@ pub fn start_hitbox_poller(window: tauri::WebviewWindow) {
                     }
                     was_lbutton_down = is_lbutton_down;
 
-                    let should_be_transparent = if is_cursor_inside || is_approaching_drag {
+                    let should_be_transparent = if internal_drag_out {
+                        !is_cursor_inside
+                    } else if is_cursor_inside || is_approaching_drag {
                         false
                     } else if !was_transparent && is_lbutton_down {
                         false // maintain active window while user is dragging

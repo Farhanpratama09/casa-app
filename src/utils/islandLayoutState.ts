@@ -6,8 +6,13 @@ export type EffectiveIslandState = 'tucked' | 'idle' | 'expanded';
 export const ISLAND_DIMENSIONS = {
   TUCKED_WIDTH: 120,
   TUCKED_HEIGHT: 4,
-  TUCKED_SENSOR_WIDTH: 124,
-  TUCKED_SENSOR_HEIGHT: 8,
+  TUCKED_SENSOR_WIDTH: 136,
+  TUCKED_SENSOR_HEIGHT: 12,
+  FLOATING_TOP_OFFSET: 12,
+  FLOATING_TUCKED_SENSOR_WIDTH: 140,
+  FLOATING_TUCKED_SENSOR_HEIGHT: 18,
+  FLOATING_PILL_HOVER_BOTTOM_MARGIN: 6,
+  HOVER_TRANSITION_HYSTERESIS_MS: 220,
   IDLE_MIN_AWAKE_WIDTH: 180,
   IDLE_HUD_MIN_WIDTH: 244,
   ALARM_BANNER_WIDTH: 360,
@@ -192,6 +197,166 @@ export function resolveEffectiveIslandLayout(
     isExpandedView: false,
     bottomCornerRadius: 16,
     topCornerRadius: input.isFloatingMode ? 16 : 0,
+  };
+}
+
+export interface PrimaryIslandHitboxAndSensorInput {
+  capsuleW: number;
+  capsuleH: number;
+  isFloatingMode: boolean;
+  tucked: boolean;
+  isHoverPreview?: boolean;
+  isAlarmRinging?: boolean;
+  centerOffsetX?: number;
+}
+
+export interface PrimaryIslandHitboxAndSensorGeometry {
+  hitbox: {
+    center_offset_x: number;
+    top_offset: number;
+    width: number;
+    height: number;
+  };
+  sensor: {
+    width: number;
+    height: number;
+    topBridgePx: number;
+    bottomPaddingPx: number;
+    horizontalPaddingPx: number;
+  };
+  isTuckedBar: boolean;
+  isCompactIdlePill: boolean;
+}
+
+/**
+ * Unified Single-Source-of-Truth for primary Win32 hitbox bounds and DOM hover sensor wrapper.
+ * In Floating Mode, bridges the 12px vertical top gap (`top_offset = 0`) across `tucked`,
+ * `tucked_peek`, `idle`, and `idle_peek` so hovering or collapsing never hits a dead zone.
+ */
+export function computePrimaryIslandHitboxAndSensor(
+  input: PrimaryIslandHitboxAndSensorInput
+): PrimaryIslandHitboxAndSensorGeometry {
+  const roundedW = Math.max(88, snapEvenDimension(input.capsuleW));
+  const roundedH = Math.round(input.capsuleH);
+  const isTuckedBar = input.tucked || roundedH <= ISLAND_DIMENSIONS.TUCKED_HEIGHT;
+  const isCompactIdlePill = !isTuckedBar && roundedH < 120;
+  const effectiveW =
+    isCompactIdlePill && input.isAlarmRinging
+      ? Math.max(ISLAND_DIMENSIONS.ALARM_BANNER_WIDTH, roundedW)
+      : roundedW;
+  const centerOffsetX = input.centerOffsetX ?? 0;
+
+  if (!input.isFloatingMode) {
+    if (isTuckedBar) {
+      return {
+        hitbox: {
+          center_offset_x: centerOffsetX,
+          top_offset: 0,
+          width: ISLAND_DIMENSIONS.TUCKED_SENSOR_WIDTH,
+          height: ISLAND_DIMENSIONS.TUCKED_SENSOR_HEIGHT,
+        },
+        sensor: {
+          width: ISLAND_DIMENSIONS.TUCKED_SENSOR_WIDTH,
+          height: ISLAND_DIMENSIONS.TUCKED_SENSOR_HEIGHT,
+          topBridgePx: 0,
+          bottomPaddingPx: 0,
+          horizontalPaddingPx:
+            ISLAND_DIMENSIONS.TUCKED_SENSOR_WIDTH - ISLAND_DIMENSIONS.TUCKED_WIDTH,
+        },
+        isTuckedBar: true,
+        isCompactIdlePill: false,
+      };
+    }
+
+    const hitW = isCompactIdlePill ? effectiveW + 16 : roundedW;
+    const hitH = isCompactIdlePill ? roundedH + 6 : roundedH;
+    return {
+      hitbox: {
+        center_offset_x: centerOffsetX,
+        top_offset: 0,
+        width: hitW,
+        height: hitH,
+      },
+      sensor: {
+        width: roundedW,
+        height: roundedH,
+        topBridgePx: 0,
+        bottomPaddingPx: 0,
+        horizontalPaddingPx: 0,
+      },
+      isTuckedBar: false,
+      isCompactIdlePill,
+    };
+  }
+
+  // Floating Mode
+  if (isTuckedBar) {
+    return {
+      hitbox: {
+        center_offset_x: centerOffsetX,
+        top_offset: 0,
+        width: ISLAND_DIMENSIONS.FLOATING_TUCKED_SENSOR_WIDTH,
+        height: ISLAND_DIMENSIONS.FLOATING_TUCKED_SENSOR_HEIGHT,
+      },
+      sensor: {
+        width: ISLAND_DIMENSIONS.FLOATING_TUCKED_SENSOR_WIDTH,
+        height: ISLAND_DIMENSIONS.FLOATING_TUCKED_SENSOR_HEIGHT,
+        topBridgePx: 0,
+        bottomPaddingPx: 0,
+        horizontalPaddingPx:
+          ISLAND_DIMENSIONS.FLOATING_TUCKED_SENSOR_WIDTH - ISLAND_DIMENSIONS.TUCKED_WIDTH,
+      },
+      isTuckedBar: true,
+      isCompactIdlePill: false,
+    };
+  }
+
+  const topOffsetGap = ISLAND_DIMENSIONS.FLOATING_TOP_OFFSET;
+  const shouldBridgeTopCorridor = isCompactIdlePill || Boolean(input.isHoverPreview);
+  const horizontalPad = isCompactIdlePill ? 16 : 0;
+  const bottomPad = isCompactIdlePill
+    ? ISLAND_DIMENSIONS.FLOATING_PILL_HOVER_BOTTOM_MARGIN
+    : 0;
+
+  if (shouldBridgeTopCorridor) {
+    const bridgedWidth = effectiveW + horizontalPad;
+    const bridgedHeight = topOffsetGap + roundedH + bottomPad;
+    return {
+      hitbox: {
+        center_offset_x: centerOffsetX,
+        top_offset: 0,
+        width: bridgedWidth,
+        height: bridgedHeight,
+      },
+      sensor: {
+        width: roundedW + horizontalPad,
+        height: roundedH + topOffsetGap + bottomPad,
+        topBridgePx: topOffsetGap,
+        bottomPaddingPx: bottomPad,
+        horizontalPaddingPx: horizontalPad,
+      },
+      isTuckedBar: false,
+      isCompactIdlePill,
+    };
+  }
+
+  // Locked expanded Mode 6 in Floating Mode: keep 0..11px top corridor OS click-through
+  return {
+    hitbox: {
+      center_offset_x: centerOffsetX,
+      top_offset: topOffsetGap,
+      width: roundedW,
+      height: roundedH,
+    },
+    sensor: {
+      width: roundedW,
+      height: roundedH + topOffsetGap,
+      topBridgePx: topOffsetGap,
+      bottomPaddingPx: 0,
+      horizontalPaddingPx: 0,
+    },
+    isTuckedBar: false,
+    isCompactIdlePill: false,
   };
 }
 

@@ -21,7 +21,6 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
-import { startDrag } from '@tauri-apps/plugin-drag';
 import {
   useDropZoneStore,
   DropItem,
@@ -34,7 +33,11 @@ import {
 } from '../../stores/useDropZoneStore';
 import { useCasaAudio } from '../../context/CasaAudioContext';
 import { NativeTrack, parseTrackTitleAndArtist } from '../../services/nativeAudioService';
-import { playChimeCue, focusIslandWindow } from '../../utils/tauriBridge';
+import {
+  playChimeCue,
+  focusIslandWindow,
+  nativeDragDropFiles,
+} from '../../utils/tauriBridge';
 import { useSettingsStore } from '../../stores/useSettingsStore';
 
 export interface DropZoneViewProps {
@@ -98,6 +101,7 @@ interface DropShelfCardProps {
   isHighlighted?: boolean;
   onRemove: (id: string) => void;
   onOpenMusic?: () => void;
+  onDragOutFeedback?: (status: 'dropped' | 'missing') => void;
 }
 
 const DropShelfCard: React.FC<DropShelfCardProps> = ({
@@ -105,6 +109,7 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
   isHighlighted = false,
   onRemove,
   onOpenMusic,
+  onDragOutFeedback,
 }) => {
   const { setPlaybackSource, playTrack } = useCasaAudio();
   const { settings, palette: themePalette } = useSettingsStore();
@@ -116,6 +121,7 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragCleanupRef = useRef<(() => void) | null>(null);
   const draggedDuringGestureRef = useRef(false);
+  const isDragInFlightRef = useRef(false);
 
   useEffect(() => {
     setImgError(false);
@@ -251,27 +257,32 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
     };
 
     const onPointerMove = async (moveEvent: PointerEvent) => {
-      if (triggered) return;
+      if (triggered || isDragInFlightRef.current) return;
       const dist = Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY);
       if (dist < 5) return;
 
       triggered = true;
+      isDragInFlightRef.current = true;
       draggedDuringGestureRef.current = true;
       cleanup();
 
       useDropZoneStore.getState().setIsInternalDragging(true);
       try {
-        await startDrag({
-          item: [item.payload],
-          icon: '',
-        });
+        const result = await nativeDragDropFiles([item.payload]);
+        if (result.status === 'dropped') {
+          onRemove(item.id);
+          onDragOutFeedback?.('dropped');
+          playChimeCue('ding');
+        }
       } catch (err) {
-        console.warn('[DropZoneCard] startDrag error:', err);
+        console.warn('[DropZoneCard] nativeDragDropFiles error:', err);
+        onDragOutFeedback?.('missing');
       } finally {
-        setTimeout(() => {
-          useDropZoneStore.getState().setIsInternalDragging(false);
-          draggedDuringGestureRef.current = false;
-        }, 250);
+        // Lepas flag isInternalDragging hanya SETELAH promise DoDragDrop selesai
+        // agar isExternalDragOver / drop-in tidak bocor di tengah tarikan.
+        useDropZoneStore.getState().setIsInternalDragging(false);
+        isDragInFlightRef.current = false;
+        draggedDuringGestureRef.current = false;
       }
     };
 
@@ -873,6 +884,13 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
                   isHighlighted={lastActionFeedback?.id === item.id}
                   onRemove={removeItem}
                   onOpenMusic={onOpenMusic}
+                  onDragOutFeedback={(status) => {
+                    flashLocalHint(
+                      status === 'dropped'
+                        ? 'File dikirim keluar · dihapus dari rak'
+                        : 'Berkas tidak ditemukan di disk'
+                    );
+                  }}
                 />
               ))}
             </AnimatePresence>

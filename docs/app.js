@@ -1258,6 +1258,18 @@
 
         const shelfCard = document.createElement('div');
         shelfCard.className = 'casa-drop-card';
+        shelfCard.setAttribute('draggable', 'true');
+        shelfCard.setAttribute('title', 'Drag back out to desktop or click Return');
+        shelfCard.addEventListener('dragstart', (ev) => {
+          if (ev.dataTransfer) {
+            ev.dataTransfer.setData('text/plain', `dropzone-out:${fid}`);
+            ev.dataTransfer.effectAllowed = 'copy';
+          }
+          shelfCard.classList.add('dragging');
+        });
+        shelfCard.addEventListener('dragend', () => {
+          shelfCard.classList.remove('dragging');
+        });
 
         const top = document.createElement('div');
         top.className = 'casa-drop-card-top';
@@ -1961,7 +1973,7 @@
         ev.preventDefault();
         el.capsule.removeAttribute('data-drop-hover');
         const fid = ev.dataTransfer ? ev.dataTransfer.getData('text/plain') : '';
-        if (fid) captureFileIntoDropZone(fid);
+        if (fid && !fid.startsWith('dropzone-out:')) captureFileIntoDropZone(fid);
       });
     }
 
@@ -1978,10 +1990,20 @@
       el.monitorScreen.addEventListener('drop', (ev) => {
         if (state.mode !== 'dropzone') return;
         const rect = el.monitorScreen.getBoundingClientRect();
+        const fid = ev.dataTransfer ? ev.dataTransfer.getData('text/plain') : '';
+        if (fid.startsWith('dropzone-out:')) {
+          ev.preventDefault();
+          const outId = fid.slice('dropzone-out:'.length);
+          // Only remove on external drop below the capsule shelf (mirrors DRAGDROP_S_DROP)
+          if (outId && ev.clientY > rect.top + 160) {
+            state.droppedIds = state.droppedIds.filter((id) => id !== outId);
+            syncUI();
+          }
+          return;
+        }
         if (ev.clientY <= rect.top + 160) {
           ev.preventDefault();
           if (el.capsule) el.capsule.removeAttribute('data-drop-hover');
-          const fid = ev.dataTransfer ? ev.dataTransfer.getData('text/plain') : '';
           if (fid) captureFileIntoDropZone(fid);
         }
       });

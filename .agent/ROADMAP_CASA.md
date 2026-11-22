@@ -32,7 +32,7 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 | Versi | Nama Rilis | Fokus Utama | Status |
 |---|---|---|---|
 | `v2.1.2` | *Prayer T-0 Sky Perimeter & Mode 6 Update Pop-Up* | Baseline rilis stabil saat ini | `[DONE]` |
-| `v2.1.3` | *Hotfix Stability — Drop-Out & Floating Pill* | Native OS drag-out (`CF_HDROP`) dengan verifikasi `DRAGDROP_S_DROP` + anti-flicker floating mode | `[PLANNED]` |
+| `v2.1.3` | *Hotfix Stability — Drop-Out & Floating Pill* | Native OS drag-out (`CF_HDROP`) dengan verifikasi `DRAGDROP_S_DROP` + anti-flicker floating mode | `[DONE]` |
 | `v2.1.4` | *CASA Player — Smart Queue & Search Album/Playlist* | Auto-queue relasi lagu (`videoId`/`trackId` + `artistId`), transisi playlist→Smart Queue & *session-seeded* queue, region `gl`/`hl`, serta kategori Top Songs, Album & Playlist | `[PLANNED]` |
 | `v2.2.0` | *Dropzone 2.0 — Papan Teks Ephemeral* | Drag-in teks/link/file tanpa shortcut (`dragDropEnabled: false`) + auto-hapus pasca drag-out/tutup | `[PLANNED]` |
 | `v2.3.0` | *Connect HP — Zero-App Local Web Drop* | Server `axum` HTTP+WebSocket sementara, QR token acak, transfer 2 arah Wi-Fi/Hotspot, auto-shutdown | `[PLANNED]` |
@@ -43,7 +43,7 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 
 ## 3. Spesifikasi Teknis Bertahap Per Versi
 
-### `v2.1.3` — Hotfix Stability: Drop-Out & Floating Pill `[PLANNED]`
+### `v2.1.3` — Hotfix Stability: Drop-Out & Floating Pill `[DONE]`
 **Tujuan:** Menuntaskan dua kendala stabilitas utama pada Dropzone drag-out ke aplikasi Windows eksternal dan transisi kapsul di *Floating Mode*.
 
 1. **Perbaikan Drag-Out File Eksternal (`DropZoneView.tsx`, `src-tauri/src/`):**

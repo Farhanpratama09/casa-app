@@ -844,3 +844,20 @@ export async function openWindowsLocationSettings(): Promise<void> {
     console.warn('[CASA IPC] open_windows_location_settings failed:', err);
   }
 }
+
+export interface NativeDragDropResult {
+  status: 'dropped' | 'cancelled';
+  effect: number;
+}
+
+/**
+ * Initiates a Win32 OLE CF_HDROP drag-out on the main STA thread.
+ * Resolves with `status: 'dropped'` ONLY when OS returns DRAGDROP_S_DROP and a non-zero drop effect
+ * outside CASA's own window.
+ */
+export async function nativeDragDropFiles(paths: string[]): Promise<NativeDragDropResult> {
+  if (!isTauriEnv) {
+    return { status: 'cancelled', effect: 0 };
+  }
+  return await invoke<NativeDragDropResult>('native_drag_drop_files', { paths });
+}

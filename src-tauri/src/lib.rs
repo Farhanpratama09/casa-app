@@ -560,6 +560,7 @@ pub fn run() {
             drop_zone::read_clipboard_files,
             drop_zone::save_clipboard_image,
             drop_zone::copy_files_to_clipboard,
+            drop_zone::native_drag_drop_files,
             drop_zone::pick_drop_zone_files,
             drop_zone::launch_file_item,
             drop_zone::reveal_in_folder,

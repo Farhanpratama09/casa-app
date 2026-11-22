@@ -57,7 +57,7 @@ Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + R
 
 ### 2.5 Native Window, Hitbox 50Hz & Telemetry Perangkat Keras
 - **Kanvas Tetap Anti-Resize Hitch:** Window utama terkunci di ukuran logis **`1100×340`** (`LogicalSize`), posisinya dihitung aware DPI melalui `position_window_top` + Win32 `SetWindowPos` (`WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`, menghapus `WS_EX_TRANSPARENT` statis).
-- **Dynamic Multi-Rect Hitbox Poller (`hitbox.rs`):** Polling 50Hz membandingkan posisi kursor terhadap maksimal 6 `HitRect` aktif (`update_island_hitboxes`), mengatur `WS_EX_TRANSPARENT` secara real-time di luar area kapsul, pod kiri/kanan, dan pop-up.
+- **Dynamic Multi-Rect Hitbox Poller (`hitbox.rs` & `islandLayoutState.ts`):** Polling adaptif 60Hz/50Hz membandingkan posisi kursor terhadap maksimal 6 `HitRect` aktif (`update_island_hitboxes`), mengatur `WS_EX_TRANSPARENT` secara real-time di luar area kapsul, menjembatani celah *top offset* `12 px` pada Floating Mode (`tucked`/`peek`/`idle`) disertai hysteresis `220 ms`, dan mengisolasi drag-out native (`native_drag_drop_files` via `CF_HDROP` + `DRAGDROP_S_DROP` & `DROPEFFECT_COPY`) agar item Drop Zone hanya terhapus jika drop ke aplikasi eksternal sukses.
 - **Resting, Smart-Tuck & HUD:** Kapsul kompak **`× ♥`** (`W=126px` di web / `IDLE_MIN_AWAKE_WIDTH: 180` & `TUCKED_HEIGHT: 4px` Smart-Tuck), Circular Battery Ring SVG, perimeter stroke To-Do Focus, HUD real-time Volume/Brightness/Bluetooth (`system_hardware.rs`), CPU/RAM (`system_stats.rs`), serta Drop Zone Shelf (`drop_zone.rs`).
 
 ---

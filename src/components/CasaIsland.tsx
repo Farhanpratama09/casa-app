@@ -50,6 +50,7 @@ import {
   recordCanvasResizeCall,
 } from '../utils/islandStressTester';
 import {
+  computePrimaryIslandHitboxAndSensor,
   computeSearchDrawerBounds,
   ISLAND_DIMENSIONS,
   resolveEffectiveIslandLayout,
@@ -75,6 +76,7 @@ const doubleRaf = (callback: () => void) => {
 };
 
 const AUTO_TUCK_IDLE_DELAY_MS = 10000;
+const HOVER_HYSTERESIS_MS = ISLAND_DIMENSIONS.HOVER_TRANSITION_HYSTERESIS_MS;
 
 const computeCenterOffsetX = (
   align: CasaHorizontalAlign,
@@ -187,11 +189,12 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
 
   const [stagedDroppedFile, setStagedDroppedFile] = useState<string | null>(null);
 
-  // Transition Guard & Anti-Spam Animation Lock (500ms safety window)
+  // Transition Guard & Anti-Spam Animation Lock (safety ceiling; cleared early in onAnimationComplete)
   const isTransitioningRef = useRef<boolean>(false);
   const transitionLockTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const schedulePostTransitionRecheckRef = useRef<(delayMs?: number) => void>(() => {});
 
-  const lockTransition = (timeoutMs = 500) => {
+  const lockTransition = (timeoutMs = 260, recheckOnExpire = false) => {
     isTransitioningRef.current = true;
     if (transitionLockTimerRef.current) {
       clearTimeout(transitionLockTimerRef.current);
@@ -199,6 +202,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     transitionLockTimerRef.current = setTimeout(() => {
       isTransitioningRef.current = false;
       transitionLockTimerRef.current = null;
+      if (recheckOnExpire) {
+        schedulePostTransitionRecheckRef.current(0);
+      }
     }, timeoutMs);
   };
 
@@ -223,6 +229,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   const prevPriorityAlertRef = useRef<boolean>(false);
   const prevIsFullscreenActiveRef = useRef<boolean>(false);
   const fullscreenExitCooldownUntilRef = useRef<number>(0);
+  const collapseCooldownUntilRef = useRef<number>(0);
+  const hoverSuppressionReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const postTransitionRecheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [fullscreenExitTick, setFullscreenExitTick] = useState<number>(0);
   const isFloatingModeRef = useRef<boolean>(isFloatingMode);
   isFloatingModeRef.current = isFloatingMode;
@@ -241,7 +250,10 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   const isRestingSleepRef = useRef<boolean>(false);
   const hoverSuppressedRef = useRef<boolean>(false);
   const isCursorInsideRef = useRef<boolean>(false);
-  const lastWindowResizeTimeRef = useRef<number>(0);
+  const hoverSensorRef = useRef<HTMLDivElement | null>(null);
+  const lastPointerPosRef = useRef<{ x: number; y: number } | null>(null);
+  const lastCollapseResizeTimeRef = useRef<number>(0);
+  const scheduleHoverPeekRef = useRef<(allowIdleHoverRestart: boolean) => void>(() => {});
   const islandRef = useRef<HTMLDivElement>(null);
   const modeRef = useRef<IslandMode>(mode);
   const isDraggingFileRef = useRef<boolean>(false);
@@ -277,6 +289,123 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   useEffect(() => {
     isKeepAwakeRef.current = isKeepAwake;
   }, [isKeepAwake]);
+
+  const clearHoverSuppressionReleaseTimer = useCallback(() => {
+    if (hoverSuppressionReleaseTimerRef.current) {
+      clearTimeout(hoverSuppressionReleaseTimerRef.current);
+      hoverSuppressionReleaseTimerRef.current = null;
+    }
+  }, []);
+
+  const clearPostTransitionRecheckTimer = useCallback(() => {
+    if (postTransitionRecheckTimerRef.current) {
+      clearTimeout(postTransitionRecheckTimerRef.current);
+      postTransitionRecheckTimerRef.current = null;
+    }
+  }, []);
+
+  const markCollapseTransitionCooldown = useCallback((durationMs = HOVER_HYSTERESIS_MS) => {
+    const until = Date.now() + durationMs;
+    if (until > collapseCooldownUntilRef.current) {
+      collapseCooldownUntilRef.current = until;
+    }
+  }, []);
+
+  const isCollapseCooldownActive = useCallback(() => {
+    const now = Date.now();
+    return (
+      isCollapsingRef.current ||
+      now - lastCollapseResizeTimeRef.current < HOVER_HYSTERESIS_MS ||
+      now < collapseCooldownUntilRef.current ||
+      now < fullscreenExitCooldownUntilRef.current
+    );
+  }, []);
+
+  const isPointerInsideHoverSensor = useCallback((): boolean => {
+    if (!isCursorInsideRef.current) return false;
+    const sRect = hoverSensorRef.current?.getBoundingClientRect();
+    const lp = lastPointerPosRef.current;
+    if (!sRect || !lp) {
+      return isCursorInsideRef.current;
+    }
+    const inside =
+      lp.x >= sRect.left &&
+      lp.x <= sRect.right &&
+      lp.y >= sRect.top &&
+      lp.y <= sRect.bottom;
+    if (!inside) {
+      isCursorInsideRef.current = false;
+    }
+    return inside;
+  }, []);
+
+  const recheckPointerHoverIntent = useCallback(() => {
+    if (!isPointerInsideHoverSensor()) return;
+    if (hoverSuppressedRef.current) return;
+    if (isCollapseCooldownActive() || isTransitioningRef.current) return;
+
+    const current = islandStateRef.current;
+    if (current === 'tucked' || current === 'idle') {
+      scheduleHoverPeekRef.current(true);
+    }
+  }, [isPointerInsideHoverSensor, isCollapseCooldownActive]);
+
+  const schedulePostTransitionRecheck = useCallback(
+    (delayMs = 0) => {
+      clearPostTransitionRecheckTimer();
+      const now = Date.now();
+      const remainingCollapseMs = Math.max(
+        0,
+        collapseCooldownUntilRef.current - now,
+        lastCollapseResizeTimeRef.current + HOVER_HYSTERESIS_MS - now,
+        fullscreenExitCooldownUntilRef.current - now
+      );
+      const waitMs = Math.max(delayMs, remainingCollapseMs > 0 ? remainingCollapseMs + 16 : 0);
+      postTransitionRecheckTimerRef.current = setTimeout(() => {
+        postTransitionRecheckTimerRef.current = null;
+        recheckPointerHoverIntent();
+      }, waitMs);
+    },
+    [clearPostTransitionRecheckTimer, recheckPointerHoverIntent]
+  );
+
+  useEffect(() => {
+    schedulePostTransitionRecheckRef.current = schedulePostTransitionRecheck;
+  }, [schedulePostTransitionRecheck]);
+
+  const clearMinimizeWakeupLocks = useCallback(() => {
+    clearHoverSuppressionReleaseTimer();
+    clearPostTransitionRecheckTimer();
+    hoverSuppressedRef.current = false;
+    isCollapsingRef.current = false;
+    collapseCooldownUntilRef.current = 0;
+    lastCollapseResizeTimeRef.current = 0;
+  }, [clearHoverSuppressionReleaseTimer, clearPostTransitionRecheckTimer]);
+
+  const schedulePostCollapseSuppressionRelease = useCallback(() => {
+    clearHoverSuppressionReleaseTimer();
+    const now = Date.now();
+    const waitMs = Math.max(
+      HOVER_HYSTERESIS_MS,
+      collapseCooldownUntilRef.current - now + 16,
+      lastCollapseResizeTimeRef.current + HOVER_HYSTERESIS_MS - now + 16,
+      fullscreenExitCooldownUntilRef.current - now + 16
+    );
+    hoverSuppressionReleaseTimerRef.current = setTimeout(() => {
+      hoverSuppressionReleaseTimerRef.current = null;
+      if (isCollapsingRef.current || isTransitioningRef.current) {
+        if (!isCursorInsideRef.current && hoverSuppressedRef.current) {
+          schedulePostCollapseSuppressionRelease();
+        }
+        return;
+      }
+      if (!isCursorInsideRef.current && Date.now() >= collapseCooldownUntilRef.current) {
+        hoverSuppressedRef.current = false;
+      } else if (isCursorInsideRef.current && !hoverSuppressedRef.current) {
+        recheckPointerHoverIntent();
+      }
+    }, waitMs);
+  }, [clearHoverSuppressionReleaseTimer, recheckPointerHoverIntent]);
 
   const clearAutoTuckIdleTimer = useCallback(() => {
     if (autoTuckIdleTimerRef.current) {
@@ -355,8 +484,6 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   // Fluid hug-content notch dimensions (single source of truth in ISLAND_DIMENSIONS)
   const TUCKED_WIDTH = ISLAND_DIMENSIONS.TUCKED_WIDTH;
   const TUCKED_HEIGHT = ISLAND_DIMENSIONS.TUCKED_HEIGHT;
-  const TUCKED_SENSOR_WIDTH = ISLAND_DIMENSIONS.TUCKED_SENSOR_WIDTH;
-  const TUCKED_SENSOR_HEIGHT = ISLAND_DIMENSIONS.TUCKED_SENSOR_HEIGHT;
   const EXPANDED_WIDTH = ISLAND_DIMENSIONS.EXPANDED_DROPZONE_WIDTH;
   const IDLE_WINDOW_HEIGHT = ISLAND_DIMENSIONS.IDLE_WINDOW_HEIGHT;
 
@@ -398,6 +525,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         setIsPeeking(false);
         isPeekingRef.current = false;
         isCollapsingRef.current = true;
+        markCollapseTransitionCooldown(HOVER_HYSTERESIS_MS);
         setIsLandingComplete(false);
         islandStateRef.current = 'tucked';
         setIslandState('tucked');
@@ -489,47 +617,40 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       devVisible: boolean,
       leftPodOpen = false,
       rightPodOpen = false,
-      tucked = false
+      tucked = false,
+      hoverPreview = false
     ): HitRect[] => {
-      const roundedW = Math.max(88, Math.ceil(capsuleW / 2) * 2);
+      const roundedW = Math.max(88, snapEvenDimension(capsuleW));
       const roundedH = Math.round(capsuleH);
-      const isTuckedBar =
-        tucked || (roundedH <= TUCKED_HEIGHT && !leftPodOpen && !rightPodOpen);
-      const isCompactIdlePill = roundedH < 120 && !leftPodOpen && !rightPodOpen;
-      const effectiveW =
-        isCompactIdlePill && isAlarmRingingRef.current
-          ? Math.max(ALARM_BANNER_WIDTH, roundedW)
-          : roundedW;
-      // Hover/touch tolerance: compact on 4px tucked strip (+8px W, +4px H at top_offset: 0), +8px L/R & +6px bottom on Idle pills
-      const hitW = isTuckedBar
-        ? effectiveW + 8
-        : isCompactIdlePill
-        ? effectiveW + 16
-        : roundedW;
-      const hitH = isTuckedBar
-        ? Math.max(4, roundedH + 4)
-        : isCompactIdlePill
-        ? roundedH + 6
-        : roundedH;
-      const topOffset = isTuckedBar ? 0 : isFloatingModeRef.current ? 12 : 0;
       const centerOffsetX = computeCenterOffsetX(
         horizontalAlignRef.current,
         roundedW,
         leftPodOpen,
         rightPodOpen
       );
+      const primaryGeom = computePrimaryIslandHitboxAndSensor({
+        capsuleW: roundedW,
+        capsuleH: roundedH,
+        isFloatingMode: isFloatingModeRef.current,
+        tucked,
+        isHoverPreview:
+          hoverPreview ||
+          islandStateRef.current === 'idle_peek' ||
+          islandStateRef.current === 'tucked_peek',
+        isAlarmRinging: isAlarmRingingRef.current,
+        centerOffsetX,
+      });
+
       const POD_WIDTH = 204;
       const podOffsetX = Math.round(roundedW / 2 + 10 + POD_WIDTH / 2);
-      const podHitboxTop = topOffset + 14;
+      const podBaseTopOffset = primaryGeom.isTuckedBar
+        ? 0
+        : isFloatingModeRef.current
+        ? ISLAND_DIMENSIONS.FLOATING_TOP_OFFSET
+        : 0;
+      const podHitboxTop = podBaseTopOffset + 14;
       const podHitboxHeight = Math.max(140, roundedH - 14);
-      const rects: HitRect[] = [
-        {
-          center_offset_x: centerOffsetX,
-          top_offset: topOffset,
-          width: hitW,
-          height: hitH,
-        },
-      ];
+      const rects: HitRect[] = [primaryGeom.hitbox];
 
       if (leftPodOpen) {
         // Left Search/Wi-Fi Satellite Pod (204px, 10px gap left of dynamic Mode 6 box)
@@ -539,7 +660,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
             centerOffsetX,
             capsuleWidth: roundedW,
             capsuleHeight: roundedH,
-            topOffset,
+            topOffset: podBaseTopOffset,
             podWidth: POD_WIDTH,
             extraPopoverHeight: searchDrawerExtraHeightRef.current,
           })
@@ -581,6 +702,10 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     height: 0,
     key: '',
   });
+  const lastPrimaryRectRef = useRef<{ width: number; height: number }>({
+    width: 0,
+    height: 0,
+  });
 
   const isCollapsingRef = useRef<boolean>(false);
 
@@ -598,11 +723,23 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     if (currentWinSizeRef.current.key === key) {
       return;
     }
+
+    const prevPrimary = lastPrimaryRectRef.current;
+    const isShrinkResize =
+      prevPrimary.width > 0 &&
+      (roundedW < prevPrimary.width || roundedH < prevPrimary.height);
+
     currentWinSizeRef.current = { width: roundedW, height: roundedH, key };
-    lastWindowResizeTimeRef.current = Date.now();
+    lastPrimaryRectRef.current = { width: roundedW, height: roundedH };
+
+    if (isShrinkResize) {
+      lastCollapseResizeTimeRef.current = Date.now();
+      markCollapseTransitionCooldown(HOVER_HYSTERESIS_MS);
+    }
+
     recordCanvasResizeCall();
     updateIslandHitboxes(rects);
-  }, []);
+  }, [markCollapseTransitionCooldown]);
 
   const applyWindowSize = useCallback(
     (
@@ -611,9 +748,12 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       devVisible = false,
       leftPod = false,
       rightPod = false,
-      tucked = false
+      tucked = false,
+      hoverPreview = false
     ) => {
-      syncCompositeHitboxes(buildHitboxRects(w, h, devVisible, leftPod, rightPod, tucked));
+      syncCompositeHitboxes(
+        buildHitboxRects(w, h, devVisible, leftPod, rightPod, tucked, hoverPreview)
+      );
     },
     [syncCompositeHitboxes, buildHitboxRects]
   );
@@ -643,7 +783,8 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         showDevTrigger,
         false,
         false,
-        targetState === 'tucked'
+        targetState === 'tucked',
+        targetState === 'idle_peek' || targetState === 'tucked_peek'
       );
 
       // Rule: if growing, expand hitbox IMMEDIATELY at t = 0 before visual state updates
@@ -875,12 +1016,18 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     return () => observer.disconnect();
   }, [needsPerimeterMeasurement, width, height, isFloatingMode]);
 
-  // Dynamic Hover Sensor Dimensions tightly hugging capsule bounds so screen wings stay 100% click-through
+  // Dynamic Hover Sensor Dimensions tightly hugging capsule & bridging Floating top corridor
   const getSensorDimensions = () => {
-    if (isPureTucked) {
-      return { width: TUCKED_SENSOR_WIDTH, height: TUCKED_SENSOR_HEIGHT };
-    }
-    return { width, height };
+    const primaryGeom = computePrimaryIslandHitboxAndSensor({
+      capsuleW: width,
+      capsuleH: height,
+      isFloatingMode,
+      tucked: isPureTucked,
+      isHoverPreview: isPeeking || islandState === 'idle_peek' || islandState === 'tucked_peek',
+      isAlarmRinging,
+      centerOffsetX: 0,
+    });
+    return primaryGeom.sensor;
   };
 
   const { width: sensorWidth, height: sensorHeight } = getSensorDimensions();
@@ -912,12 +1059,22 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         getActiveIdleHitboxHeight(),
         showDevTrigger,
         false,
-        false
+        false,
+        false,
+        islandState === 'tucked_peek'
       );
       return;
     }
     if (islandState === 'expanded' || islandState === 'idle_peek') {
-      applyWindowSize(width, height, showDevTrigger, effectiveLeftPodOpen, effectiveRightPodOpen);
+      applyWindowSize(
+        width,
+        height,
+        showDevTrigger,
+        effectiveLeftPodOpen,
+        effectiveRightPodOpen,
+        false,
+        islandState === 'idle_peek'
+      );
     }
   }, [
     placementMode,
@@ -1028,6 +1185,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         setIsWifiPodOpen(false);
         setIsBtPodOpen(false);
         isCollapsingRef.current = true;
+        markCollapseTransitionCooldown(HOVER_HYSTERESIS_MS);
         setIsLandingComplete(false);
         islandStateRef.current = 'tucked';
         setIslandState('tucked');
@@ -1099,6 +1257,10 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   ]);
 
   const prevIslandStateRef = useRef<IslandState>('idle');
+  const prevCapsuleSizeRef = useRef<{ width: number; height: number }>({
+    width: 0,
+    height: 0,
+  });
 
   // Strict Lifecycle Sync for composite multi-rect Win32 click-through hitboxes (runs before paint)
   useLayoutEffect(() => {
@@ -1131,7 +1293,15 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
 
       if (islandState === 'tucked_peek') {
         isCollapsingRef.current = false;
-        applyWindowSize(getActiveIdleWindowWidth(), IDLE_WINDOW_HEIGHT, showDevTrigger, false, false);
+        applyWindowSize(
+          getActiveIdleWindowWidth(),
+          IDLE_WINDOW_HEIGHT,
+          showDevTrigger,
+          false,
+          false,
+          false,
+          true
+        );
         return;
       }
 
@@ -1144,17 +1314,28 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           isFocusHoverPeek,
           hasHudAlert
         );
-        applyWindowSize(targetW, targetH, showDevTrigger, effectiveLeftPodOpen, effectiveRightPodOpen);
+        applyWindowSize(
+          targetW,
+          targetH,
+          showDevTrigger,
+          effectiveLeftPodOpen,
+          effectiveRightPodOpen,
+          false,
+          islandState === 'idle_peek'
+        );
         return;
       }
 
       if (islandState === 'idle') {
-        const curH = currentWinSizeRef.current.height;
-        const curW = currentWinSizeRef.current.width || EXPANDED_WIDTH;
         const targetW = getActiveIdleWindowWidth();
         const targetH = getActiveIdleHitboxHeight();
+        const isFromMinimize = prevState === 'tucked' || prevState === 'tucked_peek';
+        const shrankIdleCapsule =
+          prevState === 'idle' &&
+          prevCapsuleSizeRef.current.width > 0 &&
+          targetW < prevCapsuleSizeRef.current.width;
 
-        if (wasExpanded || targetW < curW || targetH < curH) {
+        if (!isFromMinimize && (wasExpanded || shrankIdleCapsule)) {
           // Wait for Framer Motion collapse animation to finish in onAnimationComplete before shrinking hitbox
           isCollapsingRef.current = true;
           return;
@@ -1165,6 +1346,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       }
     } finally {
       prevIslandStateRef.current = islandState;
+      prevCapsuleSizeRef.current = { width, height };
     }
   }, [
     islandState,
@@ -1215,12 +1397,15 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       hoverLeaveTimerRef.current = null;
     }
     clearAutoTuckIdleTimer();
+    clearHoverSuppressionReleaseTimer();
+    clearPostTransitionRecheckTimer();
     setIsPeeking(false);
     isPeekingRef.current = false;
     setIsSearchPodOpen(false);
     setIsQueuePodOpen(false);
     hoverSuppressedRef.current = true;
-    lockTransition(500);
+    markCollapseTransitionCooldown(HOVER_HYSTERESIS_MS);
+    lockTransition(280);
     isCollapsingRef.current = true;
     setIsLandingComplete(false);
     islandStateRef.current = 'idle';
@@ -1236,6 +1421,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     resetRestingSleepTimer,
     clearAutoTuckIdleTimer,
     resetAutoTuckIdleTimer,
+    clearHoverSuppressionReleaseTimer,
+    clearPostTransitionRecheckTimer,
+    markCollapseTransitionCooldown,
   ]);
 
   // Helper to lock preview into permanent expanded state
@@ -1265,7 +1453,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         return;
       }
       if (islandStateRef.current === 'tucked' || islandStateRef.current === 'tucked_peek') {
-        lockTransition(500);
+        clearMinimizeWakeupLocks();
+        const animateFromTucked = islandStateRef.current === 'tucked';
+        lockTransition(animateFromTucked ? 240 : 120, true);
         islandStateRef.current = 'idle';
         setIslandState('idle');
         setIsRestingSleep(false);
@@ -1333,7 +1523,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       setIsPeeking(false);
       isPeekingRef.current = false;
       if (islandStateRef.current === 'tucked' || islandStateRef.current === 'tucked_peek') {
-        lockTransition(500);
+        clearMinimizeWakeupLocks();
+        const animateFromTucked = islandStateRef.current === 'tucked';
+        lockTransition(animateFromTucked ? 240 : 120, true);
         islandStateRef.current = 'idle';
         setIslandState('idle');
         setIsRestingSleep(false);
@@ -1382,7 +1574,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       setIsPeeking(false);
       isPeekingRef.current = false;
       if (islandStateRef.current === 'tucked' || islandStateRef.current === 'tucked_peek') {
-        lockTransition(500);
+        clearMinimizeWakeupLocks();
+        const animateFromTucked = islandStateRef.current === 'tucked';
+        lockTransition(animateFromTucked ? 240 : 120, true);
         islandStateRef.current = 'idle';
         setIslandState('idle');
         setIsRestingSleep(false);
@@ -1453,7 +1647,11 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   // Shared hover-peek state machine for both mouseEnter and mouseMove
   const scheduleHoverPeek = useCallback(
     (allowIdleHoverRestart: boolean) => {
-      if (Date.now() < fullscreenExitCooldownUntilRef.current) {
+      // Collapse cooldown hanya memblokir selama fase penyusutan/antiflicker, bukan mengunci ekspansi permanen
+      if (isCollapseCooldownActive()) {
+        if (!hoverSuppressedRef.current) {
+          schedulePostTransitionRecheck();
+        }
         return;
       }
 
@@ -1472,10 +1670,15 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       const currentState = islandStateRef.current;
 
       if (currentState === 'tucked') {
-        if (allowIdleHoverRestart || (!tuckedEnterTimerRef.current && !isCollapsingRef.current && !isTransitioningRef.current)) {
+        if (allowIdleHoverRestart || (!tuckedEnterTimerRef.current && !isCollapsingRef.current)) {
           if (!tuckedEnterTimerRef.current) {
             tuckedEnterTimerRef.current = setTimeout(() => {
-              if (islandStateRef.current === 'tucked' && !hoverSuppressedRef.current) {
+              if (
+                islandStateRef.current === 'tucked' &&
+                !hoverSuppressedRef.current &&
+                !isCollapseCooldownActive()
+              ) {
+                isCollapsingRef.current = false;
                 setIsPeeking(true);
                 isPeekingRef.current = true;
                 isRestingSleepRef.current = false;
@@ -1508,12 +1711,11 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           !isAlarmRinging &&
           !isAlarmRingingRef.current &&
           !intensiveHoverTimerRef.current &&
-          !isCollapsingRef.current &&
-          !isTransitioningRef.current
+          !isCollapsingRef.current
         ) {
           intensiveHoverTimerRef.current = setTimeout(() => {
             if (
-              Date.now() >= fullscreenExitCooldownUntilRef.current &&
+              !isCollapseCooldownActive() &&
               islandStateRef.current === 'idle' &&
               !isAlarmRingingRef.current &&
               !hoverSuppressedRef.current &&
@@ -1530,11 +1732,12 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                 focusPeekNext,
                 hasHudAlertRef.current
               );
-              applyWindowSize(targetW, targetH, showDevTrigger, false, false);
+              // Sinkronkan hitbox besar segera SEBELUM visual mekar agar kursor tidak pernah jatuh ke WS_EX_TRANSPARENT
+              applyWindowSize(targetW, targetH, showDevTrigger, false, false, false, true);
 
               requestAnimationFrame(() => {
                 if (
-                  Date.now() >= fullscreenExitCooldownUntilRef.current &&
+                  !isCollapseCooldownActive() &&
                   islandStateRef.current === 'idle' &&
                   !isAlarmRingingRef.current &&
                   !hoverSuppressedRef.current &&
@@ -1553,24 +1756,37 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         }
       }
     },
-    [isAlarmRinging, isRestingSleep, activeSkillId, showDevTrigger, applyWindowSize]
+    [
+      isAlarmRinging,
+      isRestingSleep,
+      activeSkillId,
+      showDevTrigger,
+      applyWindowSize,
+      isCollapseCooldownActive,
+      schedulePostTransitionRecheck,
+    ]
   );
 
-  // Hover Interaction State Machine: Hover-to-Peek + Anti-Double-Jump Guard
-  const handleMouseEnter = useCallback(() => {
-    isCursorInsideRef.current = true;
+  useEffect(() => {
+    scheduleHoverPeekRef.current = scheduleHoverPeek;
+  }, [scheduleHoverPeek]);
 
-    // Redam flap singkat pasca update hitbox atau post-fullscreen cooldown tanpa mengunci hover permanen
-    if (
-      Date.now() - lastWindowResizeTimeRef.current < 80 ||
-      Date.now() < fullscreenExitCooldownUntilRef.current
-    ) {
-      return;
+  // Hover Interaction State Machine: Hover-to-Peek + Anti-Flicker Collapse Guard (tanpa dead-hover pasca-minimize)
+  const handleMouseEnter = useCallback((e?: React.MouseEvent) => {
+    if (e && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
+      lastPointerPosRef.current = { x: e.clientX, y: e.clientY };
     }
+    isCursorInsideRef.current = true;
 
     if (hoverSuppressedRef.current) {
       return;
     }
+    if (isCollapseCooldownActive() || isTransitioningRef.current) {
+      schedulePostTransitionRecheck();
+      return;
+    }
+    clearHoverSuppressionReleaseTimer();
+    clearPostTransitionRecheckTimer();
 
     setSmartIgnoreCursorEvents(false);
     if (tuckedEnterTimerRef.current) {
@@ -1593,17 +1809,30 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     }
     clearAutoTuckIdleTimer();
     scheduleHoverPeek(true);
-  }, [clearAutoTuckIdleTimer, scheduleHoverPeek]);
+  }, [
+    clearAutoTuckIdleTimer,
+    clearHoverSuppressionReleaseTimer,
+    clearPostTransitionRecheckTimer,
+    isCollapseCooldownActive,
+    schedulePostTransitionRecheck,
+    scheduleHoverPeek,
+  ]);
 
-  const handleMouseMove = useCallback(() => {
+  const handleMouseMove = useCallback((e?: React.MouseEvent) => {
+    if (e && typeof e.clientX === 'number' && typeof e.clientY === 'number') {
+      lastPointerPosRef.current = { x: e.clientX, y: e.clientY };
+    }
     isCursorInsideRef.current = true;
 
-    if (
-      hoverSuppressedRef.current ||
-      Date.now() < fullscreenExitCooldownUntilRef.current
-    ) {
+    if (hoverSuppressedRef.current) {
       return;
     }
+    if (isCollapseCooldownActive() || isTransitioningRef.current) {
+      schedulePostTransitionRecheck();
+      return;
+    }
+    clearHoverSuppressionReleaseTimer();
+    clearPostTransitionRecheckTimer();
 
     if (leaveTimeoutRef.current) {
       clearTimeout(leaveTimeoutRef.current);
@@ -1619,11 +1848,27 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     }
     clearAutoTuckIdleTimer();
     scheduleHoverPeek(false);
-  }, [clearAutoTuckIdleTimer, scheduleHoverPeek]);
+  }, [
+    clearAutoTuckIdleTimer,
+    clearHoverSuppressionReleaseTimer,
+    clearPostTransitionRecheckTimer,
+    isCollapseCooldownActive,
+    schedulePostTransitionRecheck,
+    scheduleHoverPeek,
+  ]);
 
   const handleMouseLeave = useCallback(() => {
     isCursorInsideRef.current = false;
-    hoverSuppressedRef.current = false;
+    clearPostTransitionRecheckTimer();
+
+    // Cegah handleMouseLeave membuka hoverSuppressedRef terlalu dini saat collapse atau cooldown masih aktif
+    if (isCollapseCooldownActive() || isTransitioningRef.current) {
+      if (hoverSuppressedRef.current) {
+        schedulePostCollapseSuppressionRelease();
+      }
+    } else {
+      hoverSuppressedRef.current = false;
+    }
 
     if (tuckedEnterTimerRef.current) {
       clearTimeout(tuckedEnterTimerRef.current);
@@ -1646,17 +1891,15 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       return;
     }
 
-    // 1. Status 'tucked_peek':
-    // REQUIREMENT 2: Hysteresis / debounce 180ms sebelum menutup kembali ke 'tucked'
+    // 1. Status 'tucked_peek': Hysteresis / debounce >= 200ms sebelum menutup kembali ke 'tucked'
     if (currentState === 'tucked_peek') {
       if (leaveTimeoutRef.current) {
         clearTimeout(leaveTimeoutRef.current);
       }
       leaveTimeoutRef.current = setTimeout(() => {
-        // Cek kembali status saat timer habis:
-        // Hanya tutup jika status masih 'tucked_peek' (belum diklik menjadi 'idle'/'expanded')
         if (islandStateRef.current === 'tucked_peek') {
           isCollapsingRef.current = true;
+          markCollapseTransitionCooldown(HOVER_HYSTERESIS_MS);
           setIsLandingComplete(false);
           islandStateRef.current = 'tucked';
           setIslandState('tucked');
@@ -1664,7 +1907,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           isPeekingRef.current = false;
         }
         leaveTimeoutRef.current = null;
-      }, 180);
+      }, HOVER_HYSTERESIS_MS);
       return;
     }
 
@@ -1676,6 +1919,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       hoverLeaveTimerRef.current = setTimeout(() => {
         if (islandStateRef.current === 'idle_peek') {
           isCollapsingRef.current = true;
+          markCollapseTransitionCooldown(HOVER_HYSTERESIS_MS);
           setIsLandingComplete(false);
           setIsPeeking(false);
           isPeekingRef.current = false;
@@ -1685,14 +1929,24 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           resetAutoTuckIdleTimer();
         }
         hoverLeaveTimerRef.current = null;
-      }, 180);
+      }, HOVER_HYSTERESIS_MS);
       return;
     }
-  }, [resetRestingSleepTimer, resetAutoTuckIdleTimer]);
+  }, [
+    resetRestingSleepTimer,
+    resetAutoTuckIdleTimer,
+    clearPostTransitionRecheckTimer,
+    isCollapseCooldownActive,
+    markCollapseTransitionCooldown,
+    schedulePostCollapseSuppressionRelease,
+  ]);
 
   // Click Handler on Notch: One-Click Deterministic Inversion
   const handlePillClick = useCallback(
     (e: React.MouseEvent) => {
+      if (typeof e.clientX === 'number' && typeof e.clientY === 'number') {
+        lastPointerPosRef.current = { x: e.clientX, y: e.clientY };
+      }
       const target = e.target as HTMLElement | null;
       if (target?.closest('[data-satellite-pod="true"]')) {
         e.stopPropagation();
@@ -1722,18 +1976,21 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       const currentState = islandStateRef.current;
 
       // 1. Klik pada Mode 7 (Minimize / 'tucked' atau preview 'tucked_peek'):
-      //    Mengunci state ke Modes 2-5 (Idle) dengan Anti-Double-Jump Guard
+      //    Keluar dari minimize deterministik tanpa menyisakan dead-hover di idle
       if (currentState === 'tucked' || currentState === 'tucked_peek') {
-        hoverSuppressedRef.current = true;
+        clearMinimizeWakeupLocks();
+        const animateFromTucked = currentState === 'tucked';
         setIsPeeking(false);
         isPeekingRef.current = false;
-        lockTransition(400);
+        lockTransition(animateFromTucked ? 240 : 120, true);
         isRestingSleepRef.current = false;
         setIsRestingSleep(false);
         islandStateRef.current = 'idle';
         setIslandState('idle');
         if (!isCursorInsideRef.current) {
           resetRestingSleepTimer();
+        } else if (!animateFromTucked) {
+          schedulePostTransitionRecheck(120);
         }
         playChimeCue('tap');
         return;
@@ -1782,6 +2039,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   // Right-Click Context Menu: Collapse if expanded/peeking, or tuck away into thin top line if idle/resting
   const handlePillContextMenu = useCallback(
     (e: React.MouseEvent) => {
+      if (typeof e.clientX === 'number' && typeof e.clientY === 'number') {
+        lastPointerPosRef.current = { x: e.clientX, y: e.clientY };
+      }
       e.preventDefault();
       e.stopPropagation();
       if (tuckedEnterTimerRef.current) {
@@ -1817,31 +2077,46 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         // tanpa memicu bangun ke Idle terlebih dahulu!
         // JANGAN reset isRestingSleep ke false di sini! Pertahankan isRestingSleep agar
         // IdlePillView tetap merender SashaEyes (mata tidur) yang memudar keluar, BUKAN jam digital!
+        clearHoverSuppressionReleaseTimer();
         hoverSuppressedRef.current = true;
         lockTransition(500);
         isCollapsingRef.current = true;
+        markCollapseTransitionCooldown(HOVER_HYSTERESIS_MS);
         setIsLandingComplete(false);
         islandStateRef.current = 'tucked';
         setIslandState('tucked');
         playChimeCue('whisper');
       } else if (currentState === 'tucked' || currentState === 'tucked_peek') {
-        hoverSuppressedRef.current = true;
-        lockTransition(400);
+        clearMinimizeWakeupLocks();
+        const animateFromTucked = currentState === 'tucked';
+        lockTransition(animateFromTucked ? 240 : 120, true);
         isRestingSleepRef.current = false;
         setIsRestingSleep(false);
         islandStateRef.current = 'idle';
         setIslandState('idle');
         if (!isCursorInsideRef.current) {
           resetRestingSleepTimer();
+        } else if (!animateFromTucked) {
+          schedulePostTransitionRecheck(120);
         }
         playChimeCue('tap');
       }
     },
-    [collapseToIdle, resetRestingSleepTimer]
+    [
+      collapseToIdle,
+      resetRestingSleepTimer,
+      clearMinimizeWakeupLocks,
+      markCollapseTransitionCooldown,
+      clearHoverSuppressionReleaseTimer,
+      schedulePostTransitionRecheck,
+    ]
   );
 
   // MouseDown Guard: Cancel pending hover timers immediately on press to prevent mid-click state collision
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (typeof e.clientX === 'number' && typeof e.clientY === 'number') {
+      lastPointerPosRef.current = { x: e.clientX, y: e.clientY };
+    }
     e.stopPropagation();
     if (tuckedEnterTimerRef.current) {
       clearTimeout(tuckedEnterTimerRef.current);
@@ -1868,27 +2143,38 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
 
       const currentState = islandStateRef.current;
       if (currentState === 'idle') {
+        clearHoverSuppressionReleaseTimer();
         hoverSuppressedRef.current = true;
         lockTransition(500);
         isCollapsingRef.current = true;
+        markCollapseTransitionCooldown(HOVER_HYSTERESIS_MS);
         setIsLandingComplete(false);
         islandStateRef.current = 'tucked';
         setIslandState('tucked');
         playChimeCue('whisper');
       } else if (currentState === 'tucked' || currentState === 'tucked_peek') {
-        hoverSuppressedRef.current = true;
-        lockTransition(400);
+        clearMinimizeWakeupLocks();
+        const animateFromTucked = currentState === 'tucked';
+        lockTransition(animateFromTucked ? 240 : 120, true);
         isRestingSleepRef.current = false;
         setIsRestingSleep(false);
         islandStateRef.current = 'idle';
         setIslandState('idle');
         if (!isCursorInsideRef.current) {
           resetRestingSleepTimer();
+        } else if (!animateFromTucked) {
+          schedulePostTransitionRecheck(120);
         }
         playChimeCue('tap');
       }
     }
-  }, [resetRestingSleepTimer]);
+  }, [
+    resetRestingSleepTimer,
+    clearMinimizeWakeupLocks,
+    markCollapseTransitionCooldown,
+    clearHoverSuppressionReleaseTimer,
+    schedulePostTransitionRecheck,
+  ]);
 
   // Generalized Priority Alert Wake & Post-Stop State Recovery (Timer Alarm + Pengingat Ibadah T-0)
   // - Expanded Mode 6: stays open (never collapses/minimizes; slim top banner simply clears).
@@ -1920,6 +2206,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
 
       const cur = islandStateRef.current;
       if (cur === 'tucked' || cur === 'tucked_peek') {
+        clearMinimizeWakeupLocks();
         wasTuckedBeforeAlertRef.current =
           isFullscreenActiveRef.current && fullscreenBehaviorRef.current === 'smart-tuck';
         islandStateRef.current = 'idle';
@@ -1959,6 +2246,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         setIsPeeking(false);
         isPeekingRef.current = false;
         isCollapsingRef.current = true;
+        markCollapseTransitionCooldown(HOVER_HYSTERESIS_MS);
         setIsLandingComplete(false);
         islandStateRef.current = 'tucked';
         setIslandState('tucked');
@@ -2048,9 +2336,10 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           setIsPeeking(false);
           isPeekingRef.current = false;
         } else if (currentState === 'tucked') {
+          clearMinimizeWakeupLocks();
           setIsPeeking(false);
           isPeekingRef.current = false;
-          lockTransition(400);
+          lockTransition(240, true);
           const enterResting =
             !isMusicPlayingRef.current &&
             !isTimerActiveRef.current &&
@@ -2119,6 +2408,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           collapseToIdleRef.current();
         } else {
           if (currentState === 'tucked' || currentState === 'tucked_peek') {
+            clearMinimizeWakeupLocks();
             islandStateRef.current = 'idle';
             setIslandState('idle');
             setIsPeeking(false);
@@ -2399,8 +2689,10 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       if (restingSleepTimerRef.current) clearTimeout(restingSleepTimerRef.current);
       if (autoTuckIdleTimerRef.current) clearTimeout(autoTuckIdleTimerRef.current);
       if (wakeUpTimerRef.current) clearTimeout(wakeUpTimerRef.current);
+      clearHoverSuppressionReleaseTimer();
+      clearPostTransitionRecheckTimer();
     };
-  }, []);
+  }, [clearHoverSuppressionReleaseTimer, clearPostTransitionRecheckTimer]);
 
   const activeCenterOffsetX = computeCenterOffsetX(
     horizontalAlign,
@@ -2413,20 +2705,22 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     <div
       ref={islandRef}
       style={{
-        top: activeTopPx,
+        top: isFloatingMode ? 0 : activeTopPx,
         left: `calc(50% + ${activeCenterOffsetX}px)`,
       }}
-      className="fixed -translate-x-1/2 flex items-start justify-center select-none z-40 pointer-events-none transition-[top] duration-150 ease-out"
+      className="fixed -translate-x-1/2 flex items-start justify-center select-none z-40 pointer-events-none"
     >
       {/* Detached Satellite Pod Portal Host (outside overflow-clip container, inside islandRef outside-click guard) */}
       <div
         ref={setPodHostEl}
         data-satellite-pod-host="true"
-        className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-[1100px] h-[196px] overflow-visible z-40"
+        style={{ top: activeTopPx }}
+        className="pointer-events-none absolute left-1/2 -translate-x-1/2 w-[1100px] h-[196px] overflow-visible z-40"
       />
 
-      {/* Dynamic Hover Sensor Wrapper tightly embracing capsule */}
+      {/* Dynamic Hover Sensor Wrapper tightly embracing capsule & floating top corridor */}
       <div
+        ref={hoverSensorRef}
         data-island-hover-sensor="true"
         onPointerEnter={handleMouseEnter}
         onPointerLeave={handleMouseLeave}
@@ -2441,7 +2735,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
             handlePillClick(e);
           }
         }}
-        className="relative flex items-start justify-center pointer-events-auto bg-transparent overflow-visible touch-manipulation"
+        className={`relative flex items-start justify-center bg-transparent overflow-visible touch-manipulation ${
+          islandState === 'expanded' ? 'pointer-events-none' : 'pointer-events-auto'
+        }`}
         style={{
           width: sensorWidth,
           height: sensorHeight,
@@ -2489,28 +2785,34 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
             animate={{
               width,
               height,
+              y: isFloatingMode ? activeTopPx : 0,
             }}
             transition={
               isLandingComplete && islandState === 'idle' && !hasHudAlert
                 ? {
-                    width: { duration: 0.3, ease: [0.22, 1, 0.36, 1] },
-                    height: { type: 'spring', stiffness: 260, damping: 28, mass: 0.8 },
+                    width: { duration: 0.22, ease: [0.22, 1, 0.36, 1] },
+                    height: { duration: 0.2, ease: [0.22, 1, 0.36, 1] },
+                    y: { duration: 0.2, ease: [0.22, 1, 0.36, 1] },
                   }
                 : {
-                    type: 'spring',
-                    stiffness: 260,
-                    damping: 28,
-                    mass: 0.8,
+                    duration: 0.2,
+                    ease: [0.22, 1, 0.36, 1],
                   }
             }
             onAnimationComplete={() => {
               unlockTransition();
               if (isCollapsingRef.current) {
                 isCollapsingRef.current = false;
-                if (isCursorInsideRef.current && islandStateRef.current === 'tucked') {
-                  hoverSuppressedRef.current = true;
-                }
+                markCollapseTransitionCooldown(HOVER_HYSTERESIS_MS);
                 doubleRaf(() => {
+                  // Cek koordinat pointer aktual terhadap sensor setelah menyusut: di Windows WS_EX_TRANSPARENT
+                  // DOM mouseleave tidak selalu terpicu saat kapsul mengecil menjauhi kursor diam.
+                  const pointerStillInsideSensor = isPointerInsideHoverSensor();
+                  if (!pointerStillInsideSensor) {
+                    clearHoverSuppressionReleaseTimer();
+                    hoverSuppressedRef.current = false;
+                  }
+
                   const devVis = showDevTriggerRef.current;
                   if (islandStateRef.current === 'tucked') {
                     if (hasHudAlertRef.current) {
@@ -2535,7 +2837,17 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                       false
                     );
                   }
+
+                  if (pointerStillInsideSensor && !hoverSuppressedRef.current) {
+                    schedulePostTransitionRecheck();
+                  }
                 });
+              } else {
+                if (!isCursorInsideRef.current && hoverSuppressedRef.current) {
+                  schedulePostCollapseSuppressionRelease();
+                } else {
+                  recheckPointerHoverIntent();
+                }
               }
               if (islandStateRef.current === 'idle' && !isExpandedView) {
                 setIsLandingComplete((prev) => (prev ? prev : true));
