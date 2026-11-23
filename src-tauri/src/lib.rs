@@ -336,6 +336,7 @@ fn toggle_gaming_mode(app: tauri::AppHandle, enabled: bool) -> Result<bool, Stri
 /// Command to cleanly terminate the application and unregister global shortcuts
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
+    drop_zone::cleanup_ephemeral_transit_dir(&app);
     #[cfg(desktop)]
     {
         use tauri_plugin_global_shortcut::GlobalShortcutExt;
@@ -384,6 +385,7 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            drop_zone::cleanup_ephemeral_transit_dir(&app.handle());
             if let Some(window) = app.get_webview_window("main") {
                 // Apply Win32 NOACTIVATE and TOOLWINDOW styles, stripping WS_EX_TRANSPARENT
                 apply_win32_window_styles(&window);
@@ -481,6 +483,7 @@ pub fn run() {
                             let _ = app.emit("tray-toggle-gaming", ());
                         }
                         "quit" => {
+                            drop_zone::cleanup_ephemeral_transit_dir(app);
                             #[cfg(desktop)]
                             {
                                 use tauri_plugin_global_shortcut::GlobalShortcutExt;
@@ -565,6 +568,9 @@ pub fn run() {
             drop_zone::save_clipboard_image,
             drop_zone::copy_files_to_clipboard,
             drop_zone::native_drag_drop_files,
+            drop_zone::native_drag_drop_text,
+            drop_zone::stage_dropped_file,
+            drop_zone::cleanup_ephemeral_drop_zone,
             drop_zone::pick_drop_zone_files,
             drop_zone::launch_file_item,
             drop_zone::reveal_in_folder,

@@ -34,7 +34,7 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 | `v2.1.2` | *Prayer T-0 Sky Perimeter & Mode 6 Update Pop-Up* | Baseline rilis stabil saat ini | `[DONE]` |
 | `v2.1.3` | *Hotfix Stability — Drop-Out & Floating Pill* | Native OS drag-out (`CF_HDROP`) dengan verifikasi `DRAGDROP_S_DROP` + anti-flicker floating mode | `[DONE]` |
 | `v2.1.4` | *CASA Player — Smart Queue & Search Album/Playlist* | Auto-queue relasi lagu (`videoId`/`trackId` + `artistId`), transisi playlist→Smart Queue & *session-seeded* queue, region `gl`/`hl`, kategori Top Songs, Album & Playlist, 3-mode Repeat, & hygiene RAM/binary | `[DONE]` |
-| `v2.2.0` | *Dropzone 2.0 — Papan Teks Ephemeral* | Drag-in teks/link/file tanpa shortcut (`dragDropEnabled: false`) + auto-hapus pasca drag-out/tutup | `[PLANNED]` |
+| `v2.2.0` | *Dropzone 2.0 — Papan Teks Ephemeral* | Drag-in teks/link/file tanpa shortcut (`dragDropEnabled: false`), `Ctrl+V` eksplisit, sanitasi HTML/URI, `CF_UNICODETEXT`, & cleanup ephemeral | `[DONE]` |
 | `v2.3.0` | *Connect HP — Zero-App Local Web Drop* | Server `axum` HTTP+WebSocket sementara, QR token acak, transfer 2 arah Wi-Fi/Hotspot, auto-shutdown | `[PLANNED]` |
 | `v2.4.0` | *Quick Calculator & Instant Converter* | Kalkulator ekspresi inline aman di pil, salin hasil 1 klik, serta konversi satuan/kurs ringkas | `[PLANNED]` |
 | `v2.5.0` | *Calendar & Smart Reminders* | Jadwal harian lokal, countdown `H-15m`/`T-0` di pil, tombol *snooze* 5 menit | `[PLANNED]` |
@@ -75,18 +75,18 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 
 ---
 
-### `v2.2.0` — Dropzone 2.0: Papan Teks Ephemeral `[PLANNED]`
-**Tujuan:** Menjadikan Dropzone sebagai rak transit terpadu untuk **potongan teks**, **tautan URL**, dan **berkas** secara langsung lewat drag-and-drop tanpa perlu menekan pintasan `Ctrl+C`/`Ctrl+V`.
+### `v2.2.0` — Dropzone 2.0: Papan Teks Ephemeral `[DONE]`
+**Tujuan:** Menjadikan Dropzone sebagai rak transit terpadu untuk **potongan teks**, **tautan URL**, dan **berkas** secara langsung lewat drag-and-drop maupun `Ctrl+V` eksplisit tanpa perlu polling clipboard latar belakang.
 
 1. **Drag-In Teks, Link & File Terpadu (`tauri.conf.json`, `CasaIsland.tsx`, `DropZoneView.tsx`, `useDropZoneStore.ts`):**
-   - Atur **`"dragDropEnabled": false`** pada konfigurasi window `main` di [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json) agar event HTML5 `dragover` & `drop` DOM menerima penuh muatan `text/plain`, `text/uri-list`, dan `DataTransfer.files` tanpa dicegat lapisan drag-drop default Tauri.
-   - Terapkan **sanitasi konten HTML/teks** (*strip tag* HTML berbahaya / karakter kontrol) serta validasi skema tautan (izinkan `http://` & `https://`, tolak `javascript:`, `data:`, atau `file:` yang tidak tervalidasi) sebelum ditampilkan di kartu `DropZoneView.tsx`.
-   - Pastikan drop di atas kapsul Mode Idle (`hover` saat menyeret teks/link/file dari browser atau editor lain) membangunkan Dropzone secara mulus sebagai target tampung.
+   - Atur **`"dragDropEnabled": false`** pada konfigurasi window `main` di [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json) agar event HTML5 `dragenter`/`dragover`/`drop` DOM menerima penuh muatan `text/plain`, `text/uri-list`, `text/html`, dan `DataTransfer.files` (dibantu `stage_dropped_file` untuk staging file DOM tanpa `.path`), sementara `onDragDropEvent` tetap dipertahankan sebagai fallback kompatibel.
+   - Terapkan **sanitasi konten HTML/teks** (*strip tag* HTML/skrip berbahaya & karakter kontrol/bidi lewat `sanitizeDropText`) serta validasi skema tautan (`parseSafeHttpUrl` — mengizinkan `http://` & `https://`, menolak `javascript:`, `data:`, `vbscript:`, dan `file:` yang tidak tervalidasi dengan banner `securityNotice`) sebelum ditampilkan di kartu `DropZoneView.tsx`.
+   - Mendukung **Smart Drag-In** di seluruh kapsul untuk membangunkan mode *Idle / Tucked / Resting* ke Dropzone secara mulus, serta **`Ctrl+V` eksplisit + tombol `Paste`** (tanpa *background clipboard snooping* `Ctrl+C`).
 
 2. **Siklus Hidup Ephemeral Murni (`useDropZoneStore.ts`, `src-tauri/src/`):**
-   - Mendukung **drag-out teks/link** ke aplikasi tujuan melalui Win32 OLE **`CF_UNICODETEXT`** (`DoDragDrop`) selain `CF_HDROP` untuk berkas.
-   - **Auto-hapus** item begitu OS mengonfirmasi drop berhasil (`DRAGDROP_S_DROP`) maupun pembersihan otomatis seluruh isi Dropzone saat sesi aplikasi berakhir/ditutup (tidak mewariskan tumpukan item kadaluarsa antar-restart, sesuai prinsip *Ephemeral-First*).
-   - Sinkronisasi perilaku papan teks ephemeral pada simulasi Drop Zone di Web Showcase `docs/`.
+   - Mendukung **drag-out teks/link** ke aplikasi tujuan melalui Win32 OLE **`CF_UNICODETEXT`** (`+ CF_TEXT` fallback via `native_drag_drop_text` & `run_drag_drop_on_sta`) selain `CF_HDROP` untuk berkas.
+   - **Auto-hapus** item begitu OS mengonfirmasi drop berhasil (`DRAGDROP_S_DROP` & `dwEffect != DROPEFFECT_NONE`, anti-self-drop) maupun pembersihan otomatis seluruh isi Dropzone + direktori transit sementara (`cleanup_ephemeral_drop_zone` / startup & `quit_app` / tray `"quit"` / `beforeunload`) saat sesi berakhir.
+   - Sinkronisasi perilaku Dropzone 2.0 (`file`, `link`, `text`, tombol `Paste`, `Ctrl+V`, & wake saat drag di kapsul) pada Web Showcase `docs/`, terverifikasi via `scripts/verify-dropzone-v220.mjs` (22/22 pass).
 
 ---
 

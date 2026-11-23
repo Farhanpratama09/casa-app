@@ -657,7 +657,7 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
 export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   if (!isTauriEnv) {
     return {
-      currentVersion: '2.1.4',
+      currentVersion: '2.2.0',
       available: false,
       version: null,
       body: null,
@@ -672,7 +672,7 @@ export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
 export async function getUpdateNotificationStatus(): Promise<UpdateNotificationStatus> {
   if (!isTauriEnv) {
     return {
-      currentVersion: '2.1.4',
+      currentVersion: '2.2.0',
       latestVersion: null,
       releaseUrl: null,
       releaseNotes: null,
@@ -685,7 +685,7 @@ export async function getUpdateNotificationStatus(): Promise<UpdateNotificationS
     return await invoke<UpdateNotificationStatus>('get_update_notification_status');
   } catch {
     return {
-      currentVersion: '2.1.4',
+      currentVersion: '2.2.0',
       latestVersion: null,
       releaseUrl: null,
       releaseNotes: null,
@@ -731,6 +731,13 @@ export async function installAppUpdate(): Promise<void> {
 }
 
 export async function quitCasaApp(): Promise<void> {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem('casa_drop_zone_shelf_items_v1', '[]');
+    }
+  } catch {
+    // ignore storage errors on exit
+  }
   if (!isTauriEnv) return;
   try {
     await invoke('quit_app');
@@ -860,4 +867,42 @@ export async function nativeDragDropFiles(paths: string[]): Promise<NativeDragDr
     return { status: 'cancelled', effect: 0 };
   }
   return await invoke<NativeDragDropResult>('native_drag_drop_files', { paths });
+}
+
+/**
+ * Initiates a Win32 OLE CF_UNICODETEXT (+ CF_TEXT) drag-out on the main STA thread.
+ * Resolves with `status: 'dropped'` ONLY when OS returns DRAGDROP_S_DROP and a non-zero drop effect
+ * outside CASA's own window.
+ */
+export async function nativeDragDropText(text: string): Promise<NativeDragDropResult> {
+  if (!isTauriEnv) {
+    return { status: 'cancelled', effect: 0 };
+  }
+  return await invoke<NativeDragDropResult>('native_drag_drop_text', { text });
+}
+
+/**
+ * Stages raw HTML5 File bytes into CASA's ephemeral transit directory when WebView2 DOM drops
+ * do not expose a native filesystem `.path`.
+ */
+export async function stageDroppedFile(
+  fileName: string,
+  dataBase64: string
+): Promise<string | null> {
+  if (!isTauriEnv) {
+    return null;
+  }
+  return await invoke<string>('stage_dropped_file', { fileName, dataBase64 });
+}
+
+/**
+ * Purges ephemeral Drop Zone transit files and temporary clipboard image caches.
+ */
+export async function cleanupEphemeralDropZone(): Promise<void> {
+  if (!isTauriEnv) return;
+  try {
+    await invoke('cleanup_ephemeral_drop_zone');
+  } catch (err) {
+    console.warn('[CASA IPC] cleanup_ephemeral_drop_zone failed:', err);
+  }
 }

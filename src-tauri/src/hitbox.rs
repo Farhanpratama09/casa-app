@@ -272,7 +272,7 @@ pub fn start_hitbox_poller(window: tauri::WebviewWindow) {
                     // Global Click-Outside Detection for non-pinned expanded/peek modes:
                     // Skips emission while Mode 6 is explicitly pinned (`IS_EXPANDED_PINNED = true`).
                     let is_pinned = IS_EXPANDED_PINNED.load(Ordering::Relaxed);
-                    if is_expanded_mode && !is_pinned {
+                    if is_expanded_mode && !is_pinned && !internal_drag_out {
                         if !was_lbutton_down && is_lbutton_down {
                             pressed_outside_expanded = !is_cursor_inside;
                         } else if was_lbutton_down && !is_lbutton_down {
@@ -287,7 +287,7 @@ pub fn start_hitbox_poller(window: tauri::WebviewWindow) {
                     was_lbutton_down = is_lbutton_down;
 
                     let should_be_transparent = if internal_drag_out {
-                        !is_cursor_inside
+                        true
                     } else if is_cursor_inside || is_approaching_drag {
                         false
                     } else if !was_transparent && is_lbutton_down {

@@ -1,4 +1,4 @@
-# Product Requirements Document (PRD) — CASA `v2.1.4`
+# Product Requirements Document (PRD) — CASA `v2.2.0`
 
 **CASA — Dynamic Rabbit Island for Windows** (`com.farhanpratama.casa`)  
 Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + Rust + React 19 + TypeScript + Vite)  
@@ -8,7 +8,7 @@ Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + R
 
 ## 1. Identitas & Filosofi Produk
 - **Nama Produk:** CASA (*Dynamic Rabbit Island for Windows*)
-- **Versi Acuan:** `2.1.4` (tersinkron di [package.json](../package.json), [Cargo.toml](../src-tauri/Cargo.toml), [tauri.conf.json](../src-tauri/tauri.conf.json), sidebar Settings, dan [docs/index.html](./index.html))
+- **Versi Acuan:** `2.2.0` (tersinkron di [package.json](../package.json), [Cargo.toml](../src-tauri/Cargo.toml), [tauri.conf.json](../src-tauri/tauri.conf.json), sidebar Settings, dan [docs/index.html](./index.html))
 - **Konsep Inti:** Kapsul *top-flush Dynamic Island* berlatar OLED hitam murni (`#000000`) di tepi atas monitor Windows 10/11 yang hening (*non-intrusive*, `WS_EX_NOACTIVATE`), menyatukan pemutar musik & lirik sinkron milidetik, *Focus Timer & To-Do Ring*, kontrol cepat sistem, *Drag & Drop Shelf*, dan ekspresi maskot **Obsidian Bunny** (`× ♥`).
 
 ---
@@ -60,19 +60,19 @@ Ambient Desktop Notch, Media Companion & Hardware Telemetry Island (Tauri v2 + R
 
 ### 2.5 Native Window, Hitbox 50Hz & Telemetry Perangkat Keras
 - **Kanvas Tetap Anti-Resize Hitch:** Window utama terkunci di ukuran logis **`1100×340`** (`LogicalSize`), posisinya dihitung aware DPI melalui `position_window_top` + Win32 `SetWindowPos` (`WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW`, menghapus `WS_EX_TRANSPARENT` statis).
-- **Dynamic Multi-Rect Hitbox Poller (`hitbox.rs` & `islandLayoutState.ts`):** Polling adaptif 60Hz/50Hz membandingkan posisi kursor terhadap maksimal 6 `HitRect` aktif (`update_island_hitboxes`), mengatur `WS_EX_TRANSPARENT` secara real-time di luar area kapsul, menjembatani celah *top offset* `12 px` pada Floating Mode (`tucked`/`peek`/`idle`) disertai hysteresis `220 ms`, dan mengisolasi drag-out native (`native_drag_drop_files` via `CF_HDROP` + `DRAGDROP_S_DROP` & `DROPEFFECT_COPY`) agar item Drop Zone hanya terhapus jika drop ke aplikasi eksternal sukses.
-- **Resting, Smart-Tuck & HUD:** Kapsul kompak **`× ♥`** (`W=126px` di web / `IDLE_MIN_AWAKE_WIDTH: 180` & `TUCKED_HEIGHT: 4px` Smart-Tuck), Circular Battery Ring SVG, perimeter stroke To-Do Focus, HUD real-time Volume/Brightness/Bluetooth (`system_hardware.rs`), CPU/RAM (`system_stats.rs`), serta Drop Zone Shelf (`drop_zone.rs`).
+- **Dynamic Multi-Rect Hitbox Poller (`hitbox.rs` & `islandLayoutState.ts`):** Polling adaptif 60Hz/50Hz membandingkan posisi kursor terhadap maksimal 6 `HitRect` aktif (`update_island_hitboxes`), mengatur `WS_EX_TRANSPARENT` secara real-time di luar area kapsul, menjembatani celah *top offset* `12 px` pada Floating Mode (`tucked`/`peek`/`idle`) disertai hysteresis `220 ms`, dan mengisolasi drag-out native (`native_drag_drop_files` via `CF_HDROP` serta `native_drag_drop_text` via `CF_UNICODETEXT` + `CF_TEXT`, `DRAGDROP_S_DROP` & `DROPEFFECT_COPY`) agar item Drop Zone hanya terhapus jika drop ke aplikasi eksternal sukses.
+- **Resting, Smart-Tuck & Dropzone 2.0 (`useDropZoneStore.ts`, `drop_zone.rs`):** Kapsul kompak **`× ♥`** (`W=126px` di web / `IDLE_MIN_AWAKE_WIDTH: 180` & `TUCKED_HEIGHT: 4px` Smart-Tuck), Circular Battery Ring SVG, perimeter stroke To-Do Focus, HUD real-time Volume/Brightness/Bluetooth (`system_hardware.rs`), CPU/RAM (`system_stats.rs`), serta **Dropzone 2.0 Ephemeral** (`dragDropEnabled: false` untuk Smart Drag-In `Files`/`text/uri-list`/`text/plain`/`text/html`, `Ctrl+V` + tombol `Paste` eksplisit tanpa polling `Ctrl+C`, sanitasi HTML/blokir URI berbahaya `javascript:`/`data:`/`vbscript:`/`file://`, drag-out `CF_HDROP` & `CF_UNICODETEXT`, serta pembersihan folder transit sementara `drop_zone_transit/` saat startup dan keluar aplikasi).
 
 ---
 
 ## 3. Web Showcase (`docs/`) — Paritas 1:1 & Komunitas
 
 - **URL Produksi:** `https://farhanpratama09.github.io/casa-app/`
-- **Estetika & Paritas Native 1:1:** Pure Monochrome OLED (`#000000` canvas, `#09090b` surface, hairline `rgba(255,255,255,0.08)`). Monitor Virtual (`#virtual-monitor`) mereplikasi 1:1 anatomi kapsul native (bahu cekung atas, intro `"Hi."` Obsidian Bunny -> pil kompak `× ♥`, *Resting & Wake*, *Mode 6 `Player | Playlists`* + pop-up `QUEUE` kanan, *Idle Lyric Minimize*, *Focus Ring & Dual-Idle*, *HUD Brightness slider* yang meredupkan layar virtual, *Drop Zone Shelf* dengan *Copy Back to Desktop*, serta *Pengingat Ibadah* opt-in 5 tab kurva parabola SVG & simulasi pil `T-0` `✦ ☾`).
+- **Estetika & Paritas Native 1:1:** Pure Monochrome OLED (`#000000` canvas, `#09090b` surface, hairline `rgba(255,255,255,0.08)`). Monitor Virtual (`#virtual-monitor`) mereplikasi 1:1 anatomi kapsul native (bahu cekung atas, intro `"Hi."` Obsidian Bunny -> pil kompak `× ♥`, *Resting & Wake*, *Mode 6 `Player | Playlists`* + pop-up `QUEUE` kanan, *Idle Lyric Minimize*, *Focus Ring & Dual-Idle*, *HUD Brightness slider* yang meredupkan layar virtual, *Drop Zone 2.0 Shelf* dengan kartu file/link/teks, `Paste` / `Ctrl+V`, & *Copy Back to Desktop*, serta *Pengingat Ibadah* opt-in 5 tab kurva parabola SVG & simulasi pil `T-0` `✦ ☾`).
 - **Navigasi Clean Path Tanpa `#`:** Menggunakan `History API` (`pushState` / `replaceState`) untuk `/casa-app/`, `/casa-app/playground`, `/casa-app/arsitektur`, `/casa-app/unduh`, `/casa-app/feedback` (+ alias `/casa-app/discussions`) disertai pemulihan SPA lewat [404.html](./404.html).
 - **Smart Download Counter & Cooldown:**
   - `initSmartReleaseHub()` mengambil statistik dari GitHub Releases API, menjumlahkan khusus biner installer (`.exe` dan `.msi`; mengecualikan `.sig` & `latest.json`), menyimpannya pada `localStorage` (`casa_dl_count_cache`) selama **15 menit** (`DL_CACHE_TTL_MS`), dan sembunyi anggun bila offline.
-  - Tombol unduh utama `#primary-download-btn` berlabel ringkas **`Download CASA for Windows`**, dengan versi dan ukuran pada subteks monospace `#download-size-text` (`v2.1.4 · NSIS Setup (.exe)`), serta **cooldown 6 detik** (`DL_COOLDOWN_MS = 6000`).
+  - Tombol unduh utama `#primary-download-btn` berlabel ringkas **`Download CASA for Windows`**, dengan versi dan ukuran pada subteks monospace `#download-size-text` (`v2.2.0 · NSIS Setup (.exe)`), serta **cooldown 6 detik** (`DL_COOLDOWN_MS = 6000`).
 - **Ratings & Reviews Ala Play Store (`#feedback`, Supabase + Telegram Moderation):**
   - Bagian `#feedback` menampilkan ringkasan skor rata-rata & 5 progress bar distribusi bintang, filter rating (`All`, `5 ★`..`1 ★`) + sort (`Newest`, `Highest`, `Lowest`), form tulis ulasan tanpa login (star picker `1–5`, Name max 40 char, Review `3–500` char, honeypot `website_hp`, `elapsed_ms`), dan balasan resmi **`Creator`**, disertai satu tautan ke **GitHub Discussions** (`https://github.com/Farhanpratama09/casa-app/discussions`).
   - **Arsitektur Database & Keamanan (`supabase/`):**

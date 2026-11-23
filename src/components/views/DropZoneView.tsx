@@ -19,6 +19,8 @@ import {
   AlignLeft,
   GripVertical,
   ExternalLink,
+  ShieldAlert,
+  RotateCcw,
 } from 'lucide-react';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import {
@@ -30,13 +32,14 @@ import {
   IMAGE_EXTENSIONS,
   formatBytes,
   isAudioItem,
+  parseSafeHttpUrl,
 } from '../../stores/useDropZoneStore';
 import { useCasaAudio } from '../../context/CasaAudioContext';
 import { NativeTrack, parseTrackTitleAndArtist } from '../../services/nativeAudioService';
 import {
   playChimeCue,
-  focusIslandWindow,
   nativeDragDropFiles,
+  nativeDragDropText,
 } from '../../utils/tauriBridge';
 import { useSettingsStore } from '../../stores/useSettingsStore';
 
@@ -45,11 +48,42 @@ export interface DropZoneViewProps {
   onOpenMusic?: () => void;
 }
 
+const DRAG_THRESHOLD_PX = 8;
+
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (!text) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fallback below when Clipboard API rejects in non-focused contexts
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', 'true');
+    ta.style.position = 'fixed';
+    ta.style.top = '-9999px';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+const isLinkItem = (item: DropItem): boolean => item.type === 'link';
+
 const renderCategoryIcon = (item: DropItem, isMonochrome = false) => {
   if (item.isDir) {
     return <Folder className={`w-4 h-4 ${isMonochrome ? 'text-white/80' : 'text-sky-400/85'}`} />;
   }
-  if (item.type === 'url') {
+  if (isLinkItem(item)) {
     return <Globe className={`w-4 h-4 ${isMonochrome ? 'text-white/85' : 'text-sky-400'}`} />;
   }
   if (item.type === 'text') {
@@ -58,7 +92,7 @@ const renderCategoryIcon = (item: DropItem, isMonochrome = false) => {
 
   const ext = (item.extension || '').toLowerCase();
   if (AUDIO_EXTENSIONS.has(ext)) {
-    return <Music className={`w-4 h-4 ${isMonochrome ? 'text-white/85' : 'text-emerald-400'}`} />;
+    return <Music className={`w-4 h-4 ${isMonochrome ? 'text-white/85' : 'text-sky-400'}`} />;
   }
   if (VIDEO_EXTENSIONS.has(ext)) {
     return <Film className={`w-4 h-4 ${isMonochrome ? 'text-white/80' : 'text-purple-400/90'}`} />;
@@ -74,26 +108,25 @@ const renderCategoryIcon = (item: DropItem, isMonochrome = false) => {
 
 const getItemMetaLabel = (item: DropItem): string => {
   if (item.isDir) return 'Folder';
-  if (item.type === 'url') return 'URL';
+  if (isLinkItem(item)) {
+    return item.domain || 'HTTPS Link';
+  }
   if (item.type === 'text') {
-    const chars = item.payload.length;
-    const lines = item.payload.split(/\r?\n/).length;
-    return lines > 1 ? `${chars} ch · ${lines} baris` : `${chars} ch`;
+    const chars = item.charCount ?? item.payload.length;
+    const lines = item.lineCount ?? item.payload.split(/\r?\n/).length;
+    return lines > 1 ? `${chars} chars · ${lines} lines` : `${chars} chars`;
   }
   const ext = item.extension ? item.extension.toUpperCase() : 'File';
   const size = item.sizeBytes ? formatBytes(item.sizeBytes) : '';
   return size ? `${ext} · ${size}` : ext;
 };
 
-const parseUrlDisplay = (rawUrl: string): { host: string; subUrl: string } => {
-  try {
-    const parsed = new URL(rawUrl);
-    const host = parsed.hostname.replace(/^www\./i, '');
-    const rest = `${parsed.pathname === '/' ? '' : parsed.pathname}${parsed.search}${parsed.hash}`;
-    return { host, subUrl: rest || rawUrl };
-  } catch {
-    return { host: rawUrl, subUrl: 'Web URL' };
-  }
+const getLinkPreviewInfo = (item: DropItem): { title: string; subtitle: string; badge: string } => {
+  const parsed = parseSafeHttpUrl(item.payload, item.title);
+  const title = item.title || parsed?.title || parsed?.domain || 'Link';
+  const subtitle = item.displayUrl || parsed?.displayUrl || item.domain || item.payload;
+  const badge = item.payload.startsWith('https://') ? 'HTTPS' : 'HTTP';
+  return { title, subtitle, badge };
 };
 
 interface DropShelfCardProps {
@@ -101,7 +134,8 @@ interface DropShelfCardProps {
   isHighlighted?: boolean;
   onRemove: (id: string) => void;
   onOpenMusic?: () => void;
-  onDragOutFeedback?: (status: 'dropped' | 'missing') => void;
+  onCopiedFeedback?: () => void;
+  onDragOutFeedback?: (status: 'dropped' | 'missing', item: DropItem) => void;
 }
 
 const DropShelfCard: React.FC<DropShelfCardProps> = ({
@@ -109,6 +143,7 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
   isHighlighted = false,
   onRemove,
   onOpenMusic,
+  onCopiedFeedback,
   onDragOutFeedback,
 }) => {
   const { setPlaybackSource, playTrack } = useCasaAudio();
@@ -135,15 +170,17 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
     };
   }, []);
 
-  const canDragFile = item.type === 'file' || item.type === 'image';
+  const isFileBased = item.type === 'file' || item.type === 'image';
+  const canDragOut = isFileBased || item.type === 'text' || isLinkItem(item);
   const isAudio = isAudioItem(item);
 
   const triggerCopiedFeedback = useCallback(() => {
     setCopied(true);
     playChimeCue('tap');
+    onCopiedFeedback?.();
     if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
     copyTimerRef.current = setTimeout(() => setCopied(false), 1400);
-  }, []);
+  }, [onCopiedFeedback]);
 
   const handleOpenItem = useCallback(async () => {
     if (draggedDuringGestureRef.current) {
@@ -151,25 +188,24 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
       return;
     }
     try {
-      if (item.type === 'url') {
-        await invoke('open_url_item', { url: item.payload });
-        playChimeCue('tap');
-      } else if (item.type === 'file' || item.type === 'image') {
+      if (isFileBased) {
         await invoke('launch_file_item', { path: item.payload });
         playChimeCue('tap');
       } else {
-        await navigator.clipboard.writeText(item.payload);
-        triggerCopiedFeedback();
+        const ok = await copyTextToClipboard(item.payload);
+        if (ok) {
+          triggerCopiedFeedback();
+        }
       }
     } catch (err) {
       console.warn('[DropZoneCard] Open failed:', err);
     }
-  }, [item.payload, item.type, triggerCopiedFeedback]);
+  }, [item, isFileBased, triggerCopiedFeedback]);
 
   const handleOpenUrl = useCallback(
     async (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (item.type !== 'url') return;
+      if (!isLinkItem(item)) return;
       try {
         await invoke('open_url_item', { url: item.payload });
         playChimeCue('tap');
@@ -177,24 +213,27 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
         console.warn('[DropZoneCard] Open URL failed:', err);
       }
     },
-    [item.type, item.payload]
+    [item]
   );
 
   const handleCopyItem = useCallback(
     async (e: React.MouseEvent) => {
       e.stopPropagation();
       try {
-        if (item.type === 'file' || item.type === 'image') {
+        if (isFileBased) {
           await invoke('copy_files_to_clipboard', { paths: [item.payload] });
+          triggerCopiedFeedback();
         } else {
-          await navigator.clipboard.writeText(item.payload);
+          const ok = await copyTextToClipboard(item.payload);
+          if (ok) {
+            triggerCopiedFeedback();
+          }
         }
-        triggerCopiedFeedback();
       } catch (err) {
         console.warn('[DropZoneCard] Clipboard copy failed:', err);
       }
     },
-    [item.payload, item.type, triggerCopiedFeedback]
+    [item.payload, isFileBased, triggerCopiedFeedback]
   );
 
   const handleQuickPlayAudio = useCallback(
@@ -240,10 +279,13 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     draggedDuringGestureRef.current = false;
-    if (!canDragFile || e.button !== 0) return;
+    if (!canDragOut || e.button !== 0) return;
 
     const target = e.target as HTMLElement;
     if (target.closest('[data-no-drag="true"]')) return;
+
+    // Prevent WebView2 default focus-steal / selection-drag on pointerdown while preserving pointermove & click
+    e.preventDefault();
 
     const startX = e.clientX;
     const startY = e.clientY;
@@ -259,7 +301,7 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
     const onPointerMove = async (moveEvent: PointerEvent) => {
       if (triggered || isDragInFlightRef.current) return;
       const dist = Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY);
-      if (dist < 5) return;
+      if (dist < DRAG_THRESHOLD_PX) return;
 
       triggered = true;
       isDragInFlightRef.current = true;
@@ -268,18 +310,23 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
 
       useDropZoneStore.getState().setIsInternalDragging(true);
       try {
-        const result = await nativeDragDropFiles([item.payload]);
+        const payloadToDrag = isLinkItem(item) ? item.payload.trim() : item.payload;
+        const result = isFileBased
+          ? await nativeDragDropFiles([item.payload])
+          : await nativeDragDropText(payloadToDrag);
         if (result.status === 'dropped') {
+          useDropZoneStore.getState().recordDraggedOutItem(item);
           onRemove(item.id);
-          onDragOutFeedback?.('dropped');
+          onDragOutFeedback?.('dropped', item);
           playChimeCue('ding');
         }
       } catch (err) {
-        console.warn('[DropZoneCard] nativeDragDropFiles error:', err);
-        onDragOutFeedback?.('missing');
+        console.warn('[DropZoneCard] native drag-out error:', err);
+        if (isFileBased) {
+          onDragOutFeedback?.('missing', item);
+        }
       } finally {
-        // Lepas flag isInternalDragging hanya SETELAH promise DoDragDrop selesai
-        // agar isExternalDragOver / drop-in tidak bocor di tengah tarikan.
+        // Release isInternalDragging ONLY after DoDragDrop settles
         useDropZoneStore.getState().setIsInternalDragging(false);
         isDragInFlightRef.current = false;
         draggedDuringGestureRef.current = false;
@@ -297,7 +344,7 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
     window.addEventListener('pointercancel', onPointerUp);
   };
 
-  const urlInfo = item.type === 'url' ? parseUrlDisplay(item.payload) : null;
+  const linkInfo = isLinkItem(item) ? getLinkPreviewInfo(item) : null;
 
   return (
     <motion.div
@@ -306,15 +353,17 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ duration: 0.14, ease: 'easeOut' }}
+      draggable={false}
       onPointerDown={handlePointerDown}
       data-tauri-drag-region="false"
+      data-drop-item-type={item.type}
       className={`group relative w-[186px] h-[106px] shrink-0 rounded-xl bg-[#0a0a0a] border transition-colors flex flex-col justify-between p-2 select-none ${
         isHighlighted
           ? 'border-white/40 ring-1 ring-white/20'
           : 'border-white/[0.06] hover:border-white/[0.16]'
-      } ${canDragFile ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
+      } ${canDragOut ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
     >
-      {/* Top Preview Body: Text Snippet vs Link vs File/Image */}
+      {/* Top Preview Body: Text Snippet vs Link Card vs File/Image */}
       {item.type === 'text' ? (
         <div
           onClick={(e) => {
@@ -325,8 +374,13 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
           className="flex flex-col gap-1 min-w-0 cursor-pointer"
         >
           <div className="flex items-center justify-between gap-1.5 min-w-0">
-            <div className="w-5 h-5 rounded-md bg-[#141417] border border-white/[0.06] flex items-center justify-center shrink-0">
-              <AlignLeft className={`w-3 h-3 ${isMonochrome ? 'text-white/80' : 'text-sky-400/85'}`} />
+            <div className="flex items-center gap-1 min-w-0">
+              <div className="w-5 h-5 rounded-md bg-[#141417] border border-white/[0.06] flex items-center justify-center shrink-0">
+                {renderCategoryIcon(item, isMonochrome)}
+              </div>
+              <span className="text-[8.5px] font-mono font-semibold tracking-wider text-white/60 uppercase">
+                TXT
+              </span>
             </div>
             <span className="text-[9px] font-mono text-white/45 truncate tabular-nums">
               {getItemMetaLabel(item)}
@@ -335,6 +389,37 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
           <p className="text-[10.5px] leading-[1.32] text-white/90 line-clamp-2 break-words">
             {item.payload}
           </p>
+        </div>
+      ) : linkInfo ? (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            void handleOpenItem();
+          }}
+          title={item.payload}
+          className="flex flex-col gap-1 min-w-0 cursor-pointer"
+        >
+          <div className="flex items-center justify-between gap-1.5 min-w-0">
+            <div className="flex items-center gap-1 min-w-0">
+              <div className="w-5 h-5 rounded-md bg-[#141417] border border-white/[0.06] flex items-center justify-center shrink-0">
+                {renderCategoryIcon(item, isMonochrome)}
+              </div>
+              <span className="text-[8.5px] font-mono font-semibold tracking-wider text-white/60 uppercase">
+                LINK
+              </span>
+            </div>
+            <span className="text-[9px] font-mono text-white/45 truncate tabular-nums">
+              {item.domain || linkInfo.badge}
+            </span>
+          </div>
+          <div className="min-w-0 flex flex-col gap-0.5">
+            <span className="text-[11px] font-medium text-white/92 truncate leading-tight">
+              {linkInfo.title}
+            </span>
+            <span className="text-[9px] font-mono text-white/45 truncate leading-tight">
+              {linkInfo.subtitle}
+            </span>
+          </div>
         </div>
       ) : (
         <div
@@ -361,10 +446,10 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
 
           <div className="min-w-0 flex-1 flex flex-col gap-0.5">
             <span className="text-[11px] font-medium text-white/90 truncate leading-tight">
-              {urlInfo ? urlInfo.host : item.title}
+              {item.title}
             </span>
             <span className="text-[9.5px] font-mono text-white/45 truncate tabular-nums leading-tight">
-              {urlInfo ? urlInfo.subUrl : getItemMetaLabel(item)}
+              {getItemMetaLabel(item)}
             </span>
           </div>
         </div>
@@ -375,10 +460,21 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
         data-no-drag="true"
         className="flex items-center justify-between gap-1 pt-1.5 border-t border-white/[0.05]"
       >
-        <div className="flex items-center gap-1 min-w-0 text-white/30">
-          {canDragFile && <GripVertical className="w-3 h-3 shrink-0" />}
-          <span className="text-[9px] tracking-tight truncate">
-            {canDragFile ? 'Drag out' : item.type === 'url' ? 'Link' : 'Snippet'}
+        <div className="flex items-center gap-1 min-w-0 text-white/35">
+          {canDragOut && <GripVertical className="w-3 h-3 shrink-0" />}
+          <span
+            data-copy-status={copied ? 'copied' : 'idle'}
+            className={`text-[9px] tracking-tight truncate ${
+              copied ? 'text-white/90 font-medium' : ''
+            }`}
+          >
+            {copied
+              ? 'Tersalin'
+              : isFileBased
+              ? 'Drag out'
+              : isLinkItem(item)
+              ? 'Drag link'
+              : 'Drag text'}
           </span>
         </div>
 
@@ -395,7 +491,7 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
             </button>
           )}
 
-          {item.type === 'url' && (
+          {isLinkItem(item) && (
             <button
               type="button"
               data-no-drag="true"
@@ -412,11 +508,11 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
             data-no-drag="true"
             onClick={handleCopyItem}
             title={
-              canDragFile
+              isFileBased
                 ? 'Salin berkas ke Clipboard Windows'
-                : item.type === 'url'
+                : isLinkItem(item)
                 ? 'Salin tautan'
-                : 'Salin snippet teks'
+                : 'Salin catatan teks'
             }
             style={
               copied
@@ -456,7 +552,7 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
 };
 
 export const DropZoneView: React.FC<DropZoneViewProps> = ({
-  isLockedExpanded = true,
+  isLockedExpanded: _isLockedExpanded = true,
   onOpenMusic,
 }) => {
   const {
@@ -464,14 +560,18 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
     isDragging,
     isInternalDragging,
     lastActionFeedback,
+    lastDraggedOutItem,
+    securityNotice,
     clearActionFeedback,
+    setSecurityNotice,
+    undoLastDraggedOut,
     addItem,
     addDroppedPaths,
     syncAssetScopes,
     removeItem,
     clearAll,
   } = useDropZoneStore();
-  const { settings } = useSettingsStore();
+  const { settings, palette: themePalette } = useSettingsStore();
   const isMonochrome = settings.theme === 'monochrome';
 
   const [isPicking, setIsPicking] = useState(false);
@@ -496,25 +596,9 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
     localHintTimerRef.current = setTimeout(() => setLocalHint(null), 1600);
   }, []);
 
-  // Auto-focus container & pull WebView foreground keyboard focus only when Mode 6 is pinned/open (not hover peek)
   useEffect(() => {
     void syncAssetScopes();
   }, [syncAssetScopes]);
-
-  useEffect(() => {
-    if (!isLockedExpanded) return;
-
-    const rafId = requestAnimationFrame(() => {
-      if (!useDropZoneStore.getState().isDragging) {
-        void focusIslandWindow();
-      }
-      containerRef.current?.focus({ preventScroll: true });
-    });
-
-    return () => {
-      cancelAnimationFrame(rafId);
-    };
-  }, [isLockedExpanded]);
 
   useEffect(() => {
     return () => {
@@ -536,23 +620,37 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
     return () => clearTimeout(timer);
   }, [lastActionFeedback, clearActionFeedback]);
 
+  // Explicit On-Demand Clipboard Read (ONLY triggered on Ctrl+V / Paste click; zero Ctrl+C background snooping)
   const handlePasteFromClipboard = useCallback(
     async (options?: { silentIfEmpty?: boolean }) => {
       if (isPasting) return;
       setIsPasting(true);
       try {
-        let clipboardText = '';
+        // 1. Check CF_HDROP files first if user explicitly copied Explorer files
+        if ('__TAURI_INTERNALS__' in window) {
+          try {
+            const winFiles = await invoke<string[]>('read_clipboard_files');
+            if (Array.isArray(winFiles) && winFiles.length > 0) {
+              await addDroppedPaths(winFiles);
+              scrollShelfToFront();
+              playChimeCue('ding');
+              return;
+            }
+          } catch {
+            // Fallback cleanly to text
+          }
+        }
 
-        // 1. Standard Web Clipboard API (graceful fallback if WebView2 denies/prompts/empty)
+        // 2. Web Clipboard API or Win32 CF_UNICODETEXT fallback
+        let clipboardText = '';
         try {
           if (navigator.clipboard?.readText) {
             clipboardText = await navigator.clipboard.readText();
           }
         } catch {
-          // Permission denied or unfocused -> fallback cleanly to Win32 CF_UNICODETEXT
+          // Fallback cleanly to Win32 CF_UNICODETEXT
         }
 
-        // 2. Fallback anti-gagal ke backend Win32 CF_UNICODETEXT
         if ((!clipboardText || !clipboardText.trim()) && '__TAURI_INTERNALS__' in window) {
           try {
             const winText = await invoke<string | null>('read_clipboard_text');
@@ -565,25 +663,14 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
         }
 
         if (clipboardText && clipboardText.trim()) {
-          await addItem(clipboardText);
-          scrollShelfToFront();
-          playChimeCue('ding');
-          return;
-        }
-
-        // 3. Fallback ke CF_HDROP jika pengguna baru Ctrl+C file di Explorer
-        if ('__TAURI_INTERNALS__' in window) {
-          try {
-            const winFiles = await invoke<string[]>('read_clipboard_files');
-            if (Array.isArray(winFiles) && winFiles.length > 0) {
-              await addDroppedPaths(winFiles);
-              scrollShelfToFront();
-              playChimeCue('ding');
-              return;
-            }
-          } catch {
-            // Ignore cleanly
+          const added = await addItem(clipboardText);
+          if (added) {
+            scrollShelfToFront();
+            playChimeCue('ding');
+          } else {
+            playChimeCue('tap');
           }
+          return;
         }
 
         if (!options?.silentIfEmpty) {
@@ -596,7 +683,7 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
     [isPasting, addItem, addDroppedPaths, scrollShelfToFront, flashLocalHint]
   );
 
-  // Unified DOM paste + Ctrl+V fallback listeners (text, links, Win+Shift+S images & Explorer files)
+  // Explicit DOM paste & Ctrl+V listeners while Drop Zone is mounted (NO background Ctrl+C polling)
   useEffect(() => {
     const ingestClipboardDataTransfer = async (data: DataTransfer): Promise<boolean> => {
       const collectedPaths: string[] = [];
@@ -648,11 +735,15 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
         }
       }
 
-      const text = data.getData('text/plain') || data.getData('text/uri-list');
-      if (text && text.trim()) {
-        await addItem(text);
-        scrollShelfToFront();
-        playChimeCue('ding');
+      const uriOrText = data.getData('text/uri-list') || data.getData('text/plain');
+      if (uriOrText && uriOrText.trim()) {
+        const added = await addItem(uriOrText);
+        if (added) {
+          scrollShelfToFront();
+          playChimeCue('ding');
+        } else {
+          playChimeCue('tap');
+        }
         return true;
       }
 
@@ -738,8 +829,15 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
     <div
       ref={containerRef}
       tabIndex={-1}
-      autoFocus
-      onMouseDown={() => {
+      onMouseDown={(e) => {
+        const target = e.target as HTMLElement | null;
+        if (
+          useDropZoneStore.getState().isInternalDragging ||
+          target?.closest('[data-drop-item-type]') ||
+          target?.closest('button')
+        ) {
+          return;
+        }
         containerRef.current?.focus({ preventScroll: true });
       }}
       data-tauri-drag-region="false"
@@ -754,8 +852,59 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
               : `${items.length} ${items.length === 1 ? 'item parked' : 'items parked'}`}
           </span>
 
-          <AnimatePresence mode="wait">
-            {activeFeedbackBadge ? (
+          <AnimatePresence initial={false}>
+            {securityNotice ? (
+              <motion.button
+                key={securityNotice}
+                type="button"
+                initial={{ opacity: 0, x: -4 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -4 }}
+                transition={{ duration: 0.14 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSecurityNotice(null);
+                }}
+                data-security-notice="true"
+                style={
+                  isMonochrome
+                    ? undefined
+                    : {
+                        borderColor: `${themePalette.danger}66`,
+                        backgroundColor: `${themePalette.danger}1F`,
+                        color: themePalette.danger,
+                      }
+                }
+                className={`inline-flex items-center gap-1 px-2 py-[1px] rounded-full border text-[9.5px] font-medium truncate cursor-pointer ${
+                  isMonochrome ? 'bg-white/[0.12] border-white/30 text-white' : ''
+                }`}
+              >
+                <ShieldAlert className="w-2.5 h-2.5 shrink-0" />
+                <span className="truncate">{securityNotice}</span>
+              </motion.button>
+            ) : lastDraggedOutItem ? (
+              <motion.button
+                key={`undo-${lastDraggedOutItem.id}`}
+                type="button"
+                data-dropzone-undo="true"
+                initial={{ opacity: 0, x: -4 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -4 }}
+                transition={{ duration: 0.14 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLocalHint(null);
+                  undoLastDraggedOut();
+                  scrollShelfToFront();
+                  playChimeCue('tap');
+                }}
+                title="Pulihkan kartu terakhir yang ditarik keluar (4 detik)"
+                className="inline-flex items-center gap-1 px-2 py-[1px] rounded-full bg-white/[0.14] hover:bg-white/[0.22] border border-white/25 text-[9.5px] font-medium text-white truncate transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-2.5 h-2.5 shrink-0" />
+                <span className="truncate">Dihapus · Urungkan</span>
+              </motion.button>
+            ) : activeFeedbackBadge ? (
               <motion.span
                 key={activeFeedbackBadge}
                 initial={{ opacity: 0, x: -4 }}
@@ -769,7 +918,7 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
             ) : (
               items.length > 0 && (
                 <span className="text-[9.5px] text-white/35 truncate">
-                  · Ctrl+V teks/link atau drag kartu keluar
+                  · Ephemeral · Ctrl+V or drag card out
                 </span>
               )
             )}
@@ -779,6 +928,7 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             type="button"
+            data-dropzone-paste="true"
             disabled={isPasting}
             onClick={(e) => {
               e.stopPropagation();
@@ -788,7 +938,7 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
             className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.10] text-[10.5px] font-medium text-white transition-colors cursor-pointer disabled:opacity-50"
           >
             <ClipboardPaste className="w-3 h-3" />
-            <span>+ Paste</span>
+            <span>Paste</span>
           </button>
 
           <button
@@ -813,7 +963,7 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
               className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.04] hover:bg-white/[0.10] border border-white/[0.08] text-[10.5px] font-medium text-white/60 hover:text-white transition-colors cursor-pointer"
             >
               <Trash2 className="w-3 h-3" />
-              <span>Clear All</span>
+              <span>Clear</span>
             </button>
           )}
         </div>
@@ -843,7 +993,7 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
                 }`}
               />
               <span className="text-[11.5px] font-medium text-white/85">
-                Drop files here or press Ctrl+V to park links &amp; snippets
+                Drop files, links, or text · Ctrl+V to paste
               </span>
             </div>
             <div className="flex items-center gap-1.5">
@@ -857,7 +1007,7 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
                 className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.08] hover:bg-white/[0.16] border border-white/[0.10] text-[10px] font-medium text-white/90 transition-colors cursor-pointer disabled:opacity-50"
               >
                 <ClipboardPaste className="w-3 h-3" />
-                <span>+ Paste Clipboard</span>
+                <span>Paste (Ctrl+V)</span>
               </button>
               <button
                 type="button"
@@ -866,7 +1016,7 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
                 className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.05] hover:bg-white/[0.14] border border-white/[0.08] text-[10px] font-medium text-white/75 hover:text-white transition-colors cursor-pointer disabled:opacity-50"
               >
                 <Plus className="w-3 h-3" />
-                <span>+ Add Files</span>
+                <span>+ Files</span>
               </button>
             </div>
           </div>
@@ -884,12 +1034,19 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
                   isHighlighted={lastActionFeedback?.id === item.id}
                   onRemove={removeItem}
                   onOpenMusic={onOpenMusic}
-                  onDragOutFeedback={(status) => {
-                    flashLocalHint(
-                      status === 'dropped'
-                        ? 'File dikirim keluar · dihapus dari rak'
-                        : 'Berkas tidak ditemukan di disk'
-                    );
+                  onCopiedFeedback={() => flashLocalHint('Tersalin')}
+                  onDragOutFeedback={(status, draggedItem) => {
+                    if (status === 'dropped') {
+                      const label =
+                        draggedItem.type === 'link'
+                          ? 'Link'
+                          : draggedItem.type === 'text'
+                          ? 'Teks'
+                          : 'File';
+                      flashLocalHint(`${label} dikirim keluar · dihapus dari rak`);
+                    } else {
+                      flashLocalHint('Berkas tidak ditemukan di disk');
+                    }
                   }}
                 />
               ))}
@@ -914,7 +1071,7 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
             >
               <Inbox className={`w-4 h-4 ${isMonochrome ? 'text-white' : 'text-indigo-400'}`} />
               <span className="text-[11.5px] font-medium text-white/90">
-                Lepaskan berkas untuk ditambahkan ke Drop Zone
+                Lepaskan file, tautan, atau teks ke Drop Zone
               </span>
             </motion.div>
           )}

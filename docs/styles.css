@@ -2059,6 +2059,12 @@ textarea {
   gap: 8px;
 }
 
+.casa-dz-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .casa-dz-title {
   font-size: 11px;
   font-weight: 500;
@@ -2075,6 +2081,12 @@ textarea {
   font-size: 10px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.casa-dz-pill-btn.compact {
+  height: 20px;
+  padding: 0 7px;
+  font-size: 9px;
 }
 
 .casa-dz-pill-btn.primary {
@@ -2145,6 +2157,24 @@ textarea {
   font-size: 9px;
   color: #e4e4e7;
   flex-shrink: 0;
+}
+
+.casa-drop-icon-tile.is-link {
+  border-color: rgba(255, 255, 255, 0.24);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.casa-drop-icon-tile.is-text {
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #d4d4d8;
+}
+
+.casa-drop-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .casa-drop-name {

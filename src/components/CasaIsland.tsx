@@ -758,6 +758,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     [syncCompositeHitboxes, buildHitboxRects]
   );
 
+  const applyWindowSizeRef = useRef(applyWindowSize);
+  applyWindowSizeRef.current = applyWindowSize;
+
   // Register stress testing hook
   useEffect(() => {
     registerIslandTransitionHook((targetState, targetMode, secondaryBubble) => {
@@ -1858,6 +1861,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   ]);
 
   const handleMouseLeave = useCallback(() => {
+    if (useDropZoneStore.getState().isInternalDragging) {
+      return;
+    }
     isCursorInsideRef.current = false;
     clearPostTransitionRecheckTimer();
 
@@ -2365,7 +2371,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
       listen('casa://outside-click', () => {
         if (!isMounted) return;
-        if (isTransitioningRef.current) return;
+        if (isTransitioningRef.current || useDropZoneStore.getState().isInternalDragging) return;
         // Pertahankan Mode 6 terkunci ('expanded') tetap terbuka saat pengguna mengklik aplikasi lain;
         // tutup hanya pratinjau hover sementara ('idle_peek').
         if (islandStateRef.current === 'idle_peek') {
@@ -2561,6 +2567,179 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     [handleNavigate, isExpandedView]
   );
 
+  const externalDragDepthRef = useRef<number>(0);
+
+  const expandToDropZoneSurface = useCallback((markDragging: boolean) => {
+    if (markDragging) {
+      useDropZoneStore.getState().setIsDragging(true);
+      isDraggingFileRef.current = true;
+    } else {
+      isDraggingFileRef.current = false;
+      useDropZoneStore.getState().setIsDragging(false);
+    }
+
+    if (tuckedEnterTimerRef.current) {
+      clearTimeout(tuckedEnterTimerRef.current);
+      tuckedEnterTimerRef.current = null;
+    }
+    if (intensiveHoverTimerRef.current) {
+      clearTimeout(intensiveHoverTimerRef.current);
+      intensiveHoverTimerRef.current = null;
+    }
+    if (leaveTimeoutRef.current) {
+      clearTimeout(leaveTimeoutRef.current);
+      leaveTimeoutRef.current = null;
+    }
+    if (hoverLeaveTimerRef.current) {
+      clearTimeout(hoverLeaveTimerRef.current);
+      hoverLeaveTimerRef.current = null;
+    }
+    if (collapseTimerRef.current) {
+      clearTimeout(collapseTimerRef.current);
+      collapseTimerRef.current = null;
+    }
+    if (restingSleepTimerRef.current) {
+      clearTimeout(restingSleepTimerRef.current);
+      restingSleepTimerRef.current = null;
+    }
+    clearAutoTuckIdleTimer();
+    if (wakeUpTimerRef.current) {
+      clearTimeout(wakeUpTimerRef.current);
+      wakeUpTimerRef.current = null;
+    }
+
+    hoverSuppressedRef.current = false;
+    isCollapsingRef.current = false;
+    setIsPeeking(false);
+    isPeekingRef.current = false;
+    setIsRestingSleep(false);
+    isRestingSleepRef.current = false;
+
+    setIsSearchPodOpen(false);
+    setIsQueuePodOpen(false);
+    setIsWifiPodOpen(false);
+    setIsBtPodOpen(false);
+
+    if (modeRef.current !== 'drop_zone' || islandStateRef.current !== 'expanded') {
+      islandStateRef.current = 'expanded';
+      setIslandState('expanded');
+      if (modeRef.current !== 'drop_zone') {
+        previousModeBeforeDragRef.current = modeRef.current;
+      }
+      const layout = resolveEffectiveIslandLayout({
+        islandState: 'expanded',
+        expandedMode: 'drop_zone',
+        measuredPillWidth: measuredPillWidthRef.current,
+        isFloatingMode: isFloatingModeRef.current,
+        hasHudAlert: hasHudAlertRef.current,
+        isAlarmRinging: isAlarmRingingRef.current,
+        isPrayerAlertActive: isPrayerAlertVisibleRef.current,
+        isIbadahEnabled: isIbadahEnabledRef.current,
+        isRestingSleep: false,
+        isLyricsOpen: false,
+        isFocusHoverPeek: false,
+      });
+      applyWindowSizeRef.current(layout.width, layout.height, showDevTriggerRef.current, false, false);
+      onChangeModeRef.current?.('drop_zone');
+      if (markDragging) {
+        playChimeCue('whisper');
+      }
+    }
+  }, [clearAutoTuckIdleTimer]);
+
+  const activateDropZoneForExternalDrag = useCallback(() => {
+    expandToDropZoneSurface(true);
+  }, [expandToDropZoneSurface]);
+
+  // Capsule-Wide HTML5 Smart Drag-In Listener (Files, Links / text/uri-list, Plain Text / HTML snippets)
+  // Works seamlessly across tucked, idle, resting, peek, and expanded states when dragDropEnabled=false.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const hasSupportedDragPayload = (dt: DataTransfer | null): boolean => {
+      if (!dt) return false;
+      if (dt.files && dt.files.length > 0) return true;
+      if (dt.items && dt.items.length > 0) return true;
+      const types = Array.from(dt.types || []);
+      return types.some(
+        (t) => t === 'Files' || t === 'text/uri-list' || t === 'text/plain' || t === 'text/html'
+      );
+    };
+
+    const handleWindowDragEnter = (e: DragEvent) => {
+      if (useDropZoneStore.getState().isInternalDragging) return;
+      if (!hasSupportedDragPayload(e.dataTransfer)) return;
+      e.preventDefault();
+      externalDragDepthRef.current += 1;
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+      }
+      activateDropZoneForExternalDrag();
+    };
+
+    const handleWindowDragOver = (e: DragEvent) => {
+      if (useDropZoneStore.getState().isInternalDragging) return;
+      if (!hasSupportedDragPayload(e.dataTransfer)) return;
+      e.preventDefault();
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+      }
+      activateDropZoneForExternalDrag();
+    };
+
+    const handleWindowDragLeave = (e: DragEvent) => {
+      if (useDropZoneStore.getState().isInternalDragging) return;
+      externalDragDepthRef.current = Math.max(0, externalDragDepthRef.current - 1);
+      if (e.relatedTarget === null || externalDragDepthRef.current <= 0) {
+        externalDragDepthRef.current = 0;
+        isDraggingFileRef.current = false;
+        useDropZoneStore.getState().setIsDragging(false);
+      }
+    };
+
+    const handleWindowDrop = async (e: DragEvent) => {
+      if (useDropZoneStore.getState().isInternalDragging) return;
+      if (e.defaultPrevented) return;
+      if (!hasSupportedDragPayload(e.dataTransfer)) return;
+
+      e.preventDefault();
+      externalDragDepthRef.current = 0;
+      expandToDropZoneSurface(false);
+
+      const firstFile = e.dataTransfer?.files?.[0];
+      if (firstFile?.name) {
+        setStagedDroppedFile(firstFile.name);
+      }
+
+      const res = await useDropZoneStore.getState().addDroppedDataTransfer(e.dataTransfer);
+      if (res.added > 0) {
+        playChimeCue('ding');
+      } else if (res.blocked) {
+        playChimeCue('tap');
+      }
+    };
+
+    const handleWindowDragEnd = () => {
+      externalDragDepthRef.current = 0;
+      isDraggingFileRef.current = false;
+      useDropZoneStore.getState().setIsDragging(false);
+    };
+
+    window.addEventListener('dragenter', handleWindowDragEnter);
+    window.addEventListener('dragover', handleWindowDragOver);
+    window.addEventListener('dragleave', handleWindowDragLeave);
+    window.addEventListener('drop', handleWindowDrop);
+    window.addEventListener('dragend', handleWindowDragEnd);
+
+    return () => {
+      window.removeEventListener('dragenter', handleWindowDragEnter);
+      window.removeEventListener('dragover', handleWindowDragOver);
+      window.removeEventListener('dragleave', handleWindowDragLeave);
+      window.removeEventListener('drop', handleWindowDrop);
+      window.removeEventListener('dragend', handleWindowDragEnd);
+    };
+  }, [activateDropZoneForExternalDrag, expandToDropZoneSurface]);
+
   // Native Tauri Window File-Drop Listener for automatic DropZone morphing & persistent drop handling
   useEffect(() => {
     if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) {
@@ -2579,81 +2758,18 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           const payload = event.payload;
 
           if (payload.type === 'enter' || payload.type === 'over') {
-            useDropZoneStore.getState().setIsDragging(true);
-            isDraggingFileRef.current = true;
-
-            if (tuckedEnterTimerRef.current) {
-              clearTimeout(tuckedEnterTimerRef.current);
-              tuckedEnterTimerRef.current = null;
-            }
-            if (intensiveHoverTimerRef.current) {
-              clearTimeout(intensiveHoverTimerRef.current);
-              intensiveHoverTimerRef.current = null;
-            }
-            if (leaveTimeoutRef.current) {
-              clearTimeout(leaveTimeoutRef.current);
-              leaveTimeoutRef.current = null;
-            }
-            if (hoverLeaveTimerRef.current) {
-              clearTimeout(hoverLeaveTimerRef.current);
-              hoverLeaveTimerRef.current = null;
-            }
-            if (collapseTimerRef.current) {
-              clearTimeout(collapseTimerRef.current);
-              collapseTimerRef.current = null;
-            }
-            if (restingSleepTimerRef.current) {
-              clearTimeout(restingSleepTimerRef.current);
-              restingSleepTimerRef.current = null;
-            }
-            clearAutoTuckIdleTimer();
-            if (wakeUpTimerRef.current) {
-              clearTimeout(wakeUpTimerRef.current);
-              wakeUpTimerRef.current = null;
-            }
-
-            hoverSuppressedRef.current = false;
-            isCollapsingRef.current = false;
-            setIsPeeking(false);
-            isPeekingRef.current = false;
-            setIsRestingSleep(false);
-            isRestingSleepRef.current = false;
-
-            setIsSearchPodOpen(false);
-            setIsQueuePodOpen(false);
-            setIsWifiPodOpen(false);
-            setIsBtPodOpen(false);
-
-            if (modeRef.current !== 'drop_zone' || islandStateRef.current !== 'expanded') {
-              islandStateRef.current = 'expanded';
-              setIslandState('expanded');
-              if (modeRef.current !== 'drop_zone') {
-                previousModeBeforeDragRef.current = modeRef.current;
-              }
-              const { width: targetW, height: targetH } = getIslandDimensions('expanded', 'drop_zone');
-              applyWindowSize(targetW, targetH, showDevTriggerRef.current, false, false);
-              onChangeModeRef.current?.('drop_zone');
-              playChimeCue('whisper');
-            }
+            activateDropZoneForExternalDrag();
           } else if (payload.type === 'leave') {
             isDraggingFileRef.current = false;
             useDropZoneStore.getState().setIsDragging(false);
           } else if (payload.type === 'drop') {
-            isDraggingFileRef.current = false;
-            useDropZoneStore.getState().setIsDragging(false);
-            setIsSearchPodOpen(false);
-            setIsQueuePodOpen(false);
-            setIsWifiPodOpen(false);
-            setIsBtPodOpen(false);
+            expandToDropZoneSurface(false);
             const paths = payload.paths;
             if (paths && paths.length > 0) {
               const lastFile = paths[paths.length - 1];
               const fileName = lastFile.replace(/^.*[\\/]/, '') || lastFile;
               setStagedDroppedFile(fileName);
               await useDropZoneStore.getState().addDroppedPaths(paths);
-              islandStateRef.current = 'expanded';
-              setIslandState('expanded');
-              onChangeModeRef.current?.('drop_zone');
               playChimeCue('ding');
             }
           }
@@ -2674,7 +2790,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         clearTimeout(dropTimeoutRef.current);
       }
     };
-  }, []);
+  }, [activateDropZoneForExternalDrag, expandToDropZoneSurface]);
 
   // Clean up all pending timers on unmount
   useEffect(() => {
@@ -3005,44 +3121,6 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.12, ease: 'easeOut' }}
-                    onDragOver={(e) => {
-                      if (useDropZoneStore.getState().isInternalDragging) return;
-                      e.preventDefault();
-                      e.dataTransfer.dropEffect = 'copy';
-                      useDropZoneStore.getState().setIsDragging(true);
-                    }}
-                    onDragLeave={() => {
-                      if (useDropZoneStore.getState().isInternalDragging) return;
-                      useDropZoneStore.getState().setIsDragging(false);
-                    }}
-                    onDrop={async (e) => {
-                      if (useDropZoneStore.getState().isInternalDragging) return;
-                      e.preventDefault();
-                      useDropZoneStore.getState().setIsDragging(false);
-                      setIsSearchPodOpen(false);
-                      setIsQueuePodOpen(false);
-                      setIsWifiPodOpen(false);
-                      setIsBtPodOpen(false);
-                      onChangeModeRef.current?.('drop_zone');
-                      const text = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text/uri-list');
-                      if (text && text.trim()) {
-                        await useDropZoneStore.getState().addItem(text.trim());
-                        playChimeCue('ding');
-                        return;
-                      }
-                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                        const droppedPaths: string[] = [];
-                        for (let i = 0; i < e.dataTransfer.files.length; i++) {
-                          const file = e.dataTransfer.files[i];
-                          const path = (file as any).path || file.name;
-                          if (path) droppedPaths.push(path);
-                        }
-                        if (droppedPaths.length > 0) {
-                          await useDropZoneStore.getState().addDroppedPaths(droppedPaths);
-                          playChimeCue('ding');
-                        }
-                      }
-                    }}
                     onClickCapture={(e) => {
                       const target = e.target as HTMLElement;
                       if (

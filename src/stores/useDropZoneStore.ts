@@ -1,7 +1,13 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import { cleanupEphemeralDropZone, stageDroppedFile } from '../utils/tauriBridge';
 
-export type DropItemType = 'file' | 'image' | 'text' | 'url';
+export type DropItemType = 'file' | 'image' | 'text' | 'link';
+
+export const MAX_DROP_TEXT_LENGTH = 50_000;
+export const MAX_STAGED_FILE_BYTES = 25 * 1024 * 1024;
+const FRESH_SEED_WINDOW_MS = 15_000;
+const DRAG_OUT_UNDO_MS = 4_000;
 
 export const IMAGE_EXTENSIONS = new Set([
   'png',
@@ -33,6 +39,11 @@ export interface DropItem {
   type: DropItemType;
   title: string;
   payload: string;
+  domain?: string;
+  displayUrl?: string;
+  charCount?: number;
+  lineCount?: number;
+  isStagedTemp?: boolean;
   sizeBytes?: number;
   extension?: string;
   isDir?: boolean;
@@ -43,6 +54,144 @@ interface RustFileMetadata {
   exists: boolean;
   size_bytes: number;
   is_dir: boolean;
+}
+
+const BLOCKED_URI_SCHEME_RE =
+  /^(?:javascript|data|vbscript|blob|file|ms-msdt|search-ms|ms-officecmd|cmd|powershell)\s*:/i;
+
+const CONTROL_AND_BIDI_RE =
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+
+export function sanitizeDropText(raw: string): string {
+  if (!raw) return '';
+  let text = raw
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<\/?[a-zA-Z][a-zA-Z0-9:-]*(?:\s+[^<>]*)?\/?>/g, ' ');
+
+  text = text
+    .replace(CONTROL_AND_BIDI_RE, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .trim();
+
+  if (text.length > MAX_DROP_TEXT_LENGTH) {
+    text = text.slice(0, MAX_DROP_TEXT_LENGTH);
+  }
+  return text;
+}
+
+export function isBlockedUriScheme(raw: string): boolean {
+  if (!raw) return false;
+  const cleaned = raw.replace(CONTROL_AND_BIDI_RE, '').trim().replace(/^<|>$/g, '');
+  return BLOCKED_URI_SCHEME_RE.test(cleaned);
+}
+
+export function extractUriListCandidate(uriList: string): string | null {
+  if (!uriList) return null;
+  const lines = uriList.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    return trimmed;
+  }
+  return null;
+}
+
+export function extractAnchorFromHtml(html: string): { href: string; label?: string } | null {
+  if (!html) return null;
+  const match = html.match(
+    /<a\b[^>]*\bhref\s*=\s*(?:"([^"]+)"|'([^']+)')[^>]*>([\s\S]*?)<\/a>/i
+  );
+  if (!match) return null;
+  const href = (match[1] || match[2] || '').trim();
+  if (!href) return null;
+  const label = sanitizeDropText(match[3] || '');
+  return label ? { href, label } : { href };
+}
+
+export function parseSafeHttpUrl(
+  raw: string,
+  titleHint?: string
+): { href: string; domain: string; displayUrl: string; title: string } | null {
+  if (!raw) return null;
+  let candidate = raw.replace(CONTROL_AND_BIDI_RE, '').trim();
+  if (candidate.startsWith('<') && candidate.endsWith('>') && candidate.length > 2) {
+    candidate = candidate.slice(1, -1).trim();
+  }
+  if (!candidate || /[\s\r\n]/.test(candidate)) {
+    return null;
+  }
+  if (isBlockedUriScheme(candidate)) {
+    return null;
+  }
+
+  let normalizedCandidate = candidate;
+  const hasExplicitHttpScheme = /^https?:\/\//i.test(candidate);
+  if (!hasExplicitHttpScheme) {
+    if (/^www\.[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+(?:[/?#][^\s]*)?$/i.test(candidate)) {
+      normalizedCandidate = `https://${candidate}`;
+    } else {
+      return null;
+    }
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(normalizedCandidate);
+  } catch {
+    return null;
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return null;
+  }
+
+  const hostLower = parsed.hostname.toLowerCase();
+  if (!hostLower || (!hostLower.includes('.') && hostLower !== 'localhost')) {
+    return null;
+  }
+
+  const domain = hostLower.replace(/^www\./i, '');
+  const trimmedPath =
+    parsed.pathname !== '/' || parsed.search || parsed.hash
+      ? `${parsed.pathname === '/' ? '' : parsed.pathname}${parsed.search}${parsed.hash}`
+      : '';
+
+  const rawDisplay = `${domain}${trimmedPath}`;
+  const displayUrl = rawDisplay.length > 56 ? `${rawDisplay.slice(0, 55)}…` : rawDisplay;
+
+  let cleanHint = titleHint ? sanitizeDropText(titleHint) : '';
+  if (cleanHint && (cleanHint === candidate || cleanHint === parsed.href)) {
+    cleanHint = '';
+  }
+
+  let derivedTitle = cleanHint;
+  if (!derivedTitle) {
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    const lastSeg = segments[segments.length - 1];
+    if (lastSeg) {
+      try {
+        derivedTitle = sanitizeDropText(decodeURIComponent(lastSeg));
+      } catch {
+        derivedTitle = sanitizeDropText(lastSeg);
+      }
+    }
+    if (!derivedTitle) {
+      derivedTitle = domain;
+    }
+  }
+
+  const href = hasExplicitHttpScheme ? candidate : parsed.href;
+  return {
+    href,
+    domain,
+    displayUrl,
+    title: derivedTitle,
+  };
 }
 
 export function normalizeWindowsPathKey(rawPath: string): string {
@@ -79,96 +228,168 @@ export function formatBytes(bytes: number): string {
   return `${gb.toFixed(2)} GB`;
 }
 
+export interface ParseDropOptions {
+  allowLocalPath?: boolean;
+  titleHint?: string;
+  isStagedTemp?: boolean;
+}
+
 export function parseDropContent(
   raw: string,
-  explicitSize?: number
-): Omit<DropItem, 'id' | 'timestamp'> {
-  const trimmedRaw = raw.trim();
-  const pathCandidate = cleanFilePath(trimmedRaw);
+  explicitSize?: number,
+  options?: ParseDropOptions
+): Omit<DropItem, 'id' | 'timestamp'> | null {
+  if (!raw || isBlockedUriScheme(raw)) {
+    return null;
+  }
 
-  // URL check (preserve exact query/fragment, only trim whitespace)
-  if (/^https?:\/\/[^\s]+$/i.test(trimmedRaw)) {
-    let title = trimmedRaw;
-    try {
-      const parsed = new URL(trimmedRaw);
-      const host = parsed.hostname.replace(/^www\./i, '');
-      const pathAndQuery =
-        parsed.pathname !== '/' || parsed.search
-          ? `${parsed.pathname === '/' ? '' : parsed.pathname}${parsed.search}`
-          : '';
-      title = `${host}${pathAndQuery}`;
-      if (title.length > 48) {
-        title = `${title.slice(0, 46)}…`;
-      }
-    } catch {
-      title = trimmedRaw.slice(0, 48);
+  const safeLink = parseSafeHttpUrl(raw, options?.titleHint);
+  if (safeLink) {
+    return {
+      type: 'link',
+      title: safeLink.title,
+      payload: safeLink.href,
+      domain: safeLink.domain,
+      displayUrl: safeLink.displayUrl,
+      extension: 'LINK',
+    };
+  }
+
+  if (options?.allowLocalPath) {
+    const pathCandidate = cleanFilePath(raw.trim());
+    const looksLikeWindowsPath =
+      /^[a-zA-Z]:[\\/]/.test(pathCandidate) || /^\\\\[^\\]+\\/.test(pathCandidate);
+    const looksLikeUnixPath = /^\/(?!\/)[^\n\r]+$/.test(pathCandidate);
+
+    if (looksLikeWindowsPath || looksLikeUnixPath || pathCandidate.length > 0) {
+      const fileName = pathCandidate.replace(/^.*[\\/]/, '') || pathCandidate;
+      const extMatch = fileName.match(/\.([a-zA-Z0-9]{1,10})$/);
+      const extension = extMatch ? extMatch[1].toLowerCase() : undefined;
+      const isImage = extension ? IMAGE_EXTENSIONS.has(extension) : false;
+
+      return {
+        type: isImage ? 'image' : 'file',
+        title: fileName,
+        payload: pathCandidate,
+        extension,
+        isStagedTemp: options.isStagedTemp,
+        sizeBytes: explicitSize && explicitSize > 0 ? explicitSize : undefined,
+      };
     }
-    return {
-      type: 'url',
-      title,
-      payload: trimmedRaw,
-    };
   }
 
-  // Local path check (Windows drive path, UNC path, or Unix path — uses quote-stripped pathCandidate)
-  const looksLikeWindowsPath =
-    /^[a-zA-Z]:[\\/]/.test(pathCandidate) || /^\\\\[^\\]+\\/.test(pathCandidate);
-  const looksLikeUnixPath = /^\/(?!\/)[^\n\r]+$/.test(pathCandidate);
-
-  if (looksLikeWindowsPath || looksLikeUnixPath) {
-    const fileName = pathCandidate.replace(/^.*[\\/]/, '') || pathCandidate;
-    const extMatch = fileName.match(/\.([a-zA-Z0-9]{1,10})$/);
-    const extension = extMatch ? extMatch[1].toLowerCase() : undefined;
-    const isImage = extension ? IMAGE_EXTENSIONS.has(extension) : false;
-
-    return {
-      type: isImage ? 'image' : 'file',
-      title: fileName,
-      payload: pathCandidate,
-      extension,
-      sizeBytes: explicitSize && explicitSize > 0 ? explicitSize : undefined,
-    };
+  const sanitized = sanitizeDropText(raw);
+  if (!sanitized) {
+    return null;
   }
 
-  // Text snippet fallback (keep quotes & line breaks intact)
-  const firstLine = trimmedRaw.split(/\r?\n/)[0]?.trim() || trimmedRaw;
-  const title = firstLine.length > 48 ? `${firstLine.slice(0, 46)}…` : firstLine || 'Text Note';
+  const lines = sanitized.split('\n');
+  const firstNonEmpty = lines.find((line) => line.trim().length > 0)?.trim() || sanitized;
+  const title = firstNonEmpty.length > 64 ? `${firstNonEmpty.slice(0, 62)}…` : firstNonEmpty;
+
   return {
     type: 'text',
-    title,
-    payload: trimmedRaw,
-    sizeBytes: new Blob([trimmedRaw]).size,
+    title: title || 'Text Note',
+    payload: sanitized,
+    extension: 'TXT',
+    charCount: sanitized.length,
+    lineCount: lines.length,
+    sizeBytes: new Blob([sanitized]).size,
   };
 }
 
 const STORAGE_KEY = 'casa_drop_zone_shelf_items_v1';
 const MAX_STORED_ITEMS = 50;
 
-function loadPersistedItems(): DropItem[] {
+function normalizeHydratedItem(rawItem: unknown): DropItem | null {
+  if (!rawItem || typeof rawItem !== 'object') return null;
+  const rec = rawItem as Record<string, unknown>;
+  if (typeof rec.payload !== 'string' || typeof rec.id !== 'string') return null;
+  const timestamp = typeof rec.timestamp === 'number' ? rec.timestamp : 0;
+  if (!Number.isFinite(timestamp) || Math.abs(Date.now() - timestamp) > FRESH_SEED_WINDOW_MS) {
+    return null;
+  }
+
+  const rawType = rec.type === 'url' ? 'link' : rec.type;
+  if (rawType !== 'file' && rawType !== 'image' && rawType !== 'text' && rawType !== 'link') {
+    return null;
+  }
+
+  if (rawType === 'link') {
+    const parsed = parseSafeHttpUrl(rec.payload);
+    if (!parsed) return null;
+    return {
+      id: rec.id,
+      type: 'link',
+      title: typeof rec.title === 'string' && rec.title.trim() ? rec.title : parsed.title,
+      payload: parsed.href,
+      domain: typeof rec.domain === 'string' ? rec.domain : parsed.domain,
+      displayUrl: typeof rec.displayUrl === 'string' ? rec.displayUrl : parsed.displayUrl,
+      extension: 'LINK',
+      timestamp,
+    };
+  }
+
+  return {
+    id: rec.id,
+    type: rawType,
+    title: typeof rec.title === 'string' ? rec.title : rec.payload,
+    payload: rec.payload,
+    sizeBytes: typeof rec.sizeBytes === 'number' ? rec.sizeBytes : undefined,
+    extension: typeof rec.extension === 'string' ? rec.extension : undefined,
+    isDir: Boolean(rec.isDir),
+    charCount: typeof rec.charCount === 'number' ? rec.charCount : undefined,
+    lineCount: typeof rec.lineCount === 'number' ? rec.lineCount : undefined,
+    timestamp,
+  };
+}
+
+function clearPersistedStorage(): void {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (err) {
-    console.warn('[DropZoneStore] Failed to load persisted items:', err);
-    return [];
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(STORAGE_KEY, '[]');
+    }
+  } catch {
+    // ignore storage errors
   }
 }
 
-function savePersistedItems(items: DropItem[]) {
+function loadInitialItems(): DropItem[] {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items.slice(0, MAX_STORED_ITEMS)));
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return [];
+    }
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      clearPersistedStorage();
+      return [];
+    }
+    const fresh = parsed
+      .map((item) => normalizeHydratedItem(item))
+      .filter((item): item is DropItem => item !== null)
+      .slice(0, MAX_STORED_ITEMS);
+
+    if (fresh.length === 0) {
+      clearPersistedStorage();
+    }
+    return fresh;
   } catch (err) {
-    console.warn('[DropZoneStore] Failed to save persisted items:', err);
+    console.warn('[DropZoneStore] Failed to load ephemeral items:', err);
+    clearPersistedStorage();
+    return [];
   }
 }
 
 async function resolveItemWithMetadata(
   raw: string,
-  explicitSize?: number
-): Promise<DropItem> {
-  const parsed = parseDropContent(raw, explicitSize);
+  explicitSize?: number,
+  options?: ParseDropOptions
+): Promise<DropItem | null> {
+  const parsed = parseDropContent(raw, explicitSize, options);
+  if (!parsed) return null;
+
   let resolvedType = parsed.type;
   let resolvedSize = parsed.sizeBytes;
   let isDir = false;
@@ -207,9 +428,9 @@ function normalizeUrlKey(rawUrl: string): string {
   try {
     const u = new URL(trimmed);
     const pathname = u.pathname === '/' ? '' : u.pathname;
-    return `url:${u.protocol.toLowerCase()}//${u.host.toLowerCase()}${pathname}${u.search}${u.hash}`;
+    return `link:${u.protocol.toLowerCase()}//${u.host.toLowerCase()}${pathname}${u.search}${u.hash}`;
   } catch {
-    return `url:${trimmed}`;
+    return `link:${trimmed}`;
   }
 }
 
@@ -217,10 +438,20 @@ function itemMatchKey(item: Pick<DropItem, 'type' | 'payload'>): string {
   if (item.type === 'file' || item.type === 'image') {
     return `path:${normalizeWindowsPathKey(item.payload)}`;
   }
-  if (item.type === 'url') {
+  if (item.type === 'link') {
     return normalizeUrlKey(item.payload);
   }
   return `text:${item.payload.trim()}`;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const CHUNK_SIZE = 0x4000;
+  const chunks: string[] = [];
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    chunks.push(String.fromCharCode(...bytes.subarray(i, i + CHUNK_SIZE)));
+  }
+  return btoa(chunks.join(''));
 }
 
 export interface DropActionFeedback {
@@ -230,42 +461,145 @@ export interface DropActionFeedback {
   timestamp: number;
 }
 
+export interface DataTransferDropResult {
+  added: number;
+  blocked: boolean;
+}
+
 interface DropZoneStore {
   items: DropItem[];
   isDragging: boolean;
   isInternalDragging: boolean;
   lastActionFeedback: DropActionFeedback | null;
+  lastDraggedOutItem: DropItem | null;
+  securityNotice: string | null;
   setIsDragging: (isDragging: boolean) => void;
   setIsInternalDragging: (isInternal: boolean) => void;
   clearActionFeedback: () => void;
-  addItem: (raw: string, explicitSize?: number) => Promise<DropItem>;
-  addPath: (path: string) => Promise<DropItem>;
-  addDroppedPath: (path: string) => Promise<DropItem>;
-  addDroppedPaths: (paths: string[]) => Promise<DropItem[]>;
+  setSecurityNotice: (msg: string | null) => void;
+  recordDraggedOutItem: (item: DropItem) => void;
+  undoLastDraggedOut: () => DropItem | null;
+  dismissDraggedOutUndo: () => void;
+  addItem: (raw: string, explicitSize?: number, titleHint?: string) => Promise<DropItem | null>;
+  addPath: (path: string) => Promise<DropItem | null>;
+  addDroppedPath: (path: string) => Promise<DropItem | null>;
+  addDroppedPaths: (
+    paths: string[],
+    options?: { stagedPaths?: Set<string> }
+  ) => Promise<DropItem[]>;
+  addDroppedDataTransfer: (dt: DataTransfer | null) => Promise<DataTransferDropResult>;
   syncAssetScopes: () => Promise<void>;
   removeItem: (id: string) => void;
   clearAll: () => void;
+  clearEphemeralSession: () => void;
 }
 
+let securityNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+let dragOutUndoTimer: ReturnType<typeof setTimeout> | null = null;
+
 export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
-  items: loadPersistedItems(),
+  items: loadInitialItems(),
   isDragging: false,
   isInternalDragging: false,
   lastActionFeedback: null,
+  lastDraggedOutItem: null,
+  securityNotice: null,
 
   setIsDragging: (isDragging: boolean) => set({ isDragging }),
   setIsInternalDragging: (isInternalDragging: boolean) => set({ isInternalDragging }),
   clearActionFeedback: () => set({ lastActionFeedback: null }),
 
-  addItem: async (raw: string, explicitSize?: number) => {
+  setSecurityNotice: (msg: string | null) => {
+    if (securityNoticeTimer) {
+      clearTimeout(securityNoticeTimer);
+      securityNoticeTimer = null;
+    }
+    set(msg ? { securityNotice: msg, lastActionFeedback: null } : { securityNotice: null });
+    if (msg) {
+      securityNoticeTimer = setTimeout(() => {
+        securityNoticeTimer = null;
+        set({ securityNotice: null });
+      }, 4200);
+    }
+  },
+
+  recordDraggedOutItem: (item: DropItem) => {
+    if (dragOutUndoTimer) {
+      clearTimeout(dragOutUndoTimer);
+      dragOutUndoTimer = null;
+    }
+    set({ lastDraggedOutItem: item });
+    dragOutUndoTimer = setTimeout(() => {
+      dragOutUndoTimer = null;
+      set({ lastDraggedOutItem: null });
+    }, DRAG_OUT_UNDO_MS);
+  },
+
+  undoLastDraggedOut: () => {
+    if (dragOutUndoTimer) {
+      clearTimeout(dragOutUndoTimer);
+      dragOutUndoTimer = null;
+    }
+    const candidate = get().lastDraggedOutItem;
+    if (!candidate) {
+      return null;
+    }
+    const restored: DropItem = {
+      ...candidate,
+      timestamp: Date.now(),
+    };
+    const key = itemMatchKey(restored);
+    clearPersistedStorage();
+    set((state) => {
+      const remaining = state.items.filter((it) => itemMatchKey(it) !== key);
+      const nextItems = [restored, ...remaining].slice(0, MAX_STORED_ITEMS);
+      return {
+        items: nextItems,
+        lastDraggedOutItem: null,
+        securityNotice: null,
+        lastActionFeedback: {
+          id: restored.id,
+          isDuplicate: false,
+          label: 'Kartu dipulihkan',
+          timestamp: Date.now(),
+        },
+      };
+    });
+    return restored;
+  },
+
+  dismissDraggedOutUndo: () => {
+    if (dragOutUndoTimer) {
+      clearTimeout(dragOutUndoTimer);
+      dragOutUndoTimer = null;
+    }
+    set({ lastDraggedOutItem: null });
+  },
+
+  addItem: async (raw: string, explicitSize?: number, titleHint?: string) => {
     const clean = raw.trim();
     if (!clean) {
-      throw new Error('Empty drop item');
+      return null;
     }
 
-    const prepared = await resolveItemWithMetadata(clean, explicitSize);
+    if (isBlockedUriScheme(clean)) {
+      get().setSecurityNotice('Skema URI tidak aman diblokir (hanya http:// & https://)');
+      set({ isDragging: false });
+      return null;
+    }
+
+    const prepared = await resolveItemWithMetadata(clean, explicitSize, {
+      allowLocalPath: false,
+      titleHint,
+    });
+    if (!prepared) {
+      set({ isDragging: false });
+      return null;
+    }
+
     const key = itemMatchKey(prepared);
     let finalItem = prepared;
+    clearPersistedStorage();
 
     set((state) => {
       const existingIdx = state.items.findIndex((it) => itemMatchKey(it) === key);
@@ -279,10 +613,10 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
         };
         const rest = state.items.filter((_, idx) => idx !== existingIdx);
         const nextItems = [finalItem, ...rest].slice(0, MAX_STORED_ITEMS);
-        savePersistedItems(nextItems);
         return {
           items: nextItems,
           isDragging: false,
+          securityNotice: null,
           lastActionFeedback: {
             id: finalItem.id,
             isDuplicate: true,
@@ -293,18 +627,18 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
       }
 
       const nextItems = [prepared, ...state.items].slice(0, MAX_STORED_ITEMS);
-      savePersistedItems(nextItems);
       return {
         items: nextItems,
         isDragging: false,
+        securityNotice: null,
         lastActionFeedback: {
           id: prepared.id,
           isDuplicate: false,
           label:
-            prepared.type === 'url'
-              ? 'Tautan disimpan'
+            prepared.type === 'link'
+              ? 'Tautan diparkir'
               : prepared.type === 'text'
-              ? 'Snippet disimpan'
+              ? 'Catatan diparkir'
               : 'Berkas ditambahkan',
           timestamp: Date.now(),
         },
@@ -315,20 +649,22 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
   },
 
   addPath: async (path: string) => {
-    return get().addItem(path);
+    const batch = await get().addDroppedPaths([path]);
+    return batch[0] ?? null;
   },
 
   addDroppedPath: async (path: string) => {
-    return get().addItem(path);
+    const batch = await get().addDroppedPaths([path]);
+    return batch[0] ?? null;
   },
 
-  addDroppedPaths: async (paths: string[]) => {
+  addDroppedPaths: async (paths: string[], options?: { stagedPaths?: Set<string> }) => {
     const seenBatchKeys = new Set<string>();
     const uniqueRawPaths: string[] = [];
 
     for (const raw of paths) {
       const cleaned = cleanFilePath(raw);
-      if (!cleaned) continue;
+      if (!cleaned || isBlockedUriScheme(cleaned)) continue;
       const key = normalizeWindowsPathKey(cleaned) || cleaned;
       if (seenBatchKeys.has(key)) continue;
       seenBatchKeys.add(key);
@@ -340,12 +676,23 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
       return [];
     }
 
-    const preparedList = await Promise.all(
-      uniqueRawPaths.map((p) => resolveItemWithMetadata(p))
+    const preparedRaw = await Promise.all(
+      uniqueRawPaths.map((p) =>
+        resolveItemWithMetadata(p, undefined, {
+          allowLocalPath: true,
+          isStagedTemp: Boolean(options?.stagedPaths?.has(p)),
+        })
+      )
     );
+    const preparedList = preparedRaw.filter((it): it is DropItem => it !== null);
+    if (preparedList.length === 0) {
+      set({ isDragging: false });
+      return [];
+    }
 
     const preparedKeys = new Set(preparedList.map((it) => itemMatchKey(it)));
     let resultingBatch: DropItem[] = [];
+    clearPersistedStorage();
 
     set((state) => {
       const existingMap = new Map<string, DropItem>();
@@ -367,10 +714,10 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
       ).length;
       const remaining = state.items.filter((it) => !preparedKeys.has(itemMatchKey(it)));
       const nextItems = [...resultingBatch, ...remaining].slice(0, MAX_STORED_ITEMS);
-      savePersistedItems(nextItems);
       return {
         items: nextItems,
         isDragging: false,
+        securityNotice: null,
         lastActionFeedback:
           resultingBatch.length > 0
             ? {
@@ -380,8 +727,8 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
                   duplicateCount === resultingBatch.length
                     ? 'Sudah ada · digeser ke depan'
                     : resultingBatch.length === 1
-                    ? 'Berkas disimpan'
-                    : `${resultingBatch.length} berkas disimpan`,
+                    ? 'Berkas diparkir'
+                    : `${resultingBatch.length} berkas diparkir`,
                 timestamp: now,
               }
             : state.lastActionFeedback,
@@ -389,6 +736,113 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
     });
 
     return resultingBatch;
+  },
+
+  addDroppedDataTransfer: async (dt: DataTransfer | null): Promise<DataTransferDropResult> => {
+    if (!dt) {
+      set({ isDragging: false });
+      return { added: 0, blocked: false };
+    }
+
+    // Priority 1: Dropped Files
+    if (dt.files && dt.files.length > 0) {
+      const collectedPaths: string[] = [];
+      const stagedPaths = new Set<string>();
+
+      for (let i = 0; i < dt.files.length; i++) {
+        const file = dt.files[i];
+        const diskPath = (file as File & { path?: string }).path;
+        if (diskPath && diskPath.trim()) {
+          collectedPaths.push(diskPath);
+          continue;
+        }
+
+        if ('__TAURI_INTERNALS__' in window) {
+          if (file.size > MAX_STAGED_FILE_BYTES) {
+            get().setSecurityNotice(
+              `Berkas "${file.name}" melebihi batas transit 25 MB; gunakan + Add.`
+            );
+            continue;
+          }
+          if (file.size > 0) {
+            try {
+              const buffer = await file.arrayBuffer();
+              const b64 = arrayBufferToBase64(buffer);
+              const staged = await stageDroppedFile(file.name, b64);
+              if (staged) {
+                collectedPaths.push(staged);
+                stagedPaths.add(staged);
+              }
+            } catch (err) {
+              console.warn('[DropZoneStore] Stage dropped file failed:', err);
+            }
+          }
+        } else if (file.name) {
+          collectedPaths.push(file.name);
+        }
+      }
+
+      if (collectedPaths.length > 0) {
+        const addedItems = await get().addDroppedPaths(collectedPaths, { stagedPaths });
+        return { added: addedItems.length, blocked: false };
+      }
+      set({ isDragging: false });
+      return { added: 0, blocked: false };
+    }
+
+    const htmlData = dt.getData('text/html') || '';
+    const htmlAnchor = extractAnchorFromHtml(htmlData);
+
+    // Priority 2: URI List (dragged links from browser address bar / bookmarks / web)
+    const uriListRaw = dt.getData('text/uri-list');
+    const uriCandidate = extractUriListCandidate(uriListRaw);
+    if (uriCandidate) {
+      if (isBlockedUriScheme(uriCandidate)) {
+        get().setSecurityNotice('Skema URI tidak aman diblokir (hanya http:// & https://)');
+        set({ isDragging: false });
+        return { added: 0, blocked: true };
+      }
+      const titleHint =
+        htmlAnchor && htmlAnchor.label ? htmlAnchor.label : undefined;
+      const item = await get().addItem(uriCandidate, undefined, titleHint);
+      return { added: item ? 1 : 0, blocked: false };
+    }
+
+    // Priority 3: Plain Text (selected text snippets or text URLs)
+    const plainRaw = dt.getData('text/plain');
+    if (plainRaw && plainRaw.trim()) {
+      if (isBlockedUriScheme(plainRaw)) {
+        get().setSecurityNotice('Skema URI tidak aman diblokir (hanya http:// & https://)');
+        set({ isDragging: false });
+        return { added: 0, blocked: true };
+      }
+      const titleHint =
+        parseSafeHttpUrl(plainRaw) && htmlAnchor?.label ? htmlAnchor.label : undefined;
+      const item = await get().addItem(plainRaw, undefined, titleHint);
+      return { added: item ? 1 : 0, blocked: false };
+    }
+
+    // Priority 4: HTML fallback (when text/plain & text/uri-list are absent)
+    if (htmlData.trim()) {
+      if (htmlAnchor) {
+        if (isBlockedUriScheme(htmlAnchor.href)) {
+          get().setSecurityNotice('Skema URI tidak aman diblokir (hanya http:// & https://)');
+          set({ isDragging: false });
+          return { added: 0, blocked: true };
+        }
+        const item = await get().addItem(htmlAnchor.href, undefined, htmlAnchor.label);
+        return { added: item ? 1 : 0, blocked: false };
+      }
+
+      const sanitized = sanitizeDropText(htmlData);
+      if (sanitized) {
+        const item = await get().addItem(sanitized);
+        return { added: item ? 1 : 0, blocked: false };
+      }
+    }
+
+    set({ isDragging: false });
+    return { added: 0, blocked: false };
   },
 
   syncAssetScopes: async () => {
@@ -409,19 +863,55 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
   removeItem: (id: string) => {
     set((state) => {
       const nextItems = state.items.filter((it) => it.id !== id);
-      savePersistedItems(nextItems);
+      if (nextItems.length === 0) {
+        clearPersistedStorage();
+      }
       return { items: nextItems };
     });
   },
 
   clearAll: () => {
-    savePersistedItems([]);
-    set({ items: [] });
+    if (dragOutUndoTimer) {
+      clearTimeout(dragOutUndoTimer);
+      dragOutUndoTimer = null;
+    }
+    clearPersistedStorage();
+    set({ items: [], lastDraggedOutItem: null, securityNotice: null });
+    void cleanupEphemeralDropZone();
+  },
+
+  clearEphemeralSession: () => {
+    if (securityNoticeTimer) {
+      clearTimeout(securityNoticeTimer);
+      securityNoticeTimer = null;
+    }
+    if (dragOutUndoTimer) {
+      clearTimeout(dragOutUndoTimer);
+      dragOutUndoTimer = null;
+    }
+    clearPersistedStorage();
+    set({
+      items: [],
+      isDragging: false,
+      isInternalDragging: false,
+      lastActionFeedback: null,
+      lastDraggedOutItem: null,
+      securityNotice: null,
+    });
+    void cleanupEphemeralDropZone();
   },
 }));
 
-if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-  setTimeout(() => {
-    void useDropZoneStore.getState().syncAssetScopes();
-  }, 120);
+if (typeof window !== 'undefined') {
+  if ('__TAURI_INTERNALS__' in window) {
+    setTimeout(() => {
+      void useDropZoneStore.getState().syncAssetScopes();
+    }, 120);
+  }
+
+  const handleEphemeralUnload = () => {
+    useDropZoneStore.getState().clearEphemeralSession();
+  };
+  window.addEventListener('beforeunload', handleEphemeralUnload);
+  window.addEventListener('pagehide', handleEphemeralUnload);
 }

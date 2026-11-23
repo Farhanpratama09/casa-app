@@ -91,9 +91,24 @@
   ];
 
   const SAMPLE_FILES = [
-    { id: 'file-brief', name: 'brief-casa.pdf', ext: 'PDF', meta: 'PDF · 420 KB' },
-    { id: 'file-sasha', name: 'sasha-icon.svg', ext: 'SVG', meta: 'SVG · 14 KB' },
-    { id: 'file-mix', name: 'mix-playlist.url', ext: 'URL', meta: 'URL · Web' },
+    { id: 'file-brief', kind: 'file', name: 'brief-casa.pdf', ext: 'PDF', meta: 'PDF · 420 KB' },
+    {
+      id: 'link-release',
+      kind: 'link',
+      name: 'CASA Releases · GitHub',
+      domain: 'github.com',
+      url: 'https://github.com/Farhanpratama09/casa-app/releases',
+      ext: 'LINK',
+      meta: 'github.com · HTTPS',
+    },
+    {
+      id: 'text-snippet',
+      kind: 'text',
+      name: 'Ephemeral transit note',
+      snippet: 'Checklist v2.2.0: Smart Drag-In, Ctrl+V & CF_UNICODETEXT.',
+      ext: 'TXT',
+      meta: 'TXT · 58 chars',
+    },
   ];
 
   // 5 interactive prayer schedule phases for the Web Showcase (simulated clock — independent of visitor browser time)
@@ -188,6 +203,8 @@
     hudDetail: '',
     hudTimerId: null,
     droppedIds: [],
+    lastReturnedDropId: null,
+    dropzoneUndoTimerId: null,
     introTimers: [],
     lyricIntervalId: null,
     clockIntervalId: null,
@@ -331,6 +348,8 @@
     dropzonePrompt: $('vm-dropzone-prompt'),
     droppedItems: $('vm-dropped-items'),
     dropzoneCount: $('vm-dropzone-count'),
+    dropzoneUndoBtn: $('vm-dropzone-undo-btn'),
+    dropzonePasteBtn: $('vm-dropzone-paste-btn'),
     copyBackBtn: $('vm-copy-back-btn'),
 
     // Desktop workspace scenes
@@ -1277,7 +1296,12 @@
         const top = document.createElement('div');
         top.className = 'casa-drop-card-top';
         const iconTile = document.createElement('div');
-        iconTile.className = 'casa-drop-icon-tile';
+        iconTile.className =
+          meta.kind === 'link'
+            ? 'casa-drop-icon-tile is-link'
+            : meta.kind === 'text'
+            ? 'casa-drop-icon-tile is-text'
+            : 'casa-drop-icon-tile';
         iconTile.textContent = meta.ext;
         const info = document.createElement('div');
         info.style.minWidth = '0';
@@ -1295,18 +1319,59 @@
         const bot = document.createElement('div');
         bot.className = 'casa-drop-card-bot';
         const hint = document.createElement('span');
-        hint.textContent = 'Parked';
+        hint.textContent =
+          meta.kind === 'link' ? 'Link' : meta.kind === 'text' ? 'Text' : 'Parked';
+
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'casa-dz-pill-btn compact';
+        copyBtn.textContent = 'Copy';
+
+        const copyMetaText = (ev) => {
+          ev.stopPropagation();
+          const copyText = meta.url || meta.snippet || meta.name;
+          if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            navigator.clipboard.writeText(copyText).catch(() => {});
+          }
+          copyBtn.textContent = 'Tersalin';
+          window.setTimeout(() => {
+            if (copyBtn.isConnected) copyBtn.textContent = 'Copy';
+          }, 1100);
+        };
+
+        if (meta.kind === 'link' || meta.kind === 'text') {
+          top.style.cursor = 'pointer';
+          top.addEventListener('click', copyMetaText);
+        }
+
+        const actionsWrap = document.createElement('div');
+        actionsWrap.className = 'casa-drop-actions';
+
+        copyBtn.addEventListener('click', copyMetaText);
+
         const restoreBtn = document.createElement('button');
         restoreBtn.type = 'button';
-        restoreBtn.className = 'casa-dz-pill-btn';
+        restoreBtn.className = 'casa-dz-pill-btn compact';
         restoreBtn.textContent = 'Return';
         restoreBtn.addEventListener('click', (ev) => {
           ev.stopPropagation();
           state.droppedIds = state.droppedIds.filter((id) => id !== fid);
+          state.lastReturnedDropId = fid;
+          if (state.dropzoneUndoTimerId) {
+            window.clearTimeout(state.dropzoneUndoTimerId);
+          }
+          state.dropzoneUndoTimerId = window.setTimeout(() => {
+            state.dropzoneUndoTimerId = null;
+            state.lastReturnedDropId = null;
+            syncUI();
+          }, 4000);
           syncUI();
         });
+
+        actionsWrap.appendChild(copyBtn);
+        actionsWrap.appendChild(restoreBtn);
         bot.appendChild(hint);
-        bot.appendChild(restoreBtn);
+        bot.appendChild(actionsWrap);
 
         shelfCard.appendChild(top);
         shelfCard.appendChild(bot);
@@ -1326,6 +1391,9 @@
     if (el.m6DropBadge) {
       el.m6DropBadge.hidden = state.droppedIds.length === 0;
       el.m6DropBadge.textContent = String(state.droppedIds.length);
+    }
+    if (el.dropzoneUndoBtn) {
+      el.dropzoneUndoBtn.hidden = !state.lastReturnedDropId;
     }
     if (el.copyBackBtn) {
       el.copyBackBtn.hidden = state.droppedIds.length === 0;
@@ -1350,6 +1418,16 @@
     state.expandedTab = 'dropzone';
     state.capsuleState = 'expanded';
     syncUI();
+  }
+
+  function pasteSampleIntoDropZone() {
+    const preferred =
+      SAMPLE_FILES.find((f) => f.kind !== 'file' && !state.droppedIds.includes(f.id)) ||
+      SAMPLE_FILES.find((f) => !state.droppedIds.includes(f.id)) ||
+      SAMPLE_FILES[1];
+    if (preferred) {
+      captureFileIntoDropZone(preferred.id);
+    }
   }
 
   function copyDropZoneBackToDesktop() {
@@ -1978,7 +2056,11 @@
 
       el.capsule.addEventListener('dragover', (ev) => {
         ev.preventDefault();
-        el.capsule.setAttribute('data-drop-hover', 'true');
+        if (state.capsuleState !== 'expanded') {
+          openDropZoneTarget(true);
+        } else {
+          el.capsule.setAttribute('data-drop-hover', 'true');
+        }
       });
 
       el.capsule.addEventListener('dragleave', () => {
@@ -2053,7 +2135,7 @@
       });
     }
 
-    // Alt + Space toggle inside playground
+    // Alt + Space toggle & Ctrl+V Drop Zone explicit paste inside playground
     window.addEventListener('keydown', (ev) => {
       if (ev.altKey && ev.code === 'Space') {
         ev.preventDefault();
@@ -2061,6 +2143,19 @@
         state.idleLyricMinimized = false;
         state.capsuleState = state.capsuleState === 'expanded' ? 'idle' : 'expanded';
         syncUI();
+        return;
+      }
+
+      if (
+        (ev.ctrlKey || ev.metaKey) &&
+        ev.key.toLowerCase() === 'v' &&
+        state.expandedTab === 'dropzone' &&
+        state.capsuleState === 'expanded'
+      ) {
+        const activeTag = document.activeElement ? document.activeElement.tagName : '';
+        if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
+        ev.preventDefault();
+        pasteSampleIntoDropZone();
       }
     });
 
@@ -2359,6 +2454,28 @@
     if (el.ccWiredBtn) el.ccWiredBtn.addEventListener('click', triggerWiredHud);
 
     // Drop Zone
+    if (el.dropzoneUndoBtn) {
+      el.dropzoneUndoBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const fid = state.lastReturnedDropId;
+        if (!fid) return;
+        if (state.dropzoneUndoTimerId) {
+          window.clearTimeout(state.dropzoneUndoTimerId);
+          state.dropzoneUndoTimerId = null;
+        }
+        state.lastReturnedDropId = null;
+        if (!state.droppedIds.includes(fid)) {
+          state.droppedIds.unshift(fid);
+        }
+        syncUI();
+      });
+    }
+    if (el.dropzonePasteBtn) {
+      el.dropzonePasteBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        pasteSampleIntoDropZone();
+      });
+    }
     if (el.simDropAllBtn) {
       el.simDropAllBtn.addEventListener('click', () => {
         const nextFile =
@@ -2467,7 +2584,7 @@
           ? exeVersion.trim().startsWith('v')
             ? exeVersion.trim()
             : `v${exeVersion.trim()}`
-          : 'v2.1.4';
+          : 'v2.2.0';
       el.downloadSizeText.textContent = `${versionTag} · NSIS Setup (.exe) · ${exeSize}`;
     }
     if (el.downloadCountText) {
@@ -2569,7 +2686,7 @@
       let exeSize = null;
       let exeVersion = null;
       if (v2Release && Array.isArray(v2Release.assets)) {
-        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.1.4';
+        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.2.0';
         const exeAsset = v2Release.assets.find(
           (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
         );
@@ -2594,7 +2711,7 @@
         );
       } catch (_err) {}
     } catch (_err) {
-      // Keep static v2.1.4 fallback link & hide download count gracefully when offline/rate-limited
+      // Keep static v2.2.0 fallback link & hide download count gracefully when offline/rate-limited
     }
   }
 

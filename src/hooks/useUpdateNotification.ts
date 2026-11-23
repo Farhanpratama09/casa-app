@@ -9,7 +9,7 @@ import {
 } from '../utils/tauriBridge';
 
 const DEFAULT_STATUS: UpdateNotificationStatus = {
-  currentVersion: '2.1.4',
+  currentVersion: '2.2.0',
   latestVersion: null,
   releaseUrl: null,
   releaseNotes: null,

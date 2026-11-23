@@ -1,6 +1,131 @@
-use std::path::Path;
+use base64::Engine;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::Manager;
+
+static STAGED_FILE_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+fn ephemeral_transit_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("Gagal menemukan local data directory: {}", e))?
+        .join("drop_zone_transit"))
+}
+
+pub fn sanitize_transit_filename(raw: &str) -> String {
+    let segment = raw
+        .split(['/', '\\'])
+        .rfind(|s| !s.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+
+    if segment.is_empty() || segment == "." || segment == ".." {
+        return "dropped-file.bin".to_string();
+    }
+
+    let mut clean: String = segment
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_' | ' ') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    while clean.contains("..") {
+        clean = clean.replace("..", ".");
+    }
+
+    let trimmed = clean.trim_matches(|ch: char| ch == '.' || ch.is_whitespace());
+    if trimmed.is_empty() {
+        return "dropped-file.bin".to_string();
+    }
+
+    let mut result = trimmed.to_string();
+    if result.len() > 96 {
+        if let Some(dot_idx) = result.rfind('.') {
+            let ext = &result[dot_idx..];
+            if !ext.is_empty() && ext.len() <= 16 {
+                let stem_limit = 96 - ext.len();
+                result = format!("{}{}", &result[..stem_limit], ext);
+            } else {
+                result.truncate(96);
+            }
+        } else {
+            result.truncate(96);
+        }
+    }
+
+    result
+}
+
+pub fn cleanup_ephemeral_transit_dir(app: &tauri::AppHandle) {
+    if let Ok(transit_dir) = ephemeral_transit_dir(app) {
+        let _ = std::fs::remove_dir_all(transit_dir);
+    }
+    if let Ok(cache_dir) = app.path().app_cache_dir() {
+        let _ = std::fs::remove_dir_all(cache_dir.join("drop_zone_clipboard"));
+        let _ = std::fs::remove_dir_all(cache_dir.join("drop_zone_cache"));
+    }
+}
+
+#[tauri::command]
+pub fn cleanup_ephemeral_drop_zone(app: tauri::AppHandle) -> Result<(), String> {
+    cleanup_ephemeral_transit_dir(&app);
+    Ok(())
+}
+
+/// Menampung berkas dari HTML5 DOM drop (`dragDropEnabled: false`) ke direktori transit ephemeral sementara
+/// ketika objek DOM `File` dari WebView2 tidak membawa path fisik OS secara langsung.
+#[tauri::command]
+pub fn stage_dropped_file(
+    app: tauri::AppHandle,
+    file_name: String,
+    data_base64: String,
+) -> Result<String, String> {
+    const MAX_STAGED_BYTES: usize = 25 * 1024 * 1024;
+    const MAX_BASE64_LEN: usize = 35 * 1024 * 1024;
+
+    let trimmed = data_base64.trim();
+    if trimmed.is_empty() {
+        return Err("Data berkas drop kosong".to_string());
+    }
+    if trimmed.len() > MAX_BASE64_LEN {
+        return Err("Ukuran berkas melebihi batas transit sementara 25 MB".to_string());
+    }
+
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(trimmed)
+        .map_err(|e| format!("Gagal mendekode data berkas: {}", e))?;
+    if decoded.is_empty() {
+        return Err("Data berkas drop kosong".to_string());
+    }
+    if decoded.len() > MAX_STAGED_BYTES {
+        return Err("Ukuran berkas melebihi batas transit sementara 25 MB".to_string());
+    }
+
+    let safe_name = sanitize_transit_filename(&file_name);
+    let transit_dir = ephemeral_transit_dir(&app)?;
+    std::fs::create_dir_all(&transit_dir)
+        .map_err(|e| format!("Gagal membuat folder transit ephemeral: {}", e))?;
+
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let seq = STAGED_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dest_path = transit_dir.join(format!("{}_{}_{}", millis, seq, safe_name));
+
+    std::fs::write(&dest_path, &decoded)
+        .map_err(|e| format!("Gagal menyimpan berkas transit sementara: {}", e))?;
+
+    allow_path_in_asset_scope(&app, &dest_path);
+    Ok(dest_path.to_string_lossy().to_string())
+}
 
 #[derive(serde::Serialize)]
 pub struct FileMetadata {
@@ -295,6 +420,99 @@ fn is_accepted_external_drop(
 }
 
 #[cfg(windows)]
+fn build_cf_unicodetext_hglobal(
+    text: &str,
+) -> Result<windows::Win32::Foundation::HGLOBAL, String> {
+    use windows::Win32::Foundation::{GlobalFree, HGLOBAL};
+    use windows::Win32::System::Memory::{
+        GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT,
+    };
+
+    if text.is_empty() {
+        return Err("Teks drag-out kosong".to_string());
+    }
+
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let byte_len = (units.len() + 1) * std::mem::size_of::<u16>();
+
+    unsafe {
+        let hglobal: HGLOBAL = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, byte_len)
+            .map_err(|e| format!("GlobalAlloc CF_UNICODETEXT gagal: {}", e))?;
+
+        let ptr = GlobalLock(hglobal);
+        if ptr.is_null() {
+            let _ = GlobalFree(Some(hglobal));
+            return Err("GlobalLock CF_UNICODETEXT gagal".to_string());
+        }
+
+        let dst_u16 = ptr as *mut u16;
+        std::ptr::copy_nonoverlapping(units.as_ptr(), dst_u16, units.len());
+        *dst_u16.add(units.len()) = 0u16;
+        let _ = GlobalUnlock(hglobal);
+        Ok(hglobal)
+    }
+}
+
+#[cfg(windows)]
+fn build_cf_text_hglobal(text: &str) -> Result<windows::Win32::Foundation::HGLOBAL, String> {
+    use windows::Win32::Foundation::{GlobalFree, HGLOBAL};
+    use windows::Win32::System::Memory::{
+        GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT,
+    };
+
+    if text.is_empty() {
+        return Err("Teks drag-out kosong".to_string());
+    }
+
+    let bytes: Vec<u8> = text
+        .as_bytes()
+        .iter()
+        .map(|&b| if b == 0 { b' ' } else { b })
+        .collect();
+    let byte_len = bytes.len() + 1;
+
+    unsafe {
+        let hglobal: HGLOBAL = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, byte_len)
+            .map_err(|e| format!("GlobalAlloc CF_TEXT gagal: {}", e))?;
+
+        let ptr = GlobalLock(hglobal);
+        if ptr.is_null() {
+            let _ = GlobalFree(Some(hglobal));
+            return Err("GlobalLock CF_TEXT gagal".to_string());
+        }
+
+        let dst_u8 = ptr as *mut u8;
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), dst_u8, bytes.len());
+        *dst_u8.add(bytes.len()) = 0u8;
+        let _ = GlobalUnlock(hglobal);
+        Ok(hglobal)
+    }
+}
+
+#[cfg(windows)]
+fn build_cf_locale_hglobal(lcid: u32) -> Result<windows::Win32::Foundation::HGLOBAL, String> {
+    use windows::Win32::Foundation::{GlobalFree, HGLOBAL};
+    use windows::Win32::System::Memory::{
+        GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT,
+    };
+
+    unsafe {
+        let hglobal: HGLOBAL = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, std::mem::size_of::<u32>())
+            .map_err(|e| format!("GlobalAlloc CF_LOCALE gagal: {}", e))?;
+
+        let ptr = GlobalLock(hglobal);
+        if ptr.is_null() {
+            let _ = GlobalFree(Some(hglobal));
+            return Err("GlobalLock CF_LOCALE gagal".to_string());
+        }
+
+        std::ptr::write(ptr as *mut u32, lcid);
+        let _ = GlobalUnlock(hglobal);
+        Ok(hglobal)
+    }
+}
+
+#[cfg(windows)]
 fn build_cf_hdrop_hglobal(
     valid_paths: &[String],
 ) -> Result<windows::Win32::Foundation::HGLOBAL, String> {
@@ -388,23 +606,30 @@ pub fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
 
 #[cfg(windows)]
 mod win32_drag {
-    use super::{build_cf_hdrop_hglobal, is_accepted_external_drop, NativeDragDropResult};
-    use std::mem::ManuallyDrop;
+    use super::{
+        build_cf_hdrop_hglobal, build_cf_locale_hglobal, build_cf_text_hglobal,
+        build_cf_unicodetext_hglobal, is_accepted_external_drop, NativeDragDropResult,
+    };
+    use std::mem::{ManuallyDrop, MaybeUninit};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use windows::Win32::Foundation::{
-        DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, DV_E_FORMATETC,
-        E_NOTIMPL, E_OUTOFMEMORY, HWND, OLE_E_ADVISENOTSUPPORTED, POINT, S_OK,
+        DATA_S_SAMEFORMATETC, DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS,
+        DV_E_FORMATETC, E_INVALIDARG, E_NOTIMPL, E_OUTOFMEMORY, HWND, OLE_E_ADVISENOTSUPPORTED,
+        POINT, S_FALSE, S_OK,
     };
     use windows::Win32::System::Com::{
-        IAdviseSink, IDataObject, IDataObject_Impl, IEnumFORMATETC, IEnumSTATDATA, DATADIR_GET,
-        DVASPECT_CONTENT, FORMATETC, STGMEDIUM, STGMEDIUM_0, TYMED_HGLOBAL,
+        IAdviseSink, IDataObject, IDataObject_Impl, IEnumFORMATETC, IEnumFORMATETC_Impl,
+        IEnumSTATDATA, DATADIR_GET, DVASPECT_CONTENT, FORMATETC, STGMEDIUM, STGMEDIUM_0,
+        TYMED_HGLOBAL,
     };
     use windows::Win32::System::Ole::{
         DoDragDrop, IDropSource, IDropSource_Impl, OleInitialize, OleUninitialize, CF_HDROP,
-        DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_NONE,
+        CF_LOCALE, CF_OEMTEXT, CF_TEXT, CF_UNICODETEXT, DROPEFFECT, DROPEFFECT_COPY,
+        DROPEFFECT_MOVE, DROPEFFECT_NONE,
     };
-    use windows::Win32::System::SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS};
+    use windows::Win32::System::SystemServices::{MK_LBUTTON, MK_RBUTTON, MODIFIERKEYS_FLAGS};
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON,
+        GetAsyncKeyState, ReleaseCapture, VK_LBUTTON, VK_RBUTTON,
     };
     use windows::Win32::UI::Shell::{SHCreateDataObject, SHCreateStdEnumFmtEtc};
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -457,7 +682,7 @@ mod win32_drag {
         fn QueryContinueDrag(&self, fescapepressed: BOOL, grfkeystate: MODIFIERKEYS_FLAGS) -> HRESULT {
             if fescapepressed.as_bool() {
                 DRAGDROP_S_CANCEL
-            } else if (grfkeystate & MK_LBUTTON) == MODIFIERKEYS_FLAGS(0) {
+            } else if (grfkeystate & (MK_LBUTTON | MK_RBUTTON)) == MODIFIERKEYS_FLAGS(0) {
                 DRAGDROP_S_DROP
             } else {
                 S_OK
@@ -587,9 +812,260 @@ mod win32_drag {
         }
     }
 
-    pub fn execute_drag_drop_on_sta(
-        valid_paths: Vec<String>,
+    #[implement(IEnumFORMATETC)]
+    struct CasaEnumFormatEtc {
+        formats: Vec<FORMATETC>,
+        index: AtomicUsize,
+    }
+
+    impl CasaEnumFormatEtc {
+        fn new(formats: Vec<FORMATETC>) -> Self {
+            Self {
+                formats,
+                index: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[allow(non_snake_case)]
+    impl IEnumFORMATETC_Impl for CasaEnumFormatEtc_Impl {
+        fn Next(
+            &self,
+            celt: u32,
+            rgelt: *mut FORMATETC,
+            pceltfetched: *mut u32,
+        ) -> HRESULT {
+            if rgelt.is_null() {
+                return E_INVALIDARG;
+            }
+            if celt > 1 && pceltfetched.is_null() {
+                return E_INVALIDARG;
+            }
+            if celt == 0 {
+                if !pceltfetched.is_null() {
+                    unsafe {
+                        std::ptr::write(pceltfetched, 0);
+                    }
+                }
+                return S_OK;
+            }
+
+            let pos = self.index.load(Ordering::SeqCst);
+            let available = self.formats.len().saturating_sub(pos);
+            let to_copy = available.min(celt as usize);
+
+            for i in 0..to_copy {
+                unsafe {
+                    std::ptr::write(rgelt.add(i), self.formats[pos + i]);
+                }
+            }
+
+            self.index.store(pos + to_copy, Ordering::SeqCst);
+
+            if !pceltfetched.is_null() {
+                unsafe {
+                    std::ptr::write(pceltfetched, to_copy as u32);
+                }
+            }
+
+            if to_copy == celt as usize {
+                S_OK
+            } else {
+                S_FALSE
+            }
+        }
+
+        fn Skip(&self, celt: u32) -> WinResult<()> {
+            let pos = self.index.load(Ordering::SeqCst);
+            let target = pos.saturating_add(celt as usize);
+            if target <= self.formats.len() {
+                self.index.store(target, Ordering::SeqCst);
+                Ok(())
+            } else {
+                self.index.store(self.formats.len(), Ordering::SeqCst);
+                Err(Error::from(S_FALSE))
+            }
+        }
+
+        fn Reset(&self) -> WinResult<()> {
+            self.index.store(0, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn Clone(&self) -> WinResult<IEnumFORMATETC> {
+            Ok(CasaEnumFormatEtc {
+                formats: self.formats.clone(),
+                index: AtomicUsize::new(self.index.load(Ordering::SeqCst)),
+            }
+            .into())
+        }
+    }
+
+    #[implement(IDataObject)]
+    struct CasaTextDataObject {
+        text: String,
+    }
+
+    impl CasaTextDataObject {
+        fn new(text: String) -> Self {
+            Self { text }
+        }
+
+        fn formatetc_hglobal(cf: u16) -> FORMATETC {
+            FORMATETC {
+                cfFormat: cf,
+                ptd: std::ptr::null_mut(),
+                dwAspect: DVASPECT_CONTENT.0,
+                lindex: -1,
+                tymed: TYMED_HGLOBAL.0 as u32,
+            }
+        }
+
+        fn matches_chromium_format(pformatetc: *const FORMATETC, target_cf: u16) -> bool {
+            let Some(fmt) = (unsafe { pformatetc.as_ref() }) else {
+                return false;
+            };
+            fmt.cfFormat == target_cf
+                && (fmt.dwAspect == DVASPECT_CONTENT.0 || fmt.dwAspect == 0)
+                && (fmt.tymed & (TYMED_HGLOBAL.0 as u32)) != 0
+                && (fmt.lindex == -1 || fmt.lindex == 0)
+        }
+
+        fn supports_format(&self, pformatetc: *const FORMATETC) -> bool {
+            Self::matches_chromium_format(pformatetc, CF_UNICODETEXT.0)
+                || Self::matches_chromium_format(pformatetc, CF_TEXT.0)
+                || Self::matches_chromium_format(pformatetc, CF_OEMTEXT.0)
+                || Self::matches_chromium_format(pformatetc, CF_LOCALE.0)
+        }
+
+        fn write_hglobal_to_pmedium(
+            pmedium: *mut STGMEDIUM,
+            hglobal: windows::Win32::Foundation::HGLOBAL,
+        ) -> WinResult<()> {
+            if pmedium.is_null() {
+                return Err(Error::from(E_INVALIDARG));
+            }
+            unsafe {
+                std::ptr::write(
+                    pmedium,
+                    STGMEDIUM {
+                        tymed: TYMED_HGLOBAL.0 as u32,
+                        u: STGMEDIUM_0 { hGlobal: hglobal },
+                        pUnkForRelease: ManuallyDrop::new(None),
+                    },
+                );
+            }
+            Ok(())
+        }
+    }
+
+    #[allow(non_snake_case)]
+    impl IDataObject_Impl for CasaTextDataObject_Impl {
+        fn GetData(&self, pformatetcin: *const FORMATETC) -> WinResult<STGMEDIUM> {
+            let hglobal = if CasaTextDataObject::matches_chromium_format(
+                pformatetcin,
+                CF_UNICODETEXT.0,
+            ) {
+                build_cf_unicodetext_hglobal(&self.text)
+                    .map_err(|_| Error::from(E_OUTOFMEMORY))?
+            } else if CasaTextDataObject::matches_chromium_format(pformatetcin, CF_TEXT.0)
+                || CasaTextDataObject::matches_chromium_format(pformatetcin, CF_OEMTEXT.0)
+            {
+                build_cf_text_hglobal(&self.text).map_err(|_| Error::from(E_OUTOFMEMORY))?
+            } else if CasaTextDataObject::matches_chromium_format(pformatetcin, CF_LOCALE.0) {
+                build_cf_locale_hglobal(0x0409).map_err(|_| Error::from(E_OUTOFMEMORY))?
+            } else {
+                return Err(Error::from(DV_E_FORMATETC));
+            };
+
+            let mut medium = MaybeUninit::<STGMEDIUM>::uninit();
+            CasaTextDataObject::write_hglobal_to_pmedium(medium.as_mut_ptr(), hglobal)?;
+            Ok(unsafe { medium.assume_init() })
+        }
+
+        fn GetDataHere(
+            &self,
+            _pformatetc: *const FORMATETC,
+            _pmedium: *mut STGMEDIUM,
+        ) -> WinResult<()> {
+            Err(Error::from(DV_E_FORMATETC))
+        }
+
+        fn QueryGetData(&self, pformatetc: *const FORMATETC) -> HRESULT {
+            if self.supports_format(pformatetc) {
+                S_OK
+            } else {
+                DV_E_FORMATETC
+            }
+        }
+
+        fn GetCanonicalFormatEtc(
+            &self,
+            pformatectin: *const FORMATETC,
+            pformatetcout: *mut FORMATETC,
+        ) -> HRESULT {
+            if pformatetcout.is_null() {
+                return E_INVALIDARG;
+            }
+            if pformatectin.is_null() {
+                unsafe {
+                    std::ptr::write(pformatetcout, FORMATETC::default());
+                }
+                return E_INVALIDARG;
+            }
+            unsafe {
+                let mut canon = std::ptr::read(pformatectin);
+                canon.ptd = std::ptr::null_mut();
+                std::ptr::write(pformatetcout, canon);
+            }
+            DATA_S_SAMEFORMATETC
+        }
+
+        fn SetData(
+            &self,
+            _pformatetc: *const FORMATETC,
+            _pmedium: *const STGMEDIUM,
+            _frelease: BOOL,
+        ) -> WinResult<()> {
+            Err(Error::from(E_NOTIMPL))
+        }
+
+        fn EnumFormatEtc(&self, dwdirection: u32) -> WinResult<IEnumFORMATETC> {
+            if dwdirection == DATADIR_GET.0 as u32 {
+                let fmts = vec![
+                    CasaTextDataObject::formatetc_hglobal(CF_UNICODETEXT.0),
+                    CasaTextDataObject::formatetc_hglobal(CF_TEXT.0),
+                    CasaTextDataObject::formatetc_hglobal(CF_OEMTEXT.0),
+                    CasaTextDataObject::formatetc_hglobal(CF_LOCALE.0),
+                ];
+                Ok(CasaEnumFormatEtc::new(fmts).into())
+            } else {
+                Err(Error::from(E_NOTIMPL))
+            }
+        }
+
+        fn DAdvise(
+            &self,
+            _pformatetc: *const FORMATETC,
+            _advf: u32,
+            _padvsink: Ref<IAdviseSink>,
+        ) -> WinResult<u32> {
+            Err(Error::from(OLE_E_ADVISENOTSUPPORTED))
+        }
+
+        fn DUnadvise(&self, _dwconnection: u32) -> WinResult<()> {
+            Err(Error::from(OLE_E_ADVISENOTSUPPORTED))
+        }
+
+        fn EnumDAdvise(&self) -> WinResult<IEnumSTATDATA> {
+            Err(Error::from(OLE_E_ADVISENOTSUPPORTED))
+        }
+    }
+
+    fn run_drag_drop_on_sta(
+        data_object: IDataObject,
         main_hwnd: Option<HWND>,
+        allowed_effects: DROPEFFECT,
     ) -> Result<NativeDragDropResult, String> {
         let _ole_guard = OleInitGuard::acquire()?;
         let _drag_out_guard = InternalDragOutGuard::enter();
@@ -607,11 +1083,15 @@ mod win32_drag {
             });
         }
 
-        let data_object: IDataObject = CasaFileDataObject::new(valid_paths).into();
+        // Bebaskan mouse capture sisa WebView2 sebelum memasuki modal loop OLE DoDragDrop
+        unsafe {
+            let _ = ReleaseCapture();
+        }
+
         let drop_source: IDropSource = CasaDropSource.into();
         let mut out_effect = DROPEFFECT_NONE;
 
-        let hr = unsafe { DoDragDrop(&data_object, &drop_source, DROPEFFECT_COPY, &mut out_effect) };
+        let hr = unsafe { DoDragDrop(&data_object, &drop_source, allowed_effects, &mut out_effect) };
 
         let mut dropped_on_self = false;
         if hr == DRAGDROP_S_DROP && out_effect != DROPEFFECT_NONE {
@@ -642,6 +1122,69 @@ mod win32_drag {
             },
             effect: out_effect.0,
         })
+    }
+
+    pub fn execute_drag_drop_on_sta(
+        valid_paths: Vec<String>,
+        main_hwnd: Option<HWND>,
+    ) -> Result<NativeDragDropResult, String> {
+        let data_object: IDataObject = CasaFileDataObject::new(valid_paths).into();
+        run_drag_drop_on_sta(data_object, main_hwnd, DROPEFFECT_COPY)
+    }
+
+    pub fn execute_text_drag_drop_on_sta(
+        text: String,
+        main_hwnd: Option<HWND>,
+    ) -> Result<NativeDragDropResult, String> {
+        let data_object: IDataObject = CasaTextDataObject::new(text).into();
+        run_drag_drop_on_sta(data_object, main_hwnd, DROPEFFECT_COPY | DROPEFFECT_MOVE)
+    }
+
+    #[cfg(test)]
+    pub fn create_text_data_object(text: String) -> IDataObject {
+        CasaTextDataObject::new(text).into()
+    }
+}
+
+/// Menyeret teks atau link DropZone keluar ke editor, browser, atau aplikasi chat lewat Win32 OLE `DoDragDrop`
+/// (`CF_UNICODETEXT` + `CF_TEXT`) pada thread STA utama dengan validasi ganda `DRAGDROP_S_DROP` + `DROPEFFECT`.
+#[tauri::command]
+pub async fn native_drag_drop_text(
+    app: tauri::AppHandle,
+    text: String,
+) -> Result<NativeDragDropResult, String> {
+    #[cfg(windows)]
+    {
+        if text.trim().is_empty() {
+            return Err("Konten teks atau tautan kosong.".to_string());
+        }
+        if text.chars().count() > 200_000 {
+            return Err("Konten teks melebihi batas drag-out 200.000 karakter.".to_string());
+        }
+
+        let main_hwnd_raw = app
+            .get_webview_window("main")
+            .and_then(|w| w.hwnd().ok())
+            .map(|h| h.0 as isize);
+
+        let (tx, rx) = tokio::sync::oneshot::channel::<Result<NativeDragDropResult, String>>();
+
+        app.run_on_main_thread(move || {
+            let main_hwnd =
+                main_hwnd_raw.map(|raw| windows::Win32::Foundation::HWND(raw as *mut _));
+            let res = win32_drag::execute_text_drag_drop_on_sta(text, main_hwnd);
+            let _ = tx.send(res);
+        })
+        .map_err(|e| format!("Gagal menjadwalkan drag-out teks di UI thread: {}", e))?;
+
+        rx.await
+            .map_err(|_| "Channel hasil DoDragDrop teks tertutup sebelum selesai".to_string())?
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = (app, text);
+        Err("Native CF_UNICODETEXT drag-out hanya didukung di Windows".to_string())
     }
 }
 
@@ -933,6 +1476,284 @@ mod tests {
 
             let _ = GlobalUnlock(hglobal);
             let _ = GlobalFree(Some(hglobal));
+        }
+    }
+
+    #[cfg(windows)]
+    const GMEM_INVALID_HANDLE: u32 = 0x8000;
+
+    #[cfg(windows)]
+    #[test]
+    fn builds_valid_utf16_cf_unicodetext_hglobal() {
+        use windows::Win32::Foundation::GlobalFree;
+        use windows::Win32::System::Memory::{GlobalFlags, GlobalLock, GlobalSize, GlobalUnlock};
+
+        let sample = "Halo CASA \u{1F680} https://example.com/path?a=1&b=2";
+        let hglobal = build_cf_unicodetext_hglobal(sample).expect("allocate cf_unicodetext");
+
+        unsafe {
+            let flags = GlobalFlags(hglobal);
+            assert_eq!(flags & GMEM_INVALID_HANDLE, 0, "HGLOBAL must be valid GMEM_MOVEABLE handle");
+
+            let byte_size = GlobalSize(hglobal);
+            let units: Vec<u16> = sample.encode_utf16().collect();
+            let expected_byte_len = (units.len() + 1) * std::mem::size_of::<u16>();
+            assert!(byte_size >= expected_byte_len);
+
+            let ptr = GlobalLock(hglobal) as *const u16;
+            assert!(!ptr.is_null());
+
+            let expected_u16: Vec<u16> = sample.encode_utf16().chain(std::iter::once(0u16)).collect();
+            let slice = std::slice::from_raw_parts(ptr, expected_u16.len());
+            assert_eq!(slice, expected_u16.as_slice());
+            assert_eq!(slice.last().copied(), Some(0u16));
+
+            let _ = GlobalUnlock(hglobal);
+            let _ = GlobalFree(Some(hglobal));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_empty_cf_unicodetext_hglobal() {
+        assert!(build_cf_unicodetext_hglobal("").is_err());
+    }
+
+    #[test]
+    fn sanitizes_transit_filename_and_blocks_traversal() {
+        let sanitized = sanitize_transit_filename(r"../../evil\..\secret<1>.pdf");
+        assert!(!sanitized.contains(".."));
+        assert!(!sanitized.contains('/'));
+        assert!(!sanitized.contains('\\'));
+        assert_eq!(sanitized, "secret_1_.pdf");
+
+        assert_eq!(sanitize_transit_filename("../../.."), "dropped-file.bin");
+        assert_eq!(sanitize_transit_filename("   "), "dropped-file.bin");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn chromium_text_data_object_supports_bitmask_tymed_and_triple_getdata_lifecycle() {
+        use windows::Win32::Foundation::{DATA_S_SAMEFORMATETC, DV_E_FORMATETC, E_INVALIDARG, S_OK};
+        use windows::Win32::System::Com::{
+            DVASPECT_CONTENT, DVASPECT_THUMBNAIL, FORMATETC, TYMED_HGLOBAL, TYMED_ISTREAM,
+        };
+        use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
+        use windows::Win32::System::Memory::{GlobalFlags, GlobalLock, GlobalSize, GlobalUnlock};
+        use windows::Win32::System::Ole::{
+            ReleaseStgMedium, CF_LOCALE, CF_OEMTEXT, CF_TEXT, CF_UNICODETEXT,
+        };
+        use windows_core::w;
+
+        let sample = "Halo WhatsApp & Chrome \u{1F680}";
+        let data_obj = win32_drag::create_text_data_object(sample.to_string());
+        let bitmask_tymed = (TYMED_HGLOBAL.0 | TYMED_ISTREAM.0) as u32;
+
+        let make_fmt = |cf: u16, lindex: i32, tymed: u32, dw_aspect: u32| FORMATETC {
+            cfFormat: cf,
+            ptd: std::ptr::null_mut(),
+            dwAspect: dw_aspect,
+            lindex,
+            tymed,
+        };
+
+        unsafe {
+            // QueryGetData must accept Chromium's TYMED_HGLOBAL | TYMED_ISTREAM bitmask for CF_UNICODETEXT, CF_TEXT, CF_OEMTEXT, CF_LOCALE
+            for &cf in &[CF_UNICODETEXT.0, CF_TEXT.0, CF_OEMTEXT.0, CF_LOCALE.0] {
+                for &lindex in &[-1, 0] {
+                    let fmt = make_fmt(cf, lindex, bitmask_tymed, DVASPECT_CONTENT.0);
+                    assert_eq!(data_obj.QueryGetData(&fmt), S_OK);
+                }
+            }
+
+            // GetCanonicalFormatEtc validation (null checks + ptd zeroing)
+            let in_fmt = make_fmt(CF_UNICODETEXT.0, -1, TYMED_HGLOBAL.0 as u32, DVASPECT_CONTENT.0);
+            let mut out_fmt = FORMATETC {
+                ptd: 0x1 as *mut _,
+                ..Default::default()
+            };
+            assert_eq!(
+                data_obj.GetCanonicalFormatEtc(&in_fmt, std::ptr::null_mut()),
+                E_INVALIDARG
+            );
+            assert_eq!(
+                data_obj.GetCanonicalFormatEtc(std::ptr::null(), &mut out_fmt),
+                E_INVALIDARG
+            );
+            assert_eq!(
+                data_obj.GetCanonicalFormatEtc(&in_fmt, &mut out_fmt),
+                DATA_S_SAMEFORMATETC
+            );
+            assert!(out_fmt.ptd.is_null());
+            assert_eq!(out_fmt.cfFormat, CF_UNICODETEXT.0);
+
+            // Plain text should not advertise UniformResourceLocatorW
+            let url_cf = RegisterClipboardFormatW(w!("UniformResourceLocatorW")) as u16;
+            if url_cf != 0 {
+                let url_fmt = make_fmt(url_cf, -1, bitmask_tymed, DVASPECT_CONTENT.0);
+                assert_eq!(data_obj.QueryGetData(&url_fmt), DV_E_FORMATETC);
+            }
+
+            // Reject non-content aspect and stream-only tymed
+            assert_eq!(
+                data_obj.QueryGetData(&make_fmt(
+                    CF_UNICODETEXT.0,
+                    -1,
+                    bitmask_tymed,
+                    DVASPECT_THUMBNAIL.0
+                )),
+                DV_E_FORMATETC
+            );
+            assert_eq!(
+                data_obj.QueryGetData(&make_fmt(
+                    CF_UNICODETEXT.0,
+                    -1,
+                    TYMED_ISTREAM.0 as u32,
+                    DVASPECT_CONTENT.0
+                )),
+                DV_E_FORMATETC
+            );
+
+            // Call GetData 3 consecutive times (simulating DragEnter -> DragOver -> Drop) with ReleaseStgMedium each round
+            let unicode_fmt = make_fmt(CF_UNICODETEXT.0, -1, bitmask_tymed, DVASPECT_CONTENT.0);
+            let expected_u16: Vec<u16> = sample.encode_utf16().chain(std::iter::once(0u16)).collect();
+
+            for cycle in 0..3 {
+                let mut medium = data_obj
+                    .GetData(&unicode_fmt)
+                    .unwrap_or_else(|e| panic!("CF_UNICODETEXT GetData cycle {cycle} failed: {e}"));
+                assert_eq!(medium.tymed, TYMED_HGLOBAL.0 as u32);
+                let hglobal = medium.u.hGlobal;
+                assert_eq!(GlobalFlags(hglobal) & GMEM_INVALID_HANDLE, 0);
+                assert!(GlobalSize(hglobal) >= expected_u16.len() * 2);
+
+                let ptr = GlobalLock(hglobal) as *const u16;
+                assert!(!ptr.is_null(), "GlobalLock failed on cycle {cycle}");
+                let slice = std::slice::from_raw_parts(ptr, expected_u16.len());
+                assert_eq!(slice, expected_u16.as_slice(), "corrupted UTF-16 on cycle {cycle}");
+                let _ = GlobalUnlock(hglobal);
+
+                ReleaseStgMedium(&mut medium);
+            }
+
+            // Verify CF_TEXT and CF_OEMTEXT serve UTF-8 + NUL across calls
+            let mut expected_utf8 = sample.as_bytes().to_vec();
+            expected_utf8.push(0u8);
+            for &cf_byte_fmt in &[CF_TEXT.0, CF_OEMTEXT.0] {
+                let byte_fmt = make_fmt(cf_byte_fmt, 0, bitmask_tymed, DVASPECT_CONTENT.0);
+                let mut byte_medium = data_obj.GetData(&byte_fmt).expect("CF_TEXT/CF_OEMTEXT GetData failed");
+                assert_eq!(GlobalFlags(byte_medium.u.hGlobal) & GMEM_INVALID_HANDLE, 0);
+                let byte_ptr = GlobalLock(byte_medium.u.hGlobal) as *const u8;
+                assert!(!byte_ptr.is_null());
+                let byte_slice = std::slice::from_raw_parts(byte_ptr, expected_utf8.len());
+                assert_eq!(byte_slice, expected_utf8.as_slice());
+                let _ = GlobalUnlock(byte_medium.u.hGlobal);
+                ReleaseStgMedium(&mut byte_medium);
+            }
+
+            // Verify CF_LOCALE serves DWORD 0x0409
+            let locale_fmt = make_fmt(CF_LOCALE.0, -1, bitmask_tymed, DVASPECT_CONTENT.0);
+            let mut locale_medium = data_obj.GetData(&locale_fmt).expect("CF_LOCALE GetData failed");
+            assert!(GlobalSize(locale_medium.u.hGlobal) >= std::mem::size_of::<u32>());
+            let locale_ptr = GlobalLock(locale_medium.u.hGlobal) as *const u32;
+            assert!(!locale_ptr.is_null());
+            assert_eq!(*locale_ptr, 0x0409u32);
+            let _ = GlobalUnlock(locale_medium.u.hGlobal);
+            ReleaseStgMedium(&mut locale_medium);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn chromium_link_data_object_exposes_pure_text_formats_and_null_pceltfetched_enum() {
+        use windows::Win32::Foundation::{DV_E_FORMATETC, E_INVALIDARG, S_FALSE, S_OK};
+        use windows::Win32::System::Com::{
+            DATADIR_GET, DVASPECT_CONTENT, FORMATETC, TYMED_HGLOBAL, TYMED_ISTREAM,
+        };
+        use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
+        use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+        use windows::Win32::System::Ole::{
+            ReleaseStgMedium, CF_LOCALE, CF_OEMTEXT, CF_TEXT, CF_UNICODETEXT,
+        };
+        use windows_core::w;
+
+        let url = "https://casa-app.dev/drop?ref=wa";
+        let data_obj = win32_drag::create_text_data_object(url.to_string());
+        let bitmask_tymed = (TYMED_HGLOBAL.0 | TYMED_ISTREAM.0) as u32;
+
+        unsafe {
+            // Link payload MUST NOT expose URL/shortcut formats so Chromium/WhatsApp accept it as editable text
+            for url_fmt_name in [
+                w!("UniformResourceLocatorW"),
+                w!("UniformResourceLocator"),
+                w!("text/x-moz-url"),
+            ] {
+                let url_cf = RegisterClipboardFormatW(url_fmt_name) as u16;
+                if url_cf != 0 {
+                    let url_fmt = FORMATETC {
+                        cfFormat: url_cf,
+                        ptd: std::ptr::null_mut(),
+                        dwAspect: DVASPECT_CONTENT.0,
+                        lindex: -1,
+                        tymed: bitmask_tymed,
+                    };
+                    assert_eq!(data_obj.QueryGetData(&url_fmt), DV_E_FORMATETC);
+                    assert!(data_obj.GetData(&url_fmt).is_err());
+                }
+            }
+
+            // EnumFormatEtc(DATADIR_GET) must support Next(1, &fmt, null) (Chromium pattern) without E_INVALIDARG
+            let enum_fmt = data_obj
+                .EnumFormatEtc(DATADIR_GET.0 as u32)
+                .expect("EnumFormatEtc failed");
+
+            let mut collected_cfs = Vec::new();
+            // Calls COM vtable Next(1, &mut single, nullptr) via None
+            for expected_hr in [S_OK, S_OK, S_OK, S_OK, S_FALSE] {
+                let mut single = [FORMATETC::default(); 1];
+                let hr = enum_fmt.Next(&mut single, None);
+                assert_eq!(hr, expected_hr);
+                if hr == S_OK {
+                    collected_cfs.push(single[0].cfFormat);
+                }
+            }
+            assert_eq!(
+                collected_cfs,
+                vec![CF_UNICODETEXT.0, CF_TEXT.0, CF_OEMTEXT.0, CF_LOCALE.0]
+            );
+
+            // Multi-element Next with null pceltFetched MUST return E_INVALIDARG per COM spec
+            enum_fmt.Reset().expect("Reset failed");
+            let mut two = [FORMATETC::default(); 2];
+            assert_eq!(enum_fmt.Next(&mut two, None), E_INVALIDARG);
+
+            // Clone starts at same cursor position (index 0 after Reset) and yields all 4 with pceltFetched = Some
+            let cloned = enum_fmt.Clone().expect("Clone failed");
+            let mut listed = [FORMATETC::default(); 6];
+            let mut fetched = 0u32;
+            assert_eq!(cloned.Next(&mut listed, Some(&mut fetched)), S_FALSE);
+            assert_eq!(fetched, 4);
+
+            // Verify 3 consecutive GetData(CF_UNICODETEXT) + ReleaseStgMedium cycles preserve URL intact
+            let unicode_fmt = FORMATETC {
+                cfFormat: CF_UNICODETEXT.0,
+                ptd: std::ptr::null_mut(),
+                dwAspect: DVASPECT_CONTENT.0,
+                lindex: -1,
+                tymed: bitmask_tymed,
+            };
+            let expected_u16: Vec<u16> = url.encode_utf16().chain(std::iter::once(0u16)).collect();
+            for cycle in 0..3 {
+                let mut medium = data_obj
+                    .GetData(&unicode_fmt)
+                    .unwrap_or_else(|e| panic!("URL CF_UNICODETEXT GetData cycle {cycle} failed: {e}"));
+                let ptr = GlobalLock(medium.u.hGlobal) as *const u16;
+                assert!(!ptr.is_null());
+                let slice = std::slice::from_raw_parts(ptr, expected_u16.len());
+                assert_eq!(slice, expected_u16.as_slice());
+                let _ = GlobalUnlock(medium.u.hGlobal);
+                ReleaseStgMedium(&mut medium);
+            }
         }
     }
 }

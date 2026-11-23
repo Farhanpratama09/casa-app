@@ -1,4 +1,4 @@
-# CASA_CONTEXT.md — Single Source of Truth (`v2.1.4`)
+# CASA_CONTEXT.md — Single Source of Truth (`v2.2.0`)
 
 > Dibuat dari implementasi nyata pada `src/`, `src-tauri/`, dan `docs/` (bukan asumsi). Wajib diperbarui setiap kali kode atau arsitektur berubah.  
 > **CASA** — *Dynamic Rabbit Island for Windows* (`com.farhanpratama.casa`) · MIT License.
@@ -10,7 +10,7 @@
 | Aspek | Detail |
 |---|---|
 | Form factor | Window Tauri transparan, frameless, `alwaysOnTop`, `skipTaskbar`, `shadow:false`, dipusatkan di tepi atas monitor aktif |
-| Identifier / Versi | `com.farhanpratama.casa` / **`2.1.4`** (`tauri.conf.json`, `Cargo.toml`, `package.json`, `docs/`) |
+| Identifier / Versi | `com.farhanpratama.casa` / **`2.2.0`** (`tauri.conf.json`, `Cargo.toml`, `package.json`, `docs/`) |
 | Window utama | `1100×340` terkunci (kanvas logis 1100 px menghindari *DWM swapchain ResizeBuffers hitch*; hitbox dinamis via `WS_EX_TRANSPARENT` per `HitRect`) |
 | Settings window | Window sekunder `settings` (`DesktopSettingsWindow.tsx`) berarsitektur flat OLED 2-kolom (5 tab sidebar termasuk **`Ibadah & Lokasi`**) + tombol **`Quit CASA`** |
 | Frontend | React 19, TypeScript 5.7 (`strict`), Vite 6 (dev `127.0.0.1:1420`, `manualChunks` & lazy `Settings`), Tailwind 3.4, framer-motion 12, zustand 5, lucide-react |
@@ -42,7 +42,7 @@ asaverse/
 │  ├─ styles.css             ← Pure OLED theme + native Mode 6 capsule & Play Store reviews styling
 │  ├─ 404.html               ← Clean SPA sub-route restoration (/playground, /arsitektur, /unduh, /feedback)
 │  ├─ favicon.svg            ← Obsidian Bunny icon (`× ♥`)
-│  ├─ PRD.md                 ← Product Requirements Document v2.1.4
+│  ├─ PRD.md                 ← Product Requirements Document v2.2.0
 │  └─ sasha-character-spec.md
 ├─ supabase/                 ← Backend moderasi ulasan publik (`ivlyujaafwqziogajjtk.supabase.co`)
 │  ├─ config.toml            ← `verify_jwt = false` untuk `submit-review` & `telegram-webhook`
@@ -56,9 +56,10 @@ asaverse/
 │  ├─ verify-search-playlist-flow.mjs ← Verifikasi Search Drawer & Playlist popover flow
 │  ├─ verify-floating-drop-v213.mjs   ← Verifikasi Floating Mode anti-flicker & native CF_HDROP drag-out
 │  ├─ verify-player-v214.mjs         ← Verifikasi Smart Queue, Anti-Loop Playlist, Session Seeding, Region, Search & Lazy Bundle
+│  ├─ verify-dropzone-v220.mjs       ← Verifikasi Dropzone 2.0 (sanitasi HTML/URI, Smart Drag-In, Ctrl+V, CF_UNICODETEXT & ephemeral cleanup)
 │  └─ verify-*.{ts,js}                ← Logic test suite (lyrics, queue, browser sanitizer, time-sync, hitbox)
 ├─ src-tauri/
-│  ├─ tauri.conf.json        ← v2.1.4, com.farhanpratama.casa, 1100x340, CSP, updater pubkey + endpoints
+│  ├─ tauri.conf.json        ← v2.2.0, com.farhanpratama.casa, 1100x340, dragDropEnabled:false, CSP, updater pubkey + endpoints
 │  ├─ capabilities/default.json
 │  └─ src/
 │     ├─ main.rs / lib.rs    ← DPI window align (`position_window_top`), 50Hz hitbox, `Alt+Space`, tray EN, `quit_app`, updater
@@ -69,7 +70,7 @@ asaverse/
 │     ├─ native_audio.rs     ← InnerTube dinamis region (`gl`/`hl`), search multi-kategori (`search_catalog_native`), `Up Next / Watch Playlist` (`get_up_next_native`), `browse_collection_tracks_native`, & stream resolution (`resolve_track_stream`)
 │     ├─ system_hardware.rs  ← WASAPI volume/mute, Display brightness WMI, Stay-Awake, Wi-Fi, Bluetooth devices/battery, audio endpoints
 │     ├─ system_stats.rs     ← CPU, RAM, & hardware telemetry (`get_system_telemetry`)
-│     ├─ drop_zone.rs        ← Drop shelf metadata, clipboard files/image, launch/reveal/open actions
+│     ├─ drop_zone.rs        ← Drop shelf metadata, clipboard files/image, staging transit ephemeral (`stage_dropped_file`, `cleanup_ephemeral_drop_zone`), native OLE `CF_HDROP` & `CF_UNICODETEXT` drag-out, launch/reveal/open actions
 │     └─ media/
 │        ├─ mod.rs           ← Router IPC media (`tokio::time::timeout` + `spawn_blocking`)
 │        ├─ types.rs         ← `MediaSessionSummary`, `MediaUpdatePayload`
@@ -110,12 +111,12 @@ asaverse/
 - **Window & Lifecycle:** `set_ignore_cursor_events`, `align_window_top`, `adjust_window_size`, `focus_island_window`, `set_window_visibility`, `toggle_gaming_mode`, `quit_app`, `update_island_hitbox`, `update_island_hitboxes`, `set_island_pinned`.
 - **System & OTA:** `get_global_shortcut_status`, `get_autostart_enabled`, `set_autostart_enabled`, `check_app_update`, `install_app_update`, `get_update_notification_status`, `trigger_background_update_check`, `dismiss_update_badge`, `clear_update_notification`.
 - **Media & Spotify:** `media_play_pause`, `media_next_track`, `media_prev_track`, `control_media_session`, `quick_swap_session`, `seek_media_session`, `get_current_media`, `spotify_play_track`, `spotify_play_uri_stealth`, `minimize_spotify_stealth`, `is_spotify_running`, `ensure_spotify_running_silent`, `focus_spotify_window`, `launch_spotify_process_clean`, `quit_spotify_app`, `start_spotify_login`, `refresh_spotify_user_token`, `search_tracks_native`, `search_catalog_native`, `get_up_next_native`, `browse_collection_tracks_native`, `get_player_region_info`, `resolve_track_stream`.
-- **Hardware & Drop Zone:** `get_system_metrics`, `get_system_telemetry`, `get_hardware_telemetry`, `set_master_volume`, `toggle_audio_mute`, `set_display_brightness`, `set_stay_awake`, `get_stay_awake`, `get_radio_states`, `toggle_wifi`, `toggle_bluetooth`, `scan_wifi_networks`, `connect_wifi_network`, `list_paired_bluetooth`, `toggle_bluetooth_device`, `get_audio_output_devices`, `set_default_audio_endpoint`, `get_file_metadata`, `register_drop_zone_files`, `read_clipboard_text`, `read_clipboard_files`, `save_clipboard_image`, `copy_files_to_clipboard`, `native_drag_drop_files`, `pick_drop_zone_files`, `launch_file_item`, `reveal_in_folder`, `open_file_item`, `open_url_item`.
+- **Hardware & Drop Zone:** `get_system_metrics`, `get_system_telemetry`, `get_hardware_telemetry`, `set_master_volume`, `toggle_audio_mute`, `set_display_brightness`, `set_stay_awake`, `get_stay_awake`, `get_radio_states`, `toggle_wifi`, `toggle_bluetooth`, `scan_wifi_networks`, `connect_wifi_network`, `list_paired_bluetooth`, `toggle_bluetooth_device`, `get_audio_output_devices`, `set_default_audio_endpoint`, `get_file_metadata`, `register_drop_zone_files`, `read_clipboard_text`, `read_clipboard_files`, `save_clipboard_image`, `copy_files_to_clipboard`, `native_drag_drop_files`, `native_drag_drop_text`, `stage_dropped_file`, `cleanup_ephemeral_drop_zone`, `pick_drop_zone_files`, `launch_file_item`, `reveal_in_folder`, `open_file_item`, `open_url_item`.
 - **Pengingat Ibadah & Lokasi (`prayer.rs`):** `get_prayer_times`, `detect_windows_location`, `search_prayer_city`, `open_windows_location_settings`.
 
 ---
 
-## 4. Arsitektur Frontend & UX `v2.1.4` (`src/` & `docs/`)
+## 4. Arsitektur Frontend & UX `v2.2.0` (`src/` & `docs/`)
 
 ### 4.1 Dimensi Kapsul (`islandLayoutState.ts`)
 - **Smart-Tuck:** `120×4 px` (sensor hover Docked `136×12 px`, Floating `140×18 px`), cooldown hysteresis hover/transisi terpadu **`220 ms`** (`HOVER_TRANSITION_HYSTERESIS_MS`), dan kompensasi *top-bridge* `0..12 px` di Floating Mode (`computePrimaryIslandHitboxAndSensor`) untuk transisi `tucked ↔ tucked_peek ↔ idle ↔ idle_peek`, plus cooldown pasca-fullscreen `450 ms`.
@@ -134,6 +135,10 @@ asaverse/
   - *Region Dinamis & Pencarian Terstruktur:* Parameter `gl`/`hl` dibaca dinamis dari Windows locale OS (`Win32_Globalization`) dengan override manual `Auto | ID | US | KR | JP` (`settings.playerRegion` di `Timer, Audio & Player`); Search Pod kiri menampilkan **Top Songs Artis**, **Albums**, **Playlists**, dan **Songs** lengkap dengan tombol **Play All** / **+ Antrian** 1-klik yang memutar lagu utuh tanpa menunggu lirik sinkron LRCLIB.
   - *Hygiene RAM & Ukuran Biner:* `DesktopSettingsWindow` di-lazy-load via `React.lazy` (dikeluarkan dari `modulePreload` utama lewat `vite.config.ts`), dan `Cargo.toml` mengonfigurasi `[profile.release]` (`opt-level = "z"`, `lto = "thin"`, `strip = "symbols"`, `panic = "abort"`, `codegen-units = 1`).
 - **Pure Monochrome Fidelity:** Saat `settings.theme === 'monochrome'`, seluruh elemen (`BatteryPill`, ikon `Speaker` / `Headphones` / `Bluetooth`, cincin CPU/RAM/Focus, status Wi-Fi/BT) wajib membaca token dari `CASA_THEME_PALETTES` (`#FFFFFF` / zinc) tanpa kelas warna statis Tailwind (`text-emerald-*`, `text-green-*`, dll.).
+- **Dropzone 2.0 — Papan Transit Teks, Link & File Ephemeral (`v2.2.0`):**
+  - *Smart Drag-In & `Ctrl+V` Eksplisit:* `dragDropEnabled: false` pada window `main` memungkinkan DOM `dragenter`/`dragover`/`drop` menerima `Files`, `text/uri-list`, `text/plain`, dan `text/html` langsung ke kapsul (termasuk membangunkan mode `tucked`/`idle`/`resting`), dilengkapi tombol **`Paste`** & pintasan `Ctrl+V` on-demand tanpa *clipboard snooping* latar belakang.
+  - *Sanitasi & Blokir Skema URI Berbahaya:* `sanitizeDropText` membersihkan tag HTML/skrip dan karakter kontrol/bidi; `parseSafeHttpUrl` membatasi tautan hanya pada `http://` & `https://` serta memblokir `javascript:`, `data:`, `vbscript:`, `file://`, dll. dengan indikator `securityNotice`.
+  - *Native Drag-Out `CF_UNICODETEXT`, Clipboard 1-Klik & Safeguard Undo 4 Detik:* `DropZoneView.tsx` mendukung drag-out kartu `file`/`image` (`native_drag_drop_files` `CF_HDROP`) dan `text`/`link` (`native_drag_drop_text` `CF_UNICODETEXT` + `CF_TEXT` + `CF_OEMTEXT` + `CF_LOCALE` lewat `run_drag_drop_on_sta`) dengan auto-hapus bersyarat `DRAGDROP_S_DROP` + anti-self-drop; klik tunggal badan kartu `text`/`link` langsung menyalin `item.payload` (`Tersalin`), sementara 1 item terakhir hasil drag-out ditahan in-memory selama `4 detik` disertai banner **Urungkan** (`undoLastDraggedOut`); seluruh isi Dropzone + direktori transit dibersihkan otomatis saat `beforeunload`, `pagehide`, startup, tray `"quit"`, maupun `quit_app` (`cleanup_ephemeral_transit_dir`).
 
 - **Single Clock Sync, `Unsynced` Auto-Scroll & To-Do Alarm `v2.0.4`:**
   - *Single Playback Clock:* `playbackClock.ts` menyatukan `resolvePlaybackPositionMs`, `computeLyricAdjustedTimeMs` (`75 ms` companion, `0 ms` native), dan `computeSyncedLyricIndex` (`50 ms` hysteresis) untuk Mode 6 & Idle Pill, disertai re-anchor SMTC (`reanchorMediaPlaybackClock`) saat transisi expanded/idle & Playing/Paused.
@@ -146,6 +151,6 @@ asaverse/
   - *Fullscreen, Post-Stop State & Celestial Sky Curve:* Pil T-0 tampil ringkas (`✦ ☾` mata Bintang & Bulan pada `CasaCompanionAvatar` ekspresi `'prayer'`, teks `Adzan <Sholat>`, jam tabular, 4 bar equalizer monokrom, tombol `Stop`/`Tutup`, animasi *micro-vibrate* 600ms, dan *breathing border glow*) dengan `hoverExpandLocked` penuh. Setelah `Stop`/audio selesai: tetap terbuka jika sebelumnya **Expanded Mode 6**, kembali ke **`idle`** normal pada desktop biasa, dan hanya langsung kembali ke **`tucked`** jika sedang aktif **Fullscreen / Gaming (`smart-tuck`)**. Pada `total-hide`, layar dijaga bersih (audio-only untuk Adzan/Chime; `Visual Saja` ditahan hingga keluar fullscreen dalam grace window 5 menit). Tab `Ibadah` menampilkan kurva parabola SVG dengan 5 titik sholat, ikon benda langit bergerak `13×13px` (Matahari Terbit / Matahari Penuh / Matahari Terbenam / Bulan Sabit + bintang) berlatar `#000000` (`r=8`) dan interpolasi warna langit dinamis (patuh Pure Monochrome pada tema `monochrome`), tombol *Perbarui Lokasi* (`↻`) di sebelah kota, label ringkas `<SHOLAT>` + `NEXT`, serta deep-link langsung ke sidebar Settings **`Ibadah & Lokasi`**.
 
 ### 4.3 Web Showcase & Ratings/Reviews (`docs/` & `supabase/`)
-- **1:1 Parity Demo:** Simulasi interaktif di [docs/index.html](./docs/index.html) & [docs/app.js](./docs/app.js) mengikuti anatomi kapsul, intro `"Hi."`, Mode 6 `Player | Playlists` + `QUEUE`, Circular Battery Ring, Brightness HUD, Control Center, Drop Zone, serta **Pengingat Ibadah `v2.1.0`** (opt-in tab ke-5 kurva parabola SVG, simulasi pil `T-0` `✦ ☾` + `Adzan <Sholat>` + equalizer + getar mikro dengan `hoverExpandLocked`, dan banner tipis Mode 6).
+- **1:1 Parity Demo:** Simulasi interaktif di [docs/index.html](./docs/index.html) & [docs/app.js](./docs/app.js) mengikuti anatomi kapsul, intro `"Hi."`, Mode 6 `Player | Playlists` + `QUEUE`, Circular Battery Ring, Brightness HUD, Control Center, **Drop Zone 2.0** (file, link & text transit card + tombol `Paste` & `Ctrl+V` eksplisit + wake saat drag), serta **Pengingat Ibadah `v2.1.0`** (opt-in tab ke-5 kurva parabola SVG, simulasi pil `T-0` `✦ ☾` + `Adzan <Sholat>` + equalizer + getar mikro dengan `hoverExpandLocked`, dan banner tipis Mode 6).
 - **Download Hub:** Menjumlahkan `.exe` + `.msi` dari GitHub Releases API (cache `localStorage` 15 menit) dan cooldown klik tombol 6 detik. Tombol utama berlabel `Download CASA for Windows` dengan metadata versi pada subteks `#download-size-text`.
 - **Ratings & Reviews (Play Store Style):** Bagian `#feedback` membaca view `casa_reviews_public` dan `casa_review_stats` menggunakan `SUPABASE_PUBLISHABLE_KEY` via header `apikey` saja (tanpa `Authorization: Bearer`), dengan pengiriman lewat Edge Function `submit-review` (anti-spam + HMAC `/64` IP rate limit) dan moderasi 1-klik / balasan `Creator` lewat `telegram-webhook`. CSP ketat mengunci `script-src 'self'`, `frame-src 'none'`, dan `connect-src 'self' https://api.github.com https://ivlyujaafwqziogajjtk.supabase.co`.
