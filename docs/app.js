@@ -105,9 +105,17 @@
       id: 'text-snippet',
       kind: 'text',
       name: 'Ephemeral transit note',
-      snippet: 'Checklist v2.2.0: Smart Drag-In, Ctrl+V & CF_UNICODETEXT.',
+      snippet: 'Checklist v2.3.0: Drag-In Folder, Ctrl+V & Connect HP.',
       ext: 'TXT',
-      meta: 'TXT · 58 chars',
+      meta: 'TXT · 54 chars',
+    },
+    {
+      id: 'folder-hp-batch',
+      kind: 'folder',
+      hpOnly: true,
+      name: 'Batch-HP (12 foto)',
+      ext: 'DIR',
+      meta: '12/12 file · 38.4 MB',
     },
   ];
 
@@ -205,6 +213,9 @@
     droppedIds: [],
     lastReturnedDropId: null,
     dropzoneUndoTimerId: null,
+    connectHpOpen: false,
+    connectHpIface: 'wifi',
+    connectHpConnected: false,
     introTimers: [],
     lyricIntervalId: null,
     clockIntervalId: null,
@@ -349,8 +360,15 @@
     droppedItems: $('vm-dropped-items'),
     dropzoneCount: $('vm-dropzone-count'),
     dropzoneUndoBtn: $('vm-dropzone-undo-btn'),
+    dropzoneConnectBtn: $('vm-dropzone-connect-btn'),
     dropzonePasteBtn: $('vm-dropzone-paste-btn'),
     copyBackBtn: $('vm-copy-back-btn'),
+    dropzoneConnectPod: $('vm-dropzone-connect-pod'),
+    dzConnectStatus: $('vm-dz-connect-status'),
+    dzConnectClose: $('vm-dz-connect-close'),
+    dzIfaceSelect: $('vm-dz-iface-select'),
+    dzConnectUrl: $('vm-dz-connect-url'),
+    dzSimPhoneBtn: $('vm-dz-sim-phone-btn'),
 
     // Desktop workspace scenes
     sceneResting: $('scene-resting'),
@@ -1188,7 +1206,7 @@
   function renderDropzoneCards() {
     if (el.desktopFiles) {
       clearNode(el.desktopFiles);
-      SAMPLE_FILES.forEach((file) => {
+      SAMPLE_FILES.filter((file) => !file.hpOnly).forEach((file) => {
         const isDropped = state.droppedIds.includes(file.id);
         const card = document.createElement('div');
         card.className = isDropped ? 'vm-file-card stashed' : 'vm-file-card';
@@ -1320,7 +1338,13 @@
         bot.className = 'casa-drop-card-bot';
         const hint = document.createElement('span');
         hint.textContent =
-          meta.kind === 'link' ? 'Link' : meta.kind === 'text' ? 'Text' : 'Parked';
+          meta.kind === 'folder'
+            ? 'Folder'
+            : meta.kind === 'link'
+            ? 'Link'
+            : meta.kind === 'text'
+            ? 'Text'
+            : 'Parked';
 
         const copyBtn = document.createElement('button');
         copyBtn.type = 'button';
@@ -1397,6 +1421,21 @@
     }
     if (el.copyBackBtn) {
       el.copyBackBtn.hidden = state.droppedIds.length === 0;
+    }
+    if (el.dropzoneConnectPod) {
+      el.dropzoneConnectPod.hidden = !state.connectHpOpen;
+    }
+    if (el.dropzoneConnectBtn) {
+      el.dropzoneConnectBtn.classList.toggle('primary', state.connectHpOpen);
+    }
+    if (el.dzConnectStatus) {
+      el.dzConnectStatus.textContent = state.connectHpConnected ? 'Terhubung' : 'Menunggu Scan';
+    }
+    if (el.dzConnectUrl) {
+      el.dzConnectUrl.textContent =
+        state.connectHpIface === 'hotspot'
+          ? 'http://192.168.137.1:54820'
+          : 'http://192.168.1.12:54820';
     }
   }
 
@@ -2454,6 +2493,34 @@
     if (el.ccWiredBtn) el.ccWiredBtn.addEventListener('click', triggerWiredHud);
 
     // Drop Zone
+    if (el.dropzoneConnectBtn) {
+      el.dropzoneConnectBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.connectHpOpen = !state.connectHpOpen;
+        syncUI();
+      });
+    }
+    if (el.dzConnectClose) {
+      el.dzConnectClose.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.connectHpOpen = false;
+        syncUI();
+      });
+    }
+    if (el.dzIfaceSelect) {
+      el.dzIfaceSelect.addEventListener('change', (ev) => {
+        ev.stopPropagation();
+        state.connectHpIface = el.dzIfaceSelect.value === 'hotspot' ? 'hotspot' : 'wifi';
+        syncUI();
+      });
+    }
+    if (el.dzSimPhoneBtn) {
+      el.dzSimPhoneBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.connectHpConnected = true;
+        captureFileIntoDropZone('folder-hp-batch');
+      });
+    }
     if (el.dropzoneUndoBtn) {
       el.dropzoneUndoBtn.addEventListener('click', (ev) => {
         ev.stopPropagation();
@@ -2584,7 +2651,7 @@
           ? exeVersion.trim().startsWith('v')
             ? exeVersion.trim()
             : `v${exeVersion.trim()}`
-          : 'v2.2.0';
+          : 'v2.3.0';
       el.downloadSizeText.textContent = `${versionTag} · NSIS Setup (.exe) · ${exeSize}`;
     }
     if (el.downloadCountText) {
@@ -2686,13 +2753,13 @@
       let exeSize = null;
       let exeVersion = null;
       if (v2Release && Array.isArray(v2Release.assets)) {
-        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.2.0';
+        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.3.0';
         const exeAsset = v2Release.assets.find(
           (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
         );
         if (exeAsset && isSafeGitHubUrl(exeAsset.browser_download_url)) {
           exeUrl = exeAsset.browser_download_url;
-          exeSize = formatMegabytes(exeAsset.size) || '4.49 MB';
+          exeSize = formatMegabytes(exeAsset.size) || '4.65 MB';
         }
       }
 
@@ -2711,7 +2778,7 @@
         );
       } catch (_err) {}
     } catch (_err) {
-      // Keep static v2.2.0 fallback link & hide download count gracefully when offline/rate-limited
+      // Keep static v2.3.0 fallback link & hide download count gracefully when offline/rate-limited
     }
   }
 

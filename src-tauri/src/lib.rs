@@ -6,6 +6,7 @@ use tauri::{
     Position, Size, LogicalPosition, LogicalSize,
 };
 
+mod connect_hp;
 mod drop_zone;
 mod hitbox;
 mod media;
@@ -336,6 +337,7 @@ fn toggle_gaming_mode(app: tauri::AppHandle, enabled: bool) -> Result<bool, Stri
 /// Command to cleanly terminate the application and unregister global shortcuts
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
+    connect_hp::shutdown_connect_hp_server();
     drop_zone::cleanup_ephemeral_transit_dir(&app);
     #[cfg(desktop)]
     {
@@ -483,6 +485,7 @@ pub fn run() {
                             let _ = app.emit("tray-toggle-gaming", ());
                         }
                         "quit" => {
+                            connect_hp::shutdown_connect_hp_server();
                             drop_zone::cleanup_ephemeral_transit_dir(app);
                             #[cfg(desktop)]
                             {
@@ -570,12 +573,22 @@ pub fn run() {
             drop_zone::native_drag_drop_files,
             drop_zone::native_drag_drop_text,
             drop_zone::stage_dropped_file,
+            drop_zone::create_drop_transit_directory,
+            drop_zone::save_dropped_directory_file,
             drop_zone::cleanup_ephemeral_drop_zone,
             drop_zone::pick_drop_zone_files,
+            drop_zone::pick_drop_zone_folder,
             drop_zone::launch_file_item,
             drop_zone::reveal_in_folder,
             drop_zone::open_file_item,
             drop_zone::open_url_item,
+            connect_hp::start_connect_hp,
+            connect_hp::stop_connect_hp,
+            connect_hp::get_connect_hp_status,
+            connect_hp::select_connect_hp_interface,
+            connect_hp::set_connect_hp_auto_copy,
+            connect_hp::sync_connect_hp_items,
+            connect_hp::open_windows_network_settings,
             align_window_top,
             set_window_visibility,
             get_global_shortcut_status,

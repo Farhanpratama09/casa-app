@@ -63,6 +63,123 @@ pub fn sanitize_transit_filename(raw: &str) -> String {
     result
 }
 
+pub fn sanitize_directory_name(raw: &str) -> String {
+    let segment = raw
+        .split(['/', '\\'])
+        .rfind(|s| !s.trim().is_empty())
+        .unwrap_or("")
+        .trim();
+
+    if segment.is_empty() || segment == "." || segment == ".." {
+        return "Dropped Folder".to_string();
+    }
+
+    let mut clean: String = segment
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_' | ' ') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    while clean.contains("..") {
+        clean = clean.replace("..", ".");
+    }
+
+    let trimmed = clean.trim_matches(|ch: char| ch == '.' || ch.is_whitespace());
+    if trimmed.is_empty() {
+        return "Dropped Folder".to_string();
+    }
+
+    let mut result = trimmed.to_string();
+    if result.len() > 80 {
+        result.truncate(80);
+    }
+    result
+}
+
+fn reserve_unique_directory_path(base_dir: &Path, raw_name: &str) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(base_dir)
+        .map_err(|e| format!("Gagal membuat folder dasar CASA Drop: {}", e))?;
+
+    let safe_base = sanitize_directory_name(raw_name);
+    for idx in 0..1000u32 {
+        let dir_name = if idx == 0 {
+            safe_base.clone()
+        } else {
+            format!("{} ({})", safe_base, idx)
+        };
+        let candidate = base_dir.join(dir_name);
+        match std::fs::create_dir(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(format!("Gagal membuat folder transit '{}': {}", candidate.display(), err));
+            }
+        }
+    }
+
+    Err("Terlalu banyak folder dengan nama identik di CASA Drop".to_string())
+}
+
+fn sanitize_relative_subpath(relative_path: &str) -> Result<PathBuf, String> {
+    let raw_segments: Vec<&str> = relative_path
+        .split(['/', '\\'])
+        .filter(|s| !s.trim().is_empty() && s.trim() != ".")
+        .collect();
+
+    if raw_segments.is_empty() {
+        return Err("Jalur relatif berkas di dalam folder kosong".to_string());
+    }
+
+    let mut clean_rel = PathBuf::new();
+    let last_idx = raw_segments.len() - 1;
+    for (idx, seg) in raw_segments.iter().enumerate() {
+        let trimmed = seg.trim();
+        if trimmed == ".." || trimmed.contains("..") || trimmed.contains(':') {
+            return Err("Path traversal pada jalur relatif folder ditolak".to_string());
+        }
+        let clean_seg = if idx == last_idx {
+            sanitize_transit_filename(trimmed)
+        } else {
+            sanitize_directory_name(trimmed)
+        };
+        clean_rel.push(clean_seg);
+    }
+
+    if clean_rel.as_os_str().is_empty() {
+        return Err("Jalur relatif berkas tidak valid".to_string());
+    }
+
+    Ok(clean_rel)
+}
+
+fn resolve_safe_file_inside_root(
+    base_downloads_drop: &Path,
+    root_dir: &Path,
+    relative_path: &str,
+) -> Result<PathBuf, String> {
+    let canon_base = std::fs::canonicalize(base_downloads_drop)
+        .map_err(|e| format!("Gagal memverifikasi folder dasar CASA Drop: {}", e))?;
+    let canon_root = std::fs::canonicalize(root_dir)
+        .map_err(|e| format!("Folder tujuan transit tidak ditemukan: {}", e))?;
+
+    if !canon_root.starts_with(&canon_base) || canon_root == canon_base || !canon_root.is_dir() {
+        return Err("Folder tujuan harus berada di dalam Downloads\\CASA Drop".to_string());
+    }
+
+    let rel_subpath = sanitize_relative_subpath(relative_path)?;
+    let target_path = canon_root.join(rel_subpath);
+    if !target_path.starts_with(&canon_root) {
+        return Err("Path tujuan keluar dari root folder transit".to_string());
+    }
+
+    Ok(target_path)
+}
+
 pub fn cleanup_ephemeral_transit_dir(app: &tauri::AppHandle) {
     if let Ok(transit_dir) = ephemeral_transit_dir(app) {
         let _ = std::fs::remove_dir_all(transit_dir);
@@ -127,36 +244,127 @@ pub fn stage_dropped_file(
     Ok(dest_path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+pub fn create_drop_transit_directory(
+    app: tauri::AppHandle,
+    folder_name: String,
+) -> Result<String, String> {
+    let base_dir = crate::connect_hp::resolve_casa_drop_dir(&app)?;
+    let dest_dir = reserve_unique_directory_path(&base_dir, &folder_name)?;
+    allow_path_in_asset_scope(&app, &dest_dir);
+    Ok(dest_dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn save_dropped_directory_file(
+    app: tauri::AppHandle,
+    root_dir: String,
+    relative_path: String,
+    data_base64: String,
+) -> Result<u64, String> {
+    const MAX_STAGED_BYTES: usize = 25 * 1024 * 1024;
+    const MAX_BASE64_LEN: usize = 35 * 1024 * 1024;
+
+    let trimmed = data_base64.trim();
+    if trimmed.len() > MAX_BASE64_LEN {
+        return Err("Ukuran berkas melebihi batas transit 25 MB".to_string());
+    }
+
+    let decoded = if trimmed.is_empty() {
+        Vec::new()
+    } else {
+        base64::engine::general_purpose::STANDARD
+            .decode(trimmed)
+            .map_err(|e| format!("Gagal mendekode data berkas folder: {}", e))?
+    };
+
+    if decoded.len() > MAX_STAGED_BYTES {
+        return Err("Ukuran berkas melebihi batas transit 25 MB".to_string());
+    }
+
+    let base_dir = crate::connect_hp::resolve_casa_drop_dir(&app)?;
+    let dest_file = resolve_safe_file_inside_root(&base_dir, Path::new(root_dir.trim()), &relative_path)?;
+    if let Some(parent) = dest_file.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Gagal membuat subdirektori transit: {}", e))?;
+    }
+
+    std::fs::write(&dest_file, &decoded)
+        .map_err(|e| format!("Gagal menyimpan berkas folder transit: {}", e))?;
+
+    allow_path_in_asset_scope(&app, &dest_file);
+    Ok(decoded.len() as u64)
+}
+
 #[derive(serde::Serialize)]
 pub struct FileMetadata {
     pub exists: bool,
     pub size_bytes: u64,
     pub is_dir: bool,
+    pub file_count: Option<u32>,
 }
 
-fn allow_path_in_asset_scope(app: &tauri::AppHandle, path: &Path) {
+pub(crate) fn allow_path_in_asset_scope(app: &tauri::AppHandle, path: &Path) {
     if path.is_file() {
         let _ = app.asset_protocol_scope().allow_file(path);
+    } else if path.is_dir() {
+        let _ = app.asset_protocol_scope().allow_directory(path, true);
     }
+}
+
+pub fn count_directory_files(dir: &Path, limit: u32) -> u32 {
+    let mut stack = vec![dir.to_path_buf()];
+    let mut count: u32 = 0;
+
+    while let Some(curr) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&curr) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
+                continue;
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            if meta.is_file() {
+                count = count.saturating_add(1);
+                if count >= limit {
+                    return count;
+                }
+            } else if meta.is_dir() && stack.len() < 512 {
+                stack.push(entry.path());
+            }
+        }
+    }
+
+    count
 }
 
 #[tauri::command]
 pub fn get_file_metadata(app: tauri::AppHandle, path: String) -> Result<FileMetadata, String> {
     let p = Path::new(&path);
     if let Ok(meta) = std::fs::metadata(p) {
-        if meta.is_file() {
+        if meta.is_file() || meta.is_dir() {
             allow_path_in_asset_scope(&app, p);
         }
+        let file_count = if meta.is_dir() {
+            Some(count_directory_files(p, 5000))
+        } else {
+            None
+        };
         Ok(FileMetadata {
             exists: true,
             size_bytes: meta.len(),
             is_dir: meta.is_dir(),
+            file_count,
         })
     } else {
         Ok(FileMetadata {
             exists: false,
             size_bytes: 0,
             is_dir: false,
+            file_count: None,
         })
     }
 }
@@ -172,7 +380,7 @@ pub fn register_drop_zone_files(app: tauri::AppHandle, paths: Vec<String>) -> Re
             continue;
         }
         let p = Path::new(trimmed);
-        if p.is_file() {
+        if p.is_file() || p.is_dir() {
             allow_path_in_asset_scope(&app, p);
             allowed.push(trimmed.to_string());
         }
@@ -262,6 +470,49 @@ pub fn read_clipboard_text() -> Result<Option<String>, String> {
     #[cfg(not(windows))]
     {
         Ok(None)
+    }
+}
+
+/// Menuliskan teks Unicode (CF_UNICODETEXT) ke Windows Clipboard secara eksplisit (reuse `open_clipboard_session` + `build_cf_unicodetext_hglobal`).
+pub fn write_clipboard_text(text: &str) -> Result<(), String> {
+    if text.is_empty() {
+        return Err("Teks clipboard kosong".to_string());
+    }
+
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::{GlobalFree, HANDLE};
+        use windows::Win32::System::DataExchange::{EmptyClipboard, SetClipboardData};
+        use windows::Win32::System::Ole::CF_UNICODETEXT;
+
+        let hglobal = build_cf_unicodetext_hglobal(text)?;
+
+        unsafe {
+            let Ok(_clipboard_guard) = open_clipboard_session() else {
+                let _ = GlobalFree(Some(hglobal));
+                return Err("Clipboard sedang digunakan oleh aplikasi lain".to_string());
+            };
+
+            let write_res = (|| -> Result<(), String> {
+                EmptyClipboard().map_err(|e| format!("EmptyClipboard gagal: {}", e))?;
+                SetClipboardData(CF_UNICODETEXT.0 as u32, Some(HANDLE(hglobal.0)))
+                    .map_err(|e| format!("SetClipboardData gagal: {}", e))?;
+                Ok(())
+            })();
+
+            if let Err(err) = write_res {
+                let _ = GlobalFree(Some(hglobal));
+                return Err(err);
+            }
+        }
+
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = text;
+        Err("Penulisan clipboard sistem hanya didukung di Windows".to_string())
     }
 }
 
@@ -394,7 +645,7 @@ fn normalize_existing_drop_paths(paths: Vec<String>) -> Vec<String> {
             continue;
         }
         let replaced = trimmed.replace('/', "\\");
-        let candidate = if let Some(stripped) = replaced.strip_prefix(r"\\?\") {
+        let mut candidate = if let Some(stripped) = replaced.strip_prefix(r"\\?\") {
             if !stripped.starts_with("UNC\\") && stripped.len() < 260 {
                 stripped.to_string()
             } else {
@@ -403,7 +654,11 @@ fn normalize_existing_drop_paths(paths: Vec<String>) -> Vec<String> {
         } else {
             replaced
         };
-        if Path::new(&candidate).exists() && !normalized.contains(&candidate) {
+        while candidate.len() > 3 && candidate.ends_with('\\') {
+            candidate.pop();
+        }
+        let candidate_path = Path::new(&candidate);
+        if (candidate_path.is_file() || candidate_path.is_dir()) && !normalized.contains(&candidate) {
             normalized.push(candidate);
         }
     }
@@ -1199,7 +1454,13 @@ pub async fn native_drag_drop_files(
     {
         let valid_paths = normalize_existing_drop_paths(paths);
         if valid_paths.is_empty() {
-            return Err("Berkas tidak ditemukan di disk atau sudah dipindahkan.".to_string());
+            return Err("Berkas atau folder tidak ditemukan di disk atau sudah dipindahkan.".to_string());
+        }
+        for valid_path in &valid_paths {
+            let p = Path::new(valid_path);
+            if p.is_dir() || p.is_file() {
+                allow_path_in_asset_scope(&app, p);
+            }
         }
 
         let main_hwnd_raw = app
@@ -1228,81 +1489,107 @@ pub async fn native_drag_drop_files(
     }
 }
 
+#[cfg(windows)]
+async fn run_native_open_dialog(
+    app: tauri::AppHandle,
+    pick_folders: bool,
+) -> Result<Vec<String>, String> {
+    let app_clone = app.clone();
+    let res = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<String>, String> {
+        use windows::Win32::Foundation::ERROR_CANCELLED;
+        use windows::Win32::System::Com::{
+            CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
+            CLSCTX_ALL, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
+        };
+        use windows::Win32::UI::Shell::{
+            FileOpenDialog, IFileOpenDialog, FOS_ALLOWMULTISELECT, FOS_FILEMUSTEXIST,
+            FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
+        };
+
+        struct ComGuard;
+        impl Drop for ComGuard {
+            fn drop(&mut self) {
+                unsafe { CoUninitialize() };
+            }
+        }
+
+        unsafe {
+            let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+            if hr.is_err() {
+                return Err(format!("CoInitializeEx gagal: {:?}", hr));
+            }
+            let _com_guard = ComGuard;
+
+            let dialog: IFileOpenDialog =
+                CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)
+                    .map_err(|e| format!("Gagal membuat dialog pemilih: {}", e))?;
+
+            if let Ok(opts) = dialog.GetOptions() {
+                let extra = if pick_folders {
+                    FOS_PICKFOLDERS | FOS_ALLOWMULTISELECT | FOS_PATHMUSTEXIST
+                } else {
+                    FOS_ALLOWMULTISELECT | FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST
+                };
+                let _ = dialog.SetOptions(opts | extra);
+            }
+
+            if let Err(err) = dialog.Show(None) {
+                let cancelled = windows::core::HRESULT::from_win32(ERROR_CANCELLED.0);
+                if err.code() == cancelled {
+                    return Ok(Vec::new());
+                }
+                return Err(format!("Dialog dibatalkan atau gagal: {}", err));
+            }
+
+            let results = dialog
+                .GetResults()
+                .map_err(|e| format!("Gagal membaca pilihan item: {}", e))?;
+            let count = results.GetCount().unwrap_or(0);
+            let mut picked = Vec::with_capacity(count as usize);
+
+            for idx in 0..count {
+                if let Ok(item) = results.GetItemAt(idx) {
+                    if let Ok(pwstr) = item.GetDisplayName(SIGDN_FILESYSPATH) {
+                        let path_str = pwstr.to_string().unwrap_or_default();
+                        CoTaskMemFree(Some(pwstr.0 as *const _));
+                        if !path_str.is_empty() {
+                            allow_path_in_asset_scope(&app_clone, Path::new(&path_str));
+                            picked.push(path_str);
+                        }
+                    }
+                }
+            }
+
+            Ok(picked)
+        }
+    })
+    .await
+    .map_err(|e| format!("Task dialog pemilih gagal: {}", e))?;
+
+    res
+}
+
 /// Membuka dialog pilih file native Windows (multi-select) tanpa memblokir event loop UI utama.
 #[tauri::command]
 pub async fn pick_drop_zone_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     #[cfg(windows)]
     {
-        let app_clone = app.clone();
-        let res = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<String>, String> {
-            use windows::Win32::Foundation::ERROR_CANCELLED;
-            use windows::Win32::System::Com::{
-                CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
-                CLSCTX_ALL, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
-            };
-            use windows::Win32::UI::Shell::{
-                FileOpenDialog, IFileOpenDialog, FOS_ALLOWMULTISELECT, FOS_FILEMUSTEXIST,
-                FOS_PATHMUSTEXIST, SIGDN_FILESYSPATH,
-            };
+        run_native_open_dialog(app, false).await
+    }
 
-            struct ComGuard;
-            impl Drop for ComGuard {
-                fn drop(&mut self) {
-                    unsafe { CoUninitialize() };
-                }
-            }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        Ok(Vec::new())
+    }
+}
 
-            unsafe {
-                let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-                if hr.is_err() {
-                    return Err(format!("CoInitializeEx gagal: {:?}", hr));
-                }
-                let _com_guard = ComGuard;
-
-                let dialog: IFileOpenDialog =
-                    CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)
-                        .map_err(|e| format!("Gagal membuat dialog file: {}", e))?;
-
-                if let Ok(opts) = dialog.GetOptions() {
-                    let _ = dialog.SetOptions(
-                        opts | FOS_ALLOWMULTISELECT | FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST,
-                    );
-                }
-
-                if let Err(err) = dialog.Show(None) {
-                    let cancelled = windows::core::HRESULT::from_win32(ERROR_CANCELLED.0);
-                    if err.code() == cancelled {
-                        return Ok(Vec::new());
-                    }
-                    return Err(format!("Dialog dibatalkan atau gagal: {}", err));
-                }
-
-                let results = dialog
-                    .GetResults()
-                    .map_err(|e| format!("Gagal membaca pilihan berkas: {}", e))?;
-                let count = results.GetCount().unwrap_or(0);
-                let mut picked = Vec::with_capacity(count as usize);
-
-                for idx in 0..count {
-                    if let Ok(item) = results.GetItemAt(idx) {
-                        if let Ok(pwstr) = item.GetDisplayName(SIGDN_FILESYSPATH) {
-                            let path_str = pwstr.to_string().unwrap_or_default();
-                            CoTaskMemFree(Some(pwstr.0 as *const _));
-                            if !path_str.is_empty() {
-                                allow_path_in_asset_scope(&app_clone, Path::new(&path_str));
-                                picked.push(path_str);
-                            }
-                        }
-                    }
-                }
-
-                Ok(picked)
-            }
-        })
-        .await
-        .map_err(|e| format!("Task dialog file gagal: {}", e))?;
-
-        res
+/// Membuka dialog pilih folder native Windows (FOS_PICKFOLDERS, mendukung path disk langsung tanpa batas 25 MB WebView).
+#[tauri::command]
+pub async fn pick_drop_zone_folder(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    #[cfg(windows)]
+    {
+        run_native_open_dialog(app, true).await
     }
 
     #[cfg(not(windows))]
@@ -1755,5 +2042,77 @@ mod tests {
                 ReleaseStgMedium(&mut medium);
             }
         }
+    }
+
+    #[test]
+    fn reserves_unique_directory_paths_with_collision_suffix() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "casa_drop_dir_res_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let d1 = reserve_unique_directory_path(&base_dir, "Project../Assets").expect("d1");
+        let d2 = reserve_unique_directory_path(&base_dir, "Project../Assets").expect("d2");
+        assert!(d1.is_dir());
+        assert!(d2.is_dir());
+        assert_ne!(d1, d2);
+        assert!(d2.file_name().unwrap().to_string_lossy().ends_with(" (1)"));
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn blocks_traversal_and_writes_safe_nested_relative_paths() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "casa_drop_dir_safe_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let base_drop = temp_root.join("CASA Drop");
+        let target_folder = reserve_unique_directory_path(&base_drop, "TripPhotos").expect("folder");
+
+        let safe_file =
+            resolve_safe_file_inside_root(&base_drop, &target_folder, "day1/sub/note.txt")
+                .expect("safe nested relative path");
+        assert!(safe_file.starts_with(std::fs::canonicalize(&target_folder).unwrap()));
+        assert!(safe_file.ends_with("note.txt"));
+
+        assert!(
+            resolve_safe_file_inside_root(&base_drop, &target_folder, "../escape.txt").is_err()
+        );
+        assert!(
+            resolve_safe_file_inside_root(&base_drop, &target_folder, "C:\\Windows\\win.ini")
+                .is_err()
+        );
+        assert!(
+            resolve_safe_file_inside_root(&base_drop, &temp_root, "outside.txt").is_err()
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_root);
+    }
+
+    #[test]
+    fn normalize_existing_drop_paths_allows_directories_and_strips_trailing_slash() {
+        let dir = std::env::temp_dir().join(format!(
+            "casa_drop_dir_norm_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let raw = dir.to_string_lossy().to_string();
+        let with_trailing = format!("{}\\", raw);
+        let slash_variant = with_trailing.replace('\\', "/");
+
+        let res = normalize_existing_drop_paths(vec![with_trailing, slash_variant]);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0], raw);
+        assert!(!res[0].ends_with('\\'));
     }
 }

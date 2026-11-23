@@ -40,7 +40,7 @@
     href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
     rel="stylesheet"
   />
-  <link rel="stylesheet" href="./styles.css?v=2.2.0" />
+  <link rel="stylesheet" href="./styles.css?v=2.3.0" />
 
   <script type="application/ld+json">
     {
@@ -53,7 +53,7 @@
       "description": "Ambient desktop notch & companion for Windows featuring monochrome OLED capsule interactions, synchronized lyrics, focus timer, brightness/Bluetooth telemetry, and drag-and-drop shelf.",
       "url": "https://farhanpratama09.github.io/casa-app/",
       "downloadUrl": "https://github.com/Farhanpratama09/casa-app/releases/latest",
-      "softwareVersion": "2.2.0",
+      "softwareVersion": "2.3.0",
       "license": "https://opensource.org/licenses/MIT",
       "author": {
         "@type": "Person",
@@ -661,6 +661,9 @@
                               <button type="button" id="vm-dropzone-undo-btn" class="casa-dz-pill-btn" hidden>
                                 Urungkan
                               </button>
+                              <button type="button" id="vm-dropzone-connect-btn" class="casa-dz-pill-btn">
+                                Connect HP
+                              </button>
                               <button type="button" id="vm-dropzone-paste-btn" class="casa-dz-pill-btn">
                                 Paste
                               </button>
@@ -676,6 +679,40 @@
                             </div>
                             <div class="casa-dropped-items" id="vm-dropped-items"></div>
                           </div>
+
+                          <!-- Right Popout Connect HP Pod (1:1 Parity v2.3.0) -->
+                          <aside class="casa-dz-connect-popout" id="vm-dropzone-connect-pod" aria-label="Connect HP Pod" hidden>
+                            <div class="casa-queue-popout-head">
+                              <div class="casa-queue-popout-left">
+                                <span class="casa-queue-popout-title">CONNECT HP</span>
+                                <span class="casa-queue-count-pill" id="vm-dz-connect-status">Menunggu Scan</span>
+                              </div>
+                              <button type="button" id="vm-dz-connect-close" class="casa-queue-close-btn" title="Tutup Connect HP" aria-label="Tutup Connect HP">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+                                  <line x1="18" y1="6" x2="6" y2="18" />
+                                  <line x1="6" y1="6" x2="18" y2="18" />
+                                </svg>
+                              </button>
+                            </div>
+                            <div class="casa-dz-connect-body">
+                              <div class="casa-dz-qr-tile" aria-label="Simulasi QR Connect HP">
+                                <svg viewBox="0 0 21 21" width="60" height="60" shape-rendering="crispEdges" aria-hidden="true">
+                                  <rect width="21" height="21" fill="#ffffff" />
+                                  <path d="M1 1h7v7H1zM2 2v5h5V2zM3 3h3v3H3zM13 1h7v7h-7zM14 2v5h5V2zM15 3h3v3h-3zM1 13h7v7H1zM2 14v5h5v-5zM3 15h3v3H3zM9 2h2v2H9zM9 6h3v2H9zM9 10h4v2H9zM14 10h2v3h-2zM17 10h3v2h-3zM10 14h2v2h-2zM13 14h4v2h-4zM18 14h2v4h-2zM10 18h6v2h-6z" fill="#000000" />
+                                </svg>
+                              </div>
+                              <div class="casa-dz-connect-controls">
+                                <select id="vm-dz-iface-select" class="casa-dz-iface-select" aria-label="Pilih antarmuka LAN">
+                                  <option value="wifi">Wi-Fi · 192.168.1.12</option>
+                                  <option value="hotspot">Hotspot · 192.168.137.1</option>
+                                </select>
+                                <div class="casa-dz-connect-url tabular" id="vm-dz-connect-url">http://192.168.1.12:54820</div>
+                                <button type="button" id="vm-dz-sim-phone-btn" class="casa-dz-pill-btn compact primary">
+                                  Kirim dari HP
+                                </button>
+                              </div>
+                            </div>
+                          </aside>
                         </div>
 
                         <!-- Panel E: Ibadah (Opt-In v2.1.0 Parabolic Sun/Moon Dynamic Sky Curve) -->
@@ -1079,7 +1116,7 @@
 
             <div class="download-cta-col">
               <a
-                href="https://github.com/Farhanpratama09/casa-app/releases/download/v2.2.0/CASA_2.2.0_x64-setup.exe"
+                href="https://github.com/Farhanpratama09/casa-app/releases/download/v2.3.0/CASA_2.3.0_x64-setup.exe"
                 target="_blank"
                 rel="noopener noreferrer"
                 id="primary-download-btn"
@@ -1088,7 +1125,7 @@
                 <span id="primary-download-label">Download CASA for Windows</span>
               </a>
               <span class="download-size-note tabular" id="download-size-note">
-                <span id="download-size-text">v2.2.0 · NSIS Setup (.exe) · 4.49 MB</span><span id="download-count-text" class="download-count-meta" hidden></span>
+                <span id="download-size-text">v2.3.0 · NSIS Setup (.exe) · 4.65 MB</span><span id="download-count-text" class="download-count-meta" hidden></span>
               </span>
             </div>
           </div>
@@ -1104,11 +1141,11 @@
             <summary class="sha-summary">Verify SHA-256 checksum</summary>
             <div class="checksum-box">
               <div class="checksum-header">
-                <span>SHA-256 · CASA_2.2.0_x64-setup.exe</span>
+                <span>SHA-256 · CASA_2.3.0_x64-setup.exe</span>
                 <button type="button" id="copy-sha-btn" class="copy-mini-btn">Salin Hash</button>
               </div>
               <p class="checksum-code" id="sha-value-exe">
-                843085CEB531543AA6AC6DAB680280F5BC1CDDB837383927FA5B2255F487253F
+                0AD97B83B9865B27EC7C86CABEEC3AB2BACC78BF48F50960AC9255FD6B385DD5
               </p>
             </div>
           </details>
@@ -1353,6 +1390,6 @@
     </div>
   </footer>
 
-  <script src="./app.js?v=2.2.0" defer></script>
+  <script src="./app.js?v=2.3.0" defer></script>
 </body>
 </html>

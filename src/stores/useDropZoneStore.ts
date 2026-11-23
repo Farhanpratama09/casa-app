@@ -1,8 +1,13 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import { cleanupEphemeralDropZone, stageDroppedFile } from '../utils/tauriBridge';
+import {
+  cleanupEphemeralDropZone,
+  createDropTransitDirectory,
+  saveDroppedDirectoryFile,
+  stageDroppedFile,
+} from '../utils/tauriBridge';
 
-export type DropItemType = 'file' | 'image' | 'text' | 'link';
+export type DropItemType = 'file' | 'image' | 'folder' | 'text' | 'link';
 
 export const MAX_DROP_TEXT_LENGTH = 50_000;
 export const MAX_STAGED_FILE_BYTES = 25 * 1024 * 1024;
@@ -47,6 +52,9 @@ export interface DropItem {
   sizeBytes?: number;
   extension?: string;
   isDir?: boolean;
+  fileCount?: number;
+  batchId?: string;
+  batchTotal?: number;
   timestamp: number;
 }
 
@@ -54,6 +62,7 @@ interface RustFileMetadata {
   exists: boolean;
   size_bytes: number;
   is_dir: boolean;
+  file_count?: number | null;
 }
 
 const BLOCKED_URI_SCHEME_RE =
@@ -311,7 +320,13 @@ function normalizeHydratedItem(rawItem: unknown): DropItem | null {
   }
 
   const rawType = rec.type === 'url' ? 'link' : rec.type;
-  if (rawType !== 'file' && rawType !== 'image' && rawType !== 'text' && rawType !== 'link') {
+  if (
+    rawType !== 'file' &&
+    rawType !== 'image' &&
+    rawType !== 'folder' &&
+    rawType !== 'text' &&
+    rawType !== 'link'
+  ) {
     return null;
   }
 
@@ -337,7 +352,10 @@ function normalizeHydratedItem(rawItem: unknown): DropItem | null {
     payload: rec.payload,
     sizeBytes: typeof rec.sizeBytes === 'number' ? rec.sizeBytes : undefined,
     extension: typeof rec.extension === 'string' ? rec.extension : undefined,
-    isDir: Boolean(rec.isDir),
+    isDir: Boolean(rec.isDir) || rawType === 'folder',
+    fileCount: typeof rec.fileCount === 'number' ? rec.fileCount : undefined,
+    batchId: typeof rec.batchId === 'string' ? rec.batchId : undefined,
+    batchTotal: typeof rec.batchTotal === 'number' ? rec.batchTotal : undefined,
     charCount: typeof rec.charCount === 'number' ? rec.charCount : undefined,
     lineCount: typeof rec.lineCount === 'number' ? rec.lineCount : undefined,
     timestamp,
@@ -392,9 +410,14 @@ async function resolveItemWithMetadata(
 
   let resolvedType = parsed.type;
   let resolvedSize = parsed.sizeBytes;
+  let resolvedExt = parsed.extension;
   let isDir = false;
+  let fileCount: number | undefined;
 
-  if ((parsed.type === 'file' || parsed.type === 'image') && '__TAURI_INTERNALS__' in window) {
+  if (
+    (parsed.type === 'file' || parsed.type === 'image' || parsed.type === 'folder') &&
+    '__TAURI_INTERNALS__' in window
+  ) {
     try {
       const meta = await invoke<RustFileMetadata>('get_file_metadata', {
         path: parsed.payload,
@@ -402,8 +425,12 @@ async function resolveItemWithMetadata(
       if (meta.exists) {
         isDir = Boolean(meta.is_dir);
         if (isDir) {
-          resolvedType = 'file';
+          resolvedType = 'folder';
+          resolvedExt = 'DIR';
           resolvedSize = undefined;
+          if (typeof meta.file_count === 'number') {
+            fileCount = meta.file_count;
+          }
         } else if (meta.size_bytes > 0) {
           resolvedSize = meta.size_bytes;
         }
@@ -416,8 +443,10 @@ async function resolveItemWithMetadata(
   return {
     ...parsed,
     type: resolvedType,
+    extension: resolvedExt,
     sizeBytes: resolvedSize,
     isDir,
+    fileCount,
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     timestamp: Date.now(),
   };
@@ -435,7 +464,7 @@ function normalizeUrlKey(rawUrl: string): string {
 }
 
 function itemMatchKey(item: Pick<DropItem, 'type' | 'payload'>): string {
-  if (item.type === 'file' || item.type === 'image') {
+  if (item.type === 'file' || item.type === 'image' || item.type === 'folder') {
     return `path:${normalizeWindowsPathKey(item.payload)}`;
   }
   if (item.type === 'link') {
@@ -452,6 +481,53 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
     chunks.push(String.fromCharCode(...bytes.subarray(i, i + CHUNK_SIZE)));
   }
   return btoa(chunks.join(''));
+}
+
+async function readAllDirectoryEntries(
+  reader: FileSystemDirectoryReader
+): Promise<FileSystemEntry[]> {
+  const all: FileSystemEntry[] = [];
+  while (true) {
+    const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => {
+      reader.readEntries(resolve, reject);
+    });
+    if (!batch || batch.length === 0) {
+      break;
+    }
+    all.push(...batch);
+  }
+  return all;
+}
+
+async function collectFilesFromDirectoryEntry(
+  dirEntry: FileSystemDirectoryEntry,
+  prefix = ''
+): Promise<Array<{ relativePath: string; file: File }>> {
+  const reader = dirEntry.createReader();
+  const entries = await readAllDirectoryEntries(reader);
+  const collected: Array<{ relativePath: string; file: File }> = [];
+
+  for (const entry of entries) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory) {
+      const nested = await collectFilesFromDirectoryEntry(
+        entry as FileSystemDirectoryEntry,
+        rel
+      );
+      collected.push(...nested);
+    } else if (entry.isFile) {
+      try {
+        const file = await new Promise<File>((resolve, reject) => {
+          (entry as FileSystemFileEntry).file(resolve, reject);
+        });
+        collected.push({ relativePath: rel, file });
+      } catch (err) {
+        console.warn('[DropZoneStore] Failed reading dropped directory file:', rel, err);
+      }
+    }
+  }
+
+  return collected;
 }
 
 export interface DropActionFeedback {
@@ -487,6 +563,21 @@ interface DropZoneStore {
     paths: string[],
     options?: { stagedPaths?: Set<string> }
   ) => Promise<DropItem[]>;
+  upsertBatchFolderItem: (info: {
+    batchId: string;
+    folderPath: string;
+    title: string;
+    fileCount: number;
+    batchTotal: number;
+    sizeBytes?: number;
+  }) => DropItem;
+  addDroppedFolderCard: (info: {
+    folderPath: string;
+    title: string;
+    fileCount: number;
+    sizeBytes?: number;
+    isStagedTemp?: boolean;
+  }) => DropItem;
   addDroppedDataTransfer: (dt: DataTransfer | null) => Promise<DataTransferDropResult>;
   syncAssetScopes: () => Promise<void>;
   removeItem: (id: string) => void;
@@ -727,8 +818,10 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
                   duplicateCount === resultingBatch.length
                     ? 'Sudah ada · digeser ke depan'
                     : resultingBatch.length === 1
-                    ? 'Berkas diparkir'
-                    : `${resultingBatch.length} berkas diparkir`,
+                    ? resultingBatch[0].type === 'folder'
+                      ? 'Folder diparkir'
+                      : 'Berkas diparkir'
+                    : `${resultingBatch.length} item diparkir`,
                 timestamp: now,
               }
             : state.lastActionFeedback,
@@ -738,63 +831,302 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
     return resultingBatch;
   },
 
+  upsertBatchFolderItem: (info: {
+    batchId: string;
+    folderPath: string;
+    title: string;
+    fileCount: number;
+    batchTotal: number;
+    sizeBytes?: number;
+  }) => {
+    const cleanPath = cleanFilePath(info.folderPath);
+    const targetKey = `path:${normalizeWindowsPathKey(cleanPath)}`;
+    let resultingItem: DropItem = {
+      id: `batch-${info.batchId}`,
+      type: 'folder',
+      title: info.title || 'Batch HP',
+      payload: cleanPath,
+      extension: 'DIR',
+      isDir: true,
+      fileCount: info.fileCount,
+      batchTotal: info.batchTotal,
+      batchId: info.batchId,
+      sizeBytes: info.sizeBytes,
+      timestamp: Date.now(),
+    };
+
+    clearPersistedStorage();
+    set((state) => {
+      const idx = state.items.findIndex(
+        (it) => it.batchId === info.batchId || itemMatchKey(it) === targetKey
+      );
+      if (idx !== -1) {
+        const prev = state.items[idx];
+        resultingItem = {
+          ...prev,
+          type: 'folder',
+          title: info.title || prev.title,
+          payload: cleanPath,
+          extension: 'DIR',
+          isDir: true,
+          fileCount: info.fileCount,
+          batchTotal: info.batchTotal,
+          batchId: info.batchId,
+          sizeBytes: info.sizeBytes ?? prev.sizeBytes,
+          timestamp: Date.now(),
+        };
+        const updated = state.items.slice();
+        updated[idx] = resultingItem;
+        return {
+          items: updated,
+          securityNotice: null,
+          lastActionFeedback: {
+            id: resultingItem.id,
+            isDuplicate: false,
+            label: `${info.fileCount}/${info.batchTotal} file diterima`,
+            timestamp: Date.now(),
+          },
+        };
+      }
+
+      const nextItems = [resultingItem, ...state.items].slice(0, MAX_STORED_ITEMS);
+      return {
+        items: nextItems,
+        securityNotice: null,
+        lastActionFeedback: {
+          id: resultingItem.id,
+          isDuplicate: false,
+          label: `${info.fileCount}/${info.batchTotal} file diterima`,
+          timestamp: Date.now(),
+        },
+      };
+    });
+
+    return resultingItem;
+  },
+
+  addDroppedFolderCard: (info: {
+    folderPath: string;
+    title: string;
+    fileCount: number;
+    sizeBytes?: number;
+    isStagedTemp?: boolean;
+  }) => {
+    const cleanPath = cleanFilePath(info.folderPath);
+    const targetKey = `path:${normalizeWindowsPathKey(cleanPath)}`;
+    let resultingItem: DropItem = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'folder',
+      title: info.title || 'Dropped Folder',
+      payload: cleanPath,
+      extension: 'DIR',
+      isDir: true,
+      fileCount: info.fileCount,
+      sizeBytes: info.sizeBytes && info.sizeBytes > 0 ? info.sizeBytes : undefined,
+      isStagedTemp: info.isStagedTemp,
+      timestamp: Date.now(),
+    };
+
+    clearPersistedStorage();
+    set((state) => {
+      const existingIdx = state.items.findIndex((it) => itemMatchKey(it) === targetKey);
+      if (existingIdx !== -1) {
+        const existing = state.items[existingIdx];
+        resultingItem = {
+          ...existing,
+          ...resultingItem,
+          id: existing.id,
+          timestamp: Date.now(),
+        };
+        const rest = state.items.filter((_, idx) => idx !== existingIdx);
+        return {
+          items: [resultingItem, ...rest].slice(0, MAX_STORED_ITEMS),
+          isDragging: false,
+          securityNotice: null,
+          lastActionFeedback: {
+            id: resultingItem.id,
+            isDuplicate: true,
+            label: 'Sudah ada · digeser ke depan',
+            timestamp: Date.now(),
+          },
+        };
+      }
+
+      return {
+        items: [resultingItem, ...state.items].slice(0, MAX_STORED_ITEMS),
+        isDragging: false,
+        securityNotice: null,
+        lastActionFeedback: {
+          id: resultingItem.id,
+          isDuplicate: false,
+          label: 'Folder diparkir',
+          timestamp: Date.now(),
+        },
+      };
+    });
+
+    return resultingItem;
+  },
+
   addDroppedDataTransfer: async (dt: DataTransfer | null): Promise<DataTransferDropResult> => {
     if (!dt) {
       set({ isDragging: false });
       return { added: 0, blocked: false };
     }
 
-    // Priority 1: Dropped Files
-    if (dt.files && dt.files.length > 0) {
-      const collectedPaths: string[] = [];
-      const stagedPaths = new Set<string>();
+    // Synchronous snapshot BEFORE any await (Chromium clears DataTransferItemList once yielding)
+    const dirEntries: FileSystemDirectoryEntry[] = [];
+    const plainFiles: File[] = [];
 
-      for (let i = 0; i < dt.files.length; i++) {
-        const file = dt.files[i];
-        const diskPath = (file as File & { path?: string }).path;
-        if (diskPath && diskPath.trim()) {
-          collectedPaths.push(diskPath);
+    if (dt.items && dt.items.length > 0) {
+      for (let i = 0; i < dt.items.length; i++) {
+        const rawItem = dt.items[i];
+        if (rawItem.kind !== 'file') continue;
+        const entry =
+          typeof rawItem.webkitGetAsEntry === 'function' ? rawItem.webkitGetAsEntry() : null;
+        if (entry?.isDirectory) {
+          dirEntries.push(entry as FileSystemDirectoryEntry);
           continue;
         }
-
-        if ('__TAURI_INTERNALS__' in window) {
-          if (file.size > MAX_STAGED_FILE_BYTES) {
-            get().setSecurityNotice(
-              `Berkas "${file.name}" melebihi batas transit 25 MB; gunakan + Add.`
-            );
-            continue;
-          }
-          if (file.size > 0) {
-            try {
-              const buffer = await file.arrayBuffer();
-              const b64 = arrayBufferToBase64(buffer);
-              const staged = await stageDroppedFile(file.name, b64);
-              if (staged) {
-                collectedPaths.push(staged);
-                stagedPaths.add(staged);
-              }
-            } catch (err) {
-              console.warn('[DropZoneStore] Stage dropped file failed:', err);
-            }
-          }
-        } else if (file.name) {
-          collectedPaths.push(file.name);
+        const f = rawItem.getAsFile();
+        if (f) {
+          plainFiles.push(f);
         }
       }
+    }
 
-      if (collectedPaths.length > 0) {
-        const addedItems = await get().addDroppedPaths(collectedPaths, { stagedPaths });
-        return { added: addedItems.length, blocked: false };
+    if (dirEntries.length === 0 && plainFiles.length === 0 && dt.files && dt.files.length > 0) {
+      for (let i = 0; i < dt.files.length; i++) {
+        plainFiles.push(dt.files[i]);
       }
-      set({ isDragging: false });
-      return { added: 0, blocked: false };
     }
 
     const htmlData = dt.getData('text/html') || '';
+    const uriListRaw = dt.getData('text/uri-list') || '';
+    const plainRaw = dt.getData('text/plain') || '';
+
+    // Priority 1: Dropped Directories & Plain Files (supports mixed drops)
+    if (dirEntries.length > 0 || plainFiles.length > 0) {
+      let foldersAdded = 0;
+      let filesAdded = 0;
+      let skippedLargeNotice: string | null = null;
+      const isTauri = '__TAURI_INTERNALS__' in window;
+
+      for (const dirEntry of dirEntries) {
+        try {
+          const collected = await collectFilesFromDirectoryEntry(dirEntry);
+          if (isTauri) {
+            const rootDir = await createDropTransitDirectory(dirEntry.name || 'Dropped Folder');
+            if (!rootDir) continue;
+            let writtenCount = 0;
+            let totalSize = 0;
+            let skippedInDir = 0;
+
+            for (const entryFile of collected) {
+              if (entryFile.file.size > MAX_STAGED_FILE_BYTES) {
+                skippedInDir++;
+                continue;
+              }
+              try {
+                const b64 =
+                  entryFile.file.size > 0
+                    ? arrayBufferToBase64(await entryFile.file.arrayBuffer())
+                    : '';
+                const writtenBytes = await saveDroppedDirectoryFile(
+                  rootDir,
+                  entryFile.relativePath,
+                  b64
+                );
+                writtenCount++;
+                totalSize += writtenBytes || entryFile.file.size;
+              } catch (err) {
+                console.warn(
+                  '[DropZoneStore] Failed saving folder child file:',
+                  entryFile.relativePath,
+                  err
+                );
+              }
+            }
+
+            if (skippedInDir > 0) {
+              skippedLargeNotice = `${skippedInDir} file >25 MB dilewati; pakai + Folder untuk ukuran besar.`;
+            }
+
+            const title = rootDir.replace(/^.*[\\/]/, '') || dirEntry.name || 'Dropped Folder';
+            get().addDroppedFolderCard({
+              folderPath: rootDir,
+              title,
+              fileCount: writtenCount,
+              sizeBytes: totalSize,
+              isStagedTemp: true,
+            });
+            foldersAdded++;
+          } else {
+            const totalSize = collected.reduce((acc, item) => acc + (item.file.size || 0), 0);
+            const fallbackPath = dirEntry.fullPath?.trim() || dirEntry.name || 'Dropped Folder';
+            get().addDroppedFolderCard({
+              folderPath: fallbackPath,
+              title: dirEntry.name || 'Dropped Folder',
+              fileCount: collected.length,
+              sizeBytes: totalSize,
+            });
+            foldersAdded++;
+          }
+        } catch (err) {
+          console.warn('[DropZoneStore] Failed staging dropped folder:', dirEntry.name, err);
+        }
+      }
+
+      if (plainFiles.length > 0) {
+        const collectedPaths: string[] = [];
+        const stagedPaths = new Set<string>();
+
+        for (const file of plainFiles) {
+          const diskPath = (file as File & { path?: string }).path;
+          if (diskPath && diskPath.trim()) {
+            collectedPaths.push(diskPath);
+            continue;
+          }
+
+          if (isTauri) {
+            if (file.size > MAX_STAGED_FILE_BYTES) {
+              skippedLargeNotice = `Berkas "${file.name}" melebihi batas transit 25 MB; gunakan + File.`;
+              continue;
+            }
+            if (file.size > 0) {
+              try {
+                const buffer = await file.arrayBuffer();
+                const b64 = arrayBufferToBase64(buffer);
+                const staged = await stageDroppedFile(file.name, b64);
+                if (staged) {
+                  collectedPaths.push(staged);
+                  stagedPaths.add(staged);
+                }
+              } catch (err) {
+                console.warn('[DropZoneStore] Stage dropped file failed:', err);
+              }
+            }
+          } else if (file.name) {
+            collectedPaths.push(file.name);
+          }
+        }
+
+        if (collectedPaths.length > 0) {
+          const addedItems = await get().addDroppedPaths(collectedPaths, { stagedPaths });
+          filesAdded += addedItems.length;
+        }
+      }
+
+      if (skippedLargeNotice) {
+        get().setSecurityNotice(skippedLargeNotice);
+      }
+      set({ isDragging: false });
+      return { added: foldersAdded + filesAdded, blocked: false };
+    }
+
     const htmlAnchor = extractAnchorFromHtml(htmlData);
 
     // Priority 2: URI List (dragged links from browser address bar / bookmarks / web)
-    const uriListRaw = dt.getData('text/uri-list');
     const uriCandidate = extractUriListCandidate(uriListRaw);
     if (uriCandidate) {
       if (isBlockedUriScheme(uriCandidate)) {
@@ -809,7 +1141,6 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
     }
 
     // Priority 3: Plain Text (selected text snippets or text URLs)
-    const plainRaw = dt.getData('text/plain');
     if (plainRaw && plainRaw.trim()) {
       if (isBlockedUriScheme(plainRaw)) {
         get().setSecurityNotice('Skema URI tidak aman diblokir (hanya http:// & https://)');
@@ -848,7 +1179,7 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
   syncAssetScopes: async () => {
     if (!('__TAURI_INTERNALS__' in window)) return;
     const paths = get()
-      .items.filter((it) => (it.type === 'file' || it.type === 'image') && !it.isDir)
+      .items.filter((it) => it.type === 'file' || it.type === 'image' || it.type === 'folder')
       .map((it) => it.payload);
 
     if (paths.length === 0) return;

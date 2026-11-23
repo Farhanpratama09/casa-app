@@ -38,6 +38,7 @@ import {
 } from '../utils/tauriBridge';
 import { useSkillStore } from '../skills/store';
 import { useDropZoneStore } from '../stores/useDropZoneStore';
+import { useConnectHpStore } from '../stores/useConnectHpStore';
 import { useSettingsStore, CasaHorizontalAlign } from '../stores/useSettingsStore';
 import {
   isSpotifyUserConnected,
@@ -552,10 +553,17 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   const [isQueuePodOpen, setIsQueuePodOpen] = useState<boolean>(false);
   const [isWifiPodOpen, setIsWifiPodOpen] = useState<boolean>(false);
   const [isBtPodOpen, setIsBtPodOpen] = useState<boolean>(false);
+  const [isConnectHpPodOpen, setIsConnectHpPodOpen] = useState<boolean>(false);
   const [isLyricsOpen, setIsLyricsOpen] = useState<boolean>(false);
   const isLyricsOpenRef = useRef<boolean>(false);
   isLyricsOpenRef.current = isLyricsOpen;
-  const podStateRef = useRef({ search: false, queue: false, wifi: false, bt: false });
+  const podStateRef = useRef({
+    search: false,
+    queue: false,
+    wifi: false,
+    bt: false,
+    connectHp: false,
+  });
 
   const [measuredPillWidth, setMeasuredPillWidth] = useState<number>(240);
   const measuredPillWidthRef = useRef<number>(240);
@@ -874,7 +882,12 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   const effectiveRightPodOpen =
     (islandState === 'expanded' || (islandState === 'idle_peek' && !isFocusHoverPeek)) &&
     ((effectiveExpandedMode === 'expanded_music' && !isMusicPodsBlockedAtHost && isQueuePodOpen) ||
-      (effectiveExpandedMode === 'expanded_control' && isBtPodOpen));
+      (effectiveExpandedMode === 'expanded_control' && isBtPodOpen) ||
+      (effectiveExpandedMode === 'drop_zone' && isConnectHpPodOpen));
+
+  useEffect(() => {
+    useConnectHpStore.getState().initListeners();
+  }, []);
 
   useEffect(() => {
     podStateRef.current = {
@@ -882,10 +895,12 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       queue: effectiveExpandedMode === 'expanded_music' && effectiveRightPodOpen,
       wifi: effectiveExpandedMode === 'expanded_control' && effectiveLeftPodOpen,
       bt: effectiveExpandedMode === 'expanded_control' && effectiveRightPodOpen,
+      connectHp: effectiveExpandedMode === 'drop_zone' && effectiveRightPodOpen,
     };
   }, [effectiveExpandedMode, effectiveLeftPodOpen, effectiveRightPodOpen]);
 
   // Close satellite pods when leaving their respective Mode 6 module or when GSMTC/Spotify Free restricts pods
+  // (NOTE: Connect HP local server keeps running on collapse/tab switch unless explicitly stopped)
   useEffect(() => {
     if (
       effectiveExpandedMode !== 'expanded_music' ||
@@ -897,6 +912,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     if (effectiveExpandedMode !== 'expanded_control') {
       setIsWifiPodOpen(false);
       setIsBtPodOpen(false);
+    }
+    if (effectiveExpandedMode !== 'drop_zone') {
+      setIsConnectHpPodOpen(false);
     }
   }, [effectiveExpandedMode, isMusicPodsBlockedAtHost]);
 
@@ -2539,6 +2557,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           setIsWifiPodOpen(false);
           setIsBtPodOpen(false);
         }
+        if (nextMode !== 'drop_zone') {
+          setIsConnectHpPodOpen(false);
+        }
         const targetSkill =
           nextMode === 'expanded_timer'
             ? 'core.timer'
@@ -2699,11 +2720,11 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
 
     const handleWindowDrop = async (e: DragEvent) => {
       if (useDropZoneStore.getState().isInternalDragging) return;
+      externalDragDepthRef.current = 0;
       if (e.defaultPrevented) return;
       if (!hasSupportedDragPayload(e.dataTransfer)) return;
 
       e.preventDefault();
-      externalDragDepthRef.current = 0;
       expandToDropZoneSurface(false);
 
       const firstFile = e.dataTransfer?.files?.[0];
@@ -3322,6 +3343,16 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                             <DropZoneView
                               isLockedExpanded={islandState === 'expanded'}
                               onOpenMusic={() => handleSelectMode('expanded_music')}
+                              podHostEl={podHostEl}
+                              isConnectHpPodOpen={effectiveRightPodOpen}
+                              onToggleConnectHpPod={() => {
+                                if (islandStateRef.current === 'idle_peek') {
+                                  handleLockExpanded();
+                                }
+                                setIsConnectHpPodOpen((prev) => !prev);
+                              }}
+                              onCloseConnectHpPod={() => setIsConnectHpPodOpen(false)}
+                              onInteractionLock={handleLockExpanded}
                             />
                           )}
                         </div>

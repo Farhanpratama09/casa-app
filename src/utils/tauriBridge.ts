@@ -657,7 +657,7 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
 export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   if (!isTauriEnv) {
     return {
-      currentVersion: '2.2.0',
+      currentVersion: '2.3.0',
       available: false,
       version: null,
       body: null,
@@ -672,7 +672,7 @@ export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
 export async function getUpdateNotificationStatus(): Promise<UpdateNotificationStatus> {
   if (!isTauriEnv) {
     return {
-      currentVersion: '2.2.0',
+      currentVersion: '2.3.0',
       latestVersion: null,
       releaseUrl: null,
       releaseNotes: null,
@@ -685,7 +685,7 @@ export async function getUpdateNotificationStatus(): Promise<UpdateNotificationS
     return await invoke<UpdateNotificationStatus>('get_update_notification_status');
   } catch {
     return {
-      currentVersion: '2.2.0',
+      currentVersion: '2.3.0',
       latestVersion: null,
       releaseUrl: null,
       releaseNotes: null,
@@ -896,6 +896,35 @@ export async function stageDroppedFile(
 }
 
 /**
+ * Creates a uniquely named transit directory inside %USERPROFILE%\Downloads\CASA Drop
+ * for folders dragged from Windows Explorer when dragDropEnabled=false.
+ */
+export async function createDropTransitDirectory(folderName: string): Promise<string | null> {
+  if (!isTauriEnv) {
+    return null;
+  }
+  return await invoke<string>('create_drop_transit_directory', { folderName });
+}
+
+/**
+ * Writes a single file inside a previously created drop transit folder using a validated relative path.
+ */
+export async function saveDroppedDirectoryFile(
+  rootDir: string,
+  relativePath: string,
+  dataBase64: string
+): Promise<number> {
+  if (!isTauriEnv) {
+    return 0;
+  }
+  return await invoke<number>('save_dropped_directory_file', {
+    rootDir,
+    relativePath,
+    dataBase64,
+  });
+}
+
+/**
  * Purges ephemeral Drop Zone transit files and temporary clipboard image caches.
  */
 export async function cleanupEphemeralDropZone(): Promise<void> {
@@ -904,5 +933,138 @@ export async function cleanupEphemeralDropZone(): Promise<void> {
     await invoke('cleanup_ephemeral_drop_zone');
   } catch (err) {
     console.warn('[CASA IPC] cleanup_ephemeral_drop_zone failed:', err);
+  }
+}
+
+export async function pickDropZoneFilesNative(): Promise<string[]> {
+  if (!isTauriEnv) return [];
+  return await invoke<string[]>('pick_drop_zone_files');
+}
+
+export async function pickDropZoneFolderNative(): Promise<string[]> {
+  if (!isTauriEnv) return [];
+  return await invoke<string[]>('pick_drop_zone_folder');
+}
+
+export interface NetworkInterfaceOption {
+  ip: string;
+  label: string;
+  isHotspot: boolean;
+}
+
+export type WindowsNetworkCategory = 'Private' | 'Public' | 'Domain' | 'Hotspot' | 'Unknown';
+
+export interface ConnectHpSessionInfo {
+  active: boolean;
+  ip: string;
+  port: number;
+  url: string;
+  qrSize: number;
+  qrPath: string;
+  networkCategory: WindowsNetworkCategory;
+  candidateInterfaces: NetworkInterfaceOption[];
+  connectedClients: number;
+  autoCopyClipboard: boolean;
+  idleTimeoutSecs: number;
+  downloadDir: string;
+  reason?: string | null;
+}
+
+export interface ConnectHpSyncItem {
+  id: string;
+  itemType: 'file' | 'image' | 'folder' | 'text' | 'link';
+  title: string;
+  extension?: string;
+  sizeBytes?: number;
+  fileCount?: number;
+  textPayload?: string;
+  localPath?: string;
+}
+
+export interface ConnectHpIncomingItemEvent {
+  kind: 'text' | 'file' | 'batch_folder';
+  payload: string;
+  fileName?: string | null;
+  sizeBytes?: number | null;
+  copiedToClipboard: boolean;
+  batchId?: string | null;
+  fileCount?: number | null;
+  batchTotal?: number | null;
+}
+
+export async function startConnectHp(
+  preferredIp?: string,
+  autoCopyClipboard = true
+): Promise<ConnectHpSessionInfo> {
+  if (!isTauriEnv) {
+    return {
+      active: false,
+      ip: '',
+      port: 0,
+      url: '',
+      qrSize: 0,
+      qrPath: '',
+      networkCategory: 'Unknown',
+      candidateInterfaces: [],
+      connectedClients: 0,
+      autoCopyClipboard,
+      idleTimeoutSecs: 600,
+      downloadDir: '',
+      reason: 'desktop_only',
+    };
+  }
+  return await invoke<ConnectHpSessionInfo>('start_connect_hp', {
+    preferredIp: preferredIp ?? null,
+    autoCopyClipboard,
+  });
+}
+
+export async function stopConnectHp(): Promise<void> {
+  if (!isTauriEnv) return;
+  await invoke('stop_connect_hp');
+}
+
+export async function getConnectHpStatus(): Promise<ConnectHpSessionInfo | null> {
+  if (!isTauriEnv) return null;
+  try {
+    return await invoke<ConnectHpSessionInfo>('get_connect_hp_status');
+  } catch {
+    return null;
+  }
+}
+
+export async function selectConnectHpInterface(
+  preferredIp: string
+): Promise<ConnectHpSessionInfo> {
+  if (!isTauriEnv) {
+    throw new Error('Desktop only');
+  }
+  return await invoke<ConnectHpSessionInfo>('select_connect_hp_interface', { preferredIp });
+}
+
+export async function setConnectHpAutoCopy(
+  enabled: boolean
+): Promise<ConnectHpSessionInfo | null> {
+  if (!isTauriEnv) return null;
+  return await invoke<ConnectHpSessionInfo>('set_connect_hp_auto_copy', { enabled });
+}
+
+export async function syncConnectHpItems(items: ConnectHpSyncItem[]): Promise<void> {
+  if (!isTauriEnv) return;
+  try {
+    await invoke('sync_connect_hp_items', { items });
+  } catch (err) {
+    console.warn('[CASA IPC] sync_connect_hp_items failed:', err);
+  }
+}
+
+export async function openWindowsNetworkSettings(
+  target: 'network' | 'hotspot' | 'firewall'
+): Promise<void> {
+  if (!isTauriEnv) return;
+  try {
+    await invoke('open_windows_network_settings', { target });
+  } catch (err) {
+    console.warn('[CASA IPC] open_windows_network_settings failed:', err);
   }
 }

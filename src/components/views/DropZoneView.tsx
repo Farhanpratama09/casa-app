@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus,
+  FolderPlus,
+  Smartphone,
   ClipboardPaste,
   Trash2,
   Inbox,
@@ -21,6 +24,7 @@ import {
   ExternalLink,
   ShieldAlert,
   RotateCcw,
+  AlertTriangle,
 } from 'lucide-react';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import {
@@ -34,18 +38,26 @@ import {
   isAudioItem,
   parseSafeHttpUrl,
 } from '../../stores/useDropZoneStore';
+import { useConnectHpStore } from '../../stores/useConnectHpStore';
 import { useCasaAudio } from '../../context/CasaAudioContext';
 import { NativeTrack, parseTrackTitleAndArtist } from '../../services/nativeAudioService';
 import {
   playChimeCue,
   nativeDragDropFiles,
   nativeDragDropText,
+  pickDropZoneFilesNative,
+  pickDropZoneFolderNative,
 } from '../../utils/tauriBridge';
 import { useSettingsStore } from '../../stores/useSettingsStore';
 
 export interface DropZoneViewProps {
   isLockedExpanded?: boolean;
   onOpenMusic?: () => void;
+  podHostEl?: HTMLDivElement | null;
+  isConnectHpPodOpen?: boolean;
+  onToggleConnectHpPod?: () => void;
+  onCloseConnectHpPod?: () => void;
+  onInteractionLock?: () => void;
 }
 
 const DRAG_THRESHOLD_PX = 8;
@@ -107,7 +119,17 @@ const renderCategoryIcon = (item: DropItem, isMonochrome = false) => {
 };
 
 const getItemMetaLabel = (item: DropItem): string => {
-  if (item.isDir) return 'Folder';
+  if (item.isDir || item.type === 'folder') {
+    if (typeof item.fileCount === 'number' && typeof item.batchTotal === 'number') {
+      const sz = item.sizeBytes ? ` · ${formatBytes(item.sizeBytes)}` : '';
+      return `${item.fileCount}/${item.batchTotal} file${sz}`;
+    }
+    if (typeof item.fileCount === 'number') {
+      const sz = item.sizeBytes ? ` · ${formatBytes(item.sizeBytes)}` : '';
+      return `${item.fileCount} ${item.fileCount === 1 ? 'file' : 'files'}${sz}`;
+    }
+    return 'Folder';
+  }
   if (isLinkItem(item)) {
     return item.domain || 'HTTPS Link';
   }
@@ -170,7 +192,8 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
     };
   }, []);
 
-  const isFileBased = item.type === 'file' || item.type === 'image';
+  const isFileBased =
+    item.type === 'file' || item.type === 'image' || item.type === 'folder';
   const canDragOut = isFileBased || item.type === 'text' || isLinkItem(item);
   const isAudio = isAudioItem(item);
 
@@ -470,6 +493,8 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
           >
             {copied
               ? 'Tersalin'
+              : item.type === 'folder' || item.isDir
+              ? 'Drag folder'
               : isFileBased
               ? 'Drag out'
               : isLinkItem(item)
@@ -554,6 +579,11 @@ const DropShelfCard: React.FC<DropShelfCardProps> = ({
 export const DropZoneView: React.FC<DropZoneViewProps> = ({
   isLockedExpanded: _isLockedExpanded = true,
   onOpenMusic,
+  podHostEl = null,
+  isConnectHpPodOpen = false,
+  onToggleConnectHpPod,
+  onCloseConnectHpPod,
+  onInteractionLock,
 }) => {
   const {
     items,
@@ -571,11 +601,13 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
     removeItem,
     clearAll,
   } = useDropZoneStore();
+  const connectHp = useConnectHpStore();
   const { settings, palette: themePalette } = useSettingsStore();
   const isMonochrome = settings.theme === 'monochrome';
 
   const [isPicking, setIsPicking] = useState(false);
   const [isPasting, setIsPasting] = useState(false);
+  const [urlCopied, setUrlCopied] = useState(false);
   const [localHint, setLocalHint] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -583,6 +615,7 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
   const lastNativePasteRef = useRef<number>(0);
   const keydownFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const urlCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scrollShelfToFront = useCallback(() => {
     requestAnimationFrame(() => {
@@ -607,6 +640,9 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
       }
       if (localHintTimerRef.current) {
         clearTimeout(localHintTimerRef.current);
+      }
+      if (urlCopyTimerRef.current) {
+        clearTimeout(urlCopyTimerRef.current);
       }
     };
   }, []);
@@ -798,7 +834,7 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
       if (isPicking) return;
       setIsPicking(true);
       try {
-        const paths = await invoke<string[]>('pick_drop_zone_files');
+        const paths = await pickDropZoneFilesNative();
         if (Array.isArray(paths) && paths.length > 0) {
           await addDroppedPaths(paths);
           scrollShelfToFront();
@@ -813,6 +849,55 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
     [isPicking, addDroppedPaths, scrollShelfToFront]
   );
 
+  const handlePickFolders = useCallback(
+    async (e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      if (isPicking) return;
+      setIsPicking(true);
+      try {
+        const paths = await pickDropZoneFolderNative();
+        if (Array.isArray(paths) && paths.length > 0) {
+          await addDroppedPaths(paths);
+          scrollShelfToFront();
+          playChimeCue('ding');
+        }
+      } catch (err) {
+        console.warn('[DropZoneView] Folder picker cancelled or failed:', err);
+      } finally {
+        setIsPicking(false);
+      }
+    },
+    [isPicking, addDroppedPaths, scrollShelfToFront]
+  );
+
+  const handleToggleConnectHp = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      playChimeCue('tap');
+      const willOpen = !isConnectHpPodOpen;
+      onToggleConnectHpPod?.();
+      if (willOpen && !connectHp.active && !connectHp.isLoading) {
+        void connectHp.startSession();
+      }
+    },
+    [isConnectHpPodOpen, onToggleConnectHpPod, connectHp]
+  );
+
+  const handleCopyConnectUrl = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!connectHp.url) return;
+      const ok = await copyTextToClipboard(connectHp.url);
+      if (ok) {
+        setUrlCopied(true);
+        playChimeCue('tap');
+        if (urlCopyTimerRef.current) clearTimeout(urlCopyTimerRef.current);
+        urlCopyTimerRef.current = setTimeout(() => setUrlCopied(false), 1600);
+      }
+    },
+    [connectHp.url]
+  );
+
   const handleShelfWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.stopPropagation();
     const container = shelfRef.current;
@@ -822,261 +907,558 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
     }
   };
 
+  const currentIface = connectHp.candidateInterfaces.find((c) => c.ip === connectHp.ip);
+  const hasHotspotOption = connectHp.candidateInterfaces.some((c) => c.isHotspot);
+  const isPublicWarning =
+    connectHp.active &&
+    connectHp.networkCategory === 'Public' &&
+    !currentIface?.isHotspot;
+  const podStatusBadge = !connectHp.active
+    ? connectHp.isLoading
+      ? 'Mulai...'
+      : 'Off'
+    : connectHp.connectedClients > 0
+    ? `${connectHp.connectedClients} HP`
+    : isPublicWarning
+    ? 'Public'
+    : 'Wait';
+
+  const rightPodX = 850;
+  const connectHpPodMarkup = (
+    <div
+      className="pointer-events-none w-[1100px] h-[196px] relative select-none"
+      data-tauri-drag-region="false"
+    >
+      <AnimatePresence>
+        {isConnectHpPodOpen && (
+          <motion.aside
+            key="right-connect-hp-pod"
+            data-pod="right"
+            data-satellite-pod="true"
+            data-connect-hp-pod="true"
+            initial={{ opacity: 0, x: -14, scale: 0.96, left: rightPodX }}
+            animate={{ opacity: 1, x: 0, scale: 1, left: rightPodX }}
+            exit={{ opacity: 0, x: -10, scale: 0.96 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 32, mass: 0.7 }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              onInteractionLock?.();
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onInteractionLock?.();
+            }}
+            onWheel={(e) => e.stopPropagation()}
+            style={{ top: 15, width: 204, height: 177 }}
+            className="pointer-events-auto absolute bg-[#000000] border border-white/[0.12] rounded-2xl p-2 flex flex-col justify-between gap-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.9)] overflow-hidden"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between gap-1 pb-1 border-b border-white/[0.08] shrink-0">
+              <div className="flex items-center gap-1 min-w-0">
+                <Smartphone className="w-3 h-3 text-white/85 shrink-0" />
+                <span className="text-[9.5px] font-mono font-semibold tracking-wider text-white/90 uppercase truncate">
+                  CONNECT HP
+                </span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <span
+                  data-connect-hp-status={
+                    connectHp.connectedClients > 0
+                      ? 'connected'
+                      : isPublicWarning
+                      ? 'public'
+                      : 'waiting'
+                  }
+                  className={`px-1.5 py-[1px] rounded-full text-[8px] font-mono font-semibold border ${
+                    connectHp.connectedClients > 0
+                      ? 'bg-white text-black border-white'
+                      : 'bg-white/[0.08] text-white/80 border-white/[0.14]'
+                  }`}
+                >
+                  {podStatusBadge}
+                </span>
+                <button
+                  type="button"
+                  data-connect-hp-stop="true"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    playChimeCue('tap');
+                    void connectHp.stopSession();
+                    onCloseConnectHpPod?.();
+                  }}
+                  title="Matikan server & tutup Connect HP"
+                  className="w-5 h-5 rounded-full bg-white/[0.06] hover:bg-white/[0.16] text-white/60 hover:text-white flex items-center justify-center cursor-pointer"
+                >
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Middle Body: 100x100 Declarative SVG QR + Controls */}
+            <div className="flex items-center gap-2 flex-1 min-h-0">
+              <div className="w-[100px] h-[100px] shrink-0 rounded-lg bg-white p-1 flex items-center justify-center overflow-hidden">
+                {connectHp.qrPath && connectHp.qrSize > 0 ? (
+                  <svg
+                    viewBox={`0 0 ${connectHp.qrSize} ${connectHp.qrSize}`}
+                    className="w-full h-full block"
+                    shapeRendering="crispEdges"
+                    aria-label="QR Code Connect HP"
+                  >
+                    <rect width={connectHp.qrSize} height={connectHp.qrSize} fill="#ffffff" />
+                    <path d={connectHp.qrPath} fill="#000000" />
+                  </svg>
+                ) : (
+                  <span className="text-[8.5px] font-mono text-black/70 text-center leading-tight">
+                    {connectHp.isLoading ? 'Memuat...' : 'Offline'}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex-1 min-w-0 h-[100px] flex flex-col justify-between gap-1">
+                <select
+                  aria-label="Pilih antarmuka jaringan Connect HP"
+                  data-connect-hp-iface="true"
+                  value={connectHp.ip}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    void connectHp.selectInterface(e.target.value);
+                  }}
+                  className="w-full h-[22px] rounded-md bg-[#111114] border border-white/[0.14] px-1 text-[8px] font-mono text-white outline-none truncate cursor-pointer"
+                >
+                  {connectHp.candidateInterfaces.length === 0 ? (
+                    <option value="">Detecting LAN...</option>
+                  ) : (
+                    connectHp.candidateInterfaces.map((iface) => (
+                      <option key={iface.ip} value={iface.ip}>
+                        {iface.label}
+                      </option>
+                    ))
+                  )}
+                </select>
+
+                <button
+                  type="button"
+                  data-connect-hp-copy-url="true"
+                  disabled={!connectHp.url}
+                  onClick={handleCopyConnectUrl}
+                  className="w-full h-[22px] rounded-md bg-white/[0.08] hover:bg-white/[0.16] border border-white/[0.12] px-1.5 text-[8.5px] font-medium text-white flex items-center justify-center gap-1 cursor-pointer disabled:opacity-40"
+                >
+                  {urlCopied ? <Check className="w-2.5 h-2.5" /> : <Copy className="w-2.5 h-2.5" />}
+                  <span className="truncate">{urlCopied ? 'URL Disalin' : 'Salin URL'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  data-connect-hp-autocopy="true"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    playChimeCue('tap');
+                    void connectHp.toggleAutoCopy();
+                  }}
+                  title="Otomatis salin teks kiriman HP ke Clipboard Windows"
+                  className={`w-full h-[21px] rounded-md border px-1.5 text-[8px] font-mono font-medium truncate cursor-pointer transition-colors ${
+                    connectHp.autoCopyClipboard
+                      ? 'bg-white text-black border-white'
+                      : 'bg-white/[0.04] text-white/65 border-white/[0.10] hover:text-white'
+                  }`}
+                >
+                  {connectHp.autoCopyClipboard ? 'Auto Copy: ON' : 'Auto Copy: OFF'}
+                </button>
+
+                <div className="text-[8px] text-white/55 truncate leading-tight">
+                  {connectHp.lastTransferNotice ||
+                    (connectHp.connectedClients > 0
+                      ? 'Siap transfer 2 arah'
+                      : 'Scan QR via HP')}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Diagnostics / Firewall Guide */}
+            <div className="shrink-0 pt-1 border-t border-white/[0.07]">
+              {isPublicWarning ? (
+                <div
+                  data-connect-hp-public-guide="true"
+                  className="flex items-center justify-between gap-1 text-[8px] text-white/85"
+                >
+                  <div className="flex items-center gap-1 min-w-0">
+                    <AlertTriangle className="w-2.5 h-2.5 shrink-0 text-white" />
+                    <span className="truncate">Public Wi-Fi · Firewall /</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playChimeCue('tap');
+                      void connectHp.openNetworkSettings(hasHotspotOption ? 'hotspot' : 'network');
+                    }}
+                    className="underline text-white font-semibold shrink-0 cursor-pointer"
+                  >
+                    {hasHotspotOption ? 'Hotspot' : 'Private'}
+                  </button>
+                </div>
+              ) : connectHp.error ? (
+                <div className="text-[8px] text-white/75 truncate" title={connectHp.error}>
+                  {connectHp.error}
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-1 text-[8px] font-mono text-white/45">
+                  <span className="truncate">
+                    {connectHp.active ? `${connectHp.ip}:${connectHp.port}` : 'Server standby'}
+                  </span>
+                  <span className="shrink-0">
+                    {connectHp.active ? `${connectHp.networkCategory} · 10m` : ''}
+                  </span>
+                </div>
+              )}
+            </div>
+          </motion.aside>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+
   const showDragTargetHighlight = isDragging && !isInternalDragging;
   const activeFeedbackBadge = localHint || lastActionFeedback?.label || null;
 
   return (
-    <div
-      ref={containerRef}
-      tabIndex={-1}
-      onMouseDown={(e) => {
-        const target = e.target as HTMLElement | null;
-        if (
-          useDropZoneStore.getState().isInternalDragging ||
-          target?.closest('[data-drop-item-type]') ||
-          target?.closest('button')
-        ) {
-          return;
-        }
-        containerRef.current?.focus({ preventScroll: true });
-      }}
-      data-tauri-drag-region="false"
-      className="relative w-full h-full bg-[#000000] px-3.5 py-2 flex flex-col justify-between gap-2 select-none overflow-hidden outline-none"
-    >
-      {/* Header Shelf Bar */}
-      <div className="flex items-center justify-between gap-2 h-[24px] shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[11px] font-medium text-white/80 tabular-nums shrink-0">
-            {items.length === 0
-              ? 'Drop Zone Shelf'
-              : `${items.length} ${items.length === 1 ? 'item parked' : 'items parked'}`}
-          </span>
+    <>
+      {podHostEl && createPortal(connectHpPodMarkup, podHostEl)}
 
-          <AnimatePresence initial={false}>
-            {securityNotice ? (
-              <motion.button
-                key={securityNotice}
+      <div
+        ref={containerRef}
+        tabIndex={-1}
+        onDragOver={(e) => {
+          if (useDropZoneStore.getState().isInternalDragging) return;
+          e.preventDefault();
+          if (e.dataTransfer) {
+            e.dataTransfer.dropEffect = 'copy';
+          }
+        }}
+        onDrop={(e) => {
+          if (useDropZoneStore.getState().isInternalDragging) return;
+          e.preventDefault();
+          useDropZoneStore.getState().setIsDragging(false);
+          void useDropZoneStore
+            .getState()
+            .addDroppedDataTransfer(e.dataTransfer)
+            .then((res) => {
+              if (res.added > 0) {
+                scrollShelfToFront();
+                playChimeCue('ding');
+              } else if (res.blocked) {
+                playChimeCue('tap');
+              }
+            });
+        }}
+        onMouseDown={(e) => {
+          const target = e.target as HTMLElement | null;
+          if (
+            useDropZoneStore.getState().isInternalDragging ||
+            target?.closest('[data-drop-item-type]') ||
+            target?.closest('button')
+          ) {
+            return;
+          }
+          containerRef.current?.focus({ preventScroll: true });
+        }}
+        data-tauri-drag-region="false"
+        className="relative w-full h-full bg-[#000000] px-3 py-2 flex flex-col justify-between gap-2 select-none overflow-hidden outline-none"
+      >
+        {/* Header Shelf Bar */}
+        <div className="flex items-center justify-between gap-1.5 h-[24px] shrink-0">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+            <span className="text-[11px] font-medium text-white/80 tabular-nums shrink-0">
+              {items.length === 0
+                ? 'Drop Zone Shelf'
+                : `${items.length} ${items.length === 1 ? 'item parked' : 'items parked'}`}
+            </span>
+
+            <AnimatePresence initial={false}>
+              {securityNotice ? (
+                <motion.button
+                  key={securityNotice}
+                  type="button"
+                  initial={{ opacity: 0, x: -4 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -4 }}
+                  transition={{ duration: 0.14 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSecurityNotice(null);
+                  }}
+                  data-security-notice="true"
+                  style={
+                    isMonochrome
+                      ? undefined
+                      : {
+                          borderColor: `${themePalette.danger}66`,
+                          backgroundColor: `${themePalette.danger}1F`,
+                          color: themePalette.danger,
+                        }
+                  }
+                  className={`inline-flex items-center gap-1 px-2 py-[1px] rounded-full border text-[9.5px] font-medium truncate cursor-pointer ${
+                    isMonochrome ? 'bg-white/[0.12] border-white/30 text-white' : ''
+                  }`}
+                >
+                  <ShieldAlert className="w-2.5 h-2.5 shrink-0" />
+                  <span className="truncate">{securityNotice}</span>
+                </motion.button>
+              ) : lastDraggedOutItem ? (
+                <motion.button
+                  key={`undo-${lastDraggedOutItem.id}`}
+                  type="button"
+                  data-dropzone-undo="true"
+                  initial={{ opacity: 0, x: -4 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -4 }}
+                  transition={{ duration: 0.14 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLocalHint(null);
+                    undoLastDraggedOut();
+                    scrollShelfToFront();
+                    playChimeCue('tap');
+                  }}
+                  title="Pulihkan kartu terakhir yang ditarik keluar (4 detik)"
+                  className="inline-flex items-center gap-1 px-2 py-[1px] rounded-full bg-white/[0.14] hover:bg-white/[0.22] border border-white/25 text-[9.5px] font-medium text-white truncate transition-colors cursor-pointer"
+                >
+                  <RotateCcw className="w-2.5 h-2.5 shrink-0" />
+                  <span className="truncate">Dihapus · Urungkan</span>
+                </motion.button>
+              ) : activeFeedbackBadge ? (
+                <motion.span
+                  key={activeFeedbackBadge}
+                  initial={{ opacity: 0, x: -4 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -4 }}
+                  transition={{ duration: 0.14 }}
+                  className="px-2 py-[1px] rounded-full bg-white/[0.10] border border-white/[0.12] text-[9.5px] font-medium text-white/85 truncate"
+                >
+                  {activeFeedbackBadge}
+                </motion.span>
+              ) : (
+                items.length > 0 && (
+                  <span className="text-[9.5px] text-white/35 truncate">
+                    · Ephemeral · Ctrl+V
+                  </span>
+                )
+              )}
+            </AnimatePresence>
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              data-dropzone-connect-hp="true"
+              onClick={handleToggleConnectHp}
+              title="Hubungkan HP via QR Code & Wi-Fi / Hotspot lokal"
+              className={`inline-flex items-center gap-1 px-2 h-[22px] rounded-full border text-[10px] font-medium transition-colors cursor-pointer ${
+                isConnectHpPodOpen
+                  ? 'bg-white text-black border-white'
+                  : connectHp.active
+                  ? 'bg-white/[0.14] text-white border-white/35 hover:bg-white/[0.20]'
+                  : 'bg-white/[0.08] hover:bg-white/[0.15] border-white/[0.10] text-white'
+              }`}
+            >
+              <Smartphone className="w-3 h-3 shrink-0" />
+              <span>Connect HP</span>
+              {connectHp.active && (
+                <span
+                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                    isConnectHpPodOpen ? 'bg-black' : 'bg-white'
+                  }`}
+                />
+              )}
+            </button>
+
+            <button
+              type="button"
+              data-dropzone-paste="true"
+              disabled={isPasting}
+              onClick={(e) => {
+                e.stopPropagation();
+                void handlePasteFromClipboard({ silentIfEmpty: false });
+              }}
+              title="Tempel teks, tautan, atau berkas dari Clipboard (Ctrl+V)"
+              className="inline-flex items-center gap-1 px-2 h-[22px] rounded-full bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.10] text-[10px] font-medium text-white transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <ClipboardPaste className="w-3 h-3 shrink-0" />
+              <span>Paste</span>
+            </button>
+
+            <button
+              type="button"
+              data-dropzone-pick-file="true"
+              disabled={isPicking}
+              onClick={handlePickFiles}
+              title="Pilih berkas hingga >4 GB via File Explorer"
+              className="inline-flex items-center gap-1 px-2 h-[22px] rounded-full bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.10] text-[10px] font-medium text-white transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <Plus className="w-3 h-3 shrink-0" />
+              <span>File</span>
+            </button>
+
+            <button
+              type="button"
+              data-dropzone-pick-folder="true"
+              disabled={isPicking}
+              onClick={handlePickFolders}
+              title="Pilih folder utuh untuk dikirim ke HP sebagai streaming ZIP"
+              className="inline-flex items-center gap-1 px-2 h-[22px] rounded-full bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.10] text-[10px] font-medium text-white transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <FolderPlus className="w-3 h-3 shrink-0" />
+              <span>Folder</span>
+            </button>
+
+            {items.length > 0 && (
+              <button
                 type="button"
-                initial={{ opacity: 0, x: -4 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -4 }}
-                transition={{ duration: 0.14 }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setSecurityNotice(null);
+                  playChimeCue('tap');
+                  clearAll();
                 }}
-                data-security-notice="true"
-                style={
-                  isMonochrome
-                    ? undefined
-                    : {
-                        borderColor: `${themePalette.danger}66`,
-                        backgroundColor: `${themePalette.danger}1F`,
-                        color: themePalette.danger,
+                title="Bersihkan rak Dropzone"
+                className="inline-flex items-center gap-1 px-2 h-[22px] rounded-full bg-white/[0.04] hover:bg-white/[0.10] border border-white/[0.08] text-[10px] font-medium text-white/60 hover:text-white transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3 h-3 shrink-0" />
+                <span>Clear</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Main Content Area: Empty State vs Horizontal Card Shelf */}
+        <div className="relative flex-1 min-h-0 flex items-center">
+          {items.length === 0 ? (
+            <div
+              onClick={handlePickFiles}
+              className={`w-full h-full rounded-xl border border-dashed transition-colors flex flex-col items-center justify-center gap-2 cursor-pointer px-4 ${
+                showDragTargetHighlight
+                  ? isMonochrome
+                    ? 'border-white/55 bg-white/[0.06]'
+                    : 'border-indigo-500/60 bg-indigo-500/[0.08]'
+                  : 'border-white/[0.12] hover:border-white/25 bg-[#0a0a0a]'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Inbox
+                  className={`w-4 h-4 transition-colors ${
+                    showDragTargetHighlight
+                      ? isMonochrome
+                        ? 'text-white'
+                        : 'text-indigo-400'
+                      : 'text-white/50'
+                  }`}
+                />
+                <span className="text-[11.5px] font-medium text-white/85">
+                  Drop files, links, or text · Ctrl+V to paste
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap justify-center">
+                <button
+                  type="button"
+                  disabled={isPasting}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handlePasteFromClipboard({ silentIfEmpty: false });
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.08] hover:bg-white/[0.16] border border-white/[0.10] text-[10px] font-medium text-white/90 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <ClipboardPaste className="w-3 h-3" />
+                  <span>Paste (Ctrl+V)</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isPicking}
+                  onClick={handlePickFiles}
+                  className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.05] hover:bg-white/[0.14] border border-white/[0.08] text-[10px] font-medium text-white/75 hover:text-white transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>+ File</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isPicking}
+                  onClick={handlePickFolders}
+                  className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.05] hover:bg-white/[0.14] border border-white/[0.08] text-[10px] font-medium text-white/75 hover:text-white transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <FolderPlus className="w-3 h-3" />
+                  <span>+ Folder</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleToggleConnectHp}
+                  className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.08] hover:bg-white/[0.16] border border-white/[0.14] text-[10px] font-medium text-white transition-colors cursor-pointer"
+                >
+                  <Smartphone className="w-3 h-3" />
+                  <span>Connect HP</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div
+              ref={shelfRef}
+              onWheel={handleShelfWheel}
+              className="w-full h-full flex items-center gap-2 overflow-x-auto no-scrollbar"
+            >
+              <AnimatePresence initial={false} mode="popLayout">
+                {items.map((item) => (
+                  <DropShelfCard
+                    key={item.id}
+                    item={item}
+                    isHighlighted={lastActionFeedback?.id === item.id}
+                    onRemove={removeItem}
+                    onOpenMusic={onOpenMusic}
+                    onCopiedFeedback={() => flashLocalHint('Tersalin')}
+                    onDragOutFeedback={(status, draggedItem) => {
+                      if (status === 'dropped') {
+                        const label =
+                          draggedItem.type === 'link'
+                            ? 'Link'
+                            : draggedItem.type === 'text'
+                            ? 'Teks'
+                            : draggedItem.type === 'folder' || draggedItem.isDir
+                            ? 'Folder'
+                            : 'File';
+                        flashLocalHint(`${label} dikirim keluar · dihapus dari rak`);
+                      } else {
+                        flashLocalHint('Berkas tidak ditemukan di disk');
                       }
-                }
-                className={`inline-flex items-center gap-1 px-2 py-[1px] rounded-full border text-[9.5px] font-medium truncate cursor-pointer ${
-                  isMonochrome ? 'bg-white/[0.12] border-white/30 text-white' : ''
+                    }}
+                  />
+                ))}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {/* Magnetic Drag-Over Overlay Highlight */}
+          <AnimatePresence>
+            {showDragTargetHighlight && items.length > 0 && (
+              <motion.div
+                key="dropzone-drag-overlay"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.12 }}
+                className={`pointer-events-none absolute inset-0 rounded-xl border-2 border-dashed backdrop-blur-sm flex items-center justify-center gap-2 ${
+                  isMonochrome
+                    ? 'border-white/55 bg-white/[0.06]'
+                    : 'border-indigo-500/60 bg-indigo-500/[0.08]'
                 }`}
               >
-                <ShieldAlert className="w-2.5 h-2.5 shrink-0" />
-                <span className="truncate">{securityNotice}</span>
-              </motion.button>
-            ) : lastDraggedOutItem ? (
-              <motion.button
-                key={`undo-${lastDraggedOutItem.id}`}
-                type="button"
-                data-dropzone-undo="true"
-                initial={{ opacity: 0, x: -4 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -4 }}
-                transition={{ duration: 0.14 }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setLocalHint(null);
-                  undoLastDraggedOut();
-                  scrollShelfToFront();
-                  playChimeCue('tap');
-                }}
-                title="Pulihkan kartu terakhir yang ditarik keluar (4 detik)"
-                className="inline-flex items-center gap-1 px-2 py-[1px] rounded-full bg-white/[0.14] hover:bg-white/[0.22] border border-white/25 text-[9.5px] font-medium text-white truncate transition-colors cursor-pointer"
-              >
-                <RotateCcw className="w-2.5 h-2.5 shrink-0" />
-                <span className="truncate">Dihapus · Urungkan</span>
-              </motion.button>
-            ) : activeFeedbackBadge ? (
-              <motion.span
-                key={activeFeedbackBadge}
-                initial={{ opacity: 0, x: -4 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -4 }}
-                transition={{ duration: 0.14 }}
-                className="px-2 py-[1px] rounded-full bg-white/[0.10] border border-white/[0.12] text-[9.5px] font-medium text-white/85 truncate"
-              >
-                {activeFeedbackBadge}
-              </motion.span>
-            ) : (
-              items.length > 0 && (
-                <span className="text-[9.5px] text-white/35 truncate">
-                  · Ephemeral · Ctrl+V or drag card out
+                <Inbox className={`w-4 h-4 ${isMonochrome ? 'text-white' : 'text-indigo-400'}`} />
+                <span className="text-[11.5px] font-medium text-white/90">
+                  Lepaskan file, tautan, atau teks ke Drop Zone
                 </span>
-              )
+              </motion.div>
             )}
           </AnimatePresence>
         </div>
-
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            data-dropzone-paste="true"
-            disabled={isPasting}
-            onClick={(e) => {
-              e.stopPropagation();
-              void handlePasteFromClipboard({ silentIfEmpty: false });
-            }}
-            title="Tempel teks, tautan, atau berkas dari Clipboard (Ctrl+V)"
-            className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.10] text-[10.5px] font-medium text-white transition-colors cursor-pointer disabled:opacity-50"
-          >
-            <ClipboardPaste className="w-3 h-3" />
-            <span>Paste</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={isPicking}
-            onClick={handlePickFiles}
-            title="Pilih berkas dari File Explorer"
-            className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.08] hover:bg-white/[0.15] border border-white/[0.10] text-[10.5px] font-medium text-white transition-colors cursor-pointer disabled:opacity-50"
-          >
-            <Plus className="w-3 h-3" />
-            <span>Add</span>
-          </button>
-
-          {items.length > 0 && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                playChimeCue('tap');
-                clearAll();
-              }}
-              className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.04] hover:bg-white/[0.10] border border-white/[0.08] text-[10.5px] font-medium text-white/60 hover:text-white transition-colors cursor-pointer"
-            >
-              <Trash2 className="w-3 h-3" />
-              <span>Clear</span>
-            </button>
-          )}
-        </div>
       </div>
-
-      {/* Main Content Area: Empty State vs Horizontal Card Shelf */}
-      <div className="relative flex-1 min-h-0 flex items-center">
-        {items.length === 0 ? (
-          <div
-            onClick={handlePickFiles}
-            className={`w-full h-full rounded-xl border border-dashed transition-colors flex flex-col items-center justify-center gap-2 cursor-pointer px-4 ${
-              showDragTargetHighlight
-                ? isMonochrome
-                  ? 'border-white/55 bg-white/[0.06]'
-                  : 'border-indigo-500/60 bg-indigo-500/[0.08]'
-                : 'border-white/[0.12] hover:border-white/25 bg-[#0a0a0a]'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <Inbox
-                className={`w-4 h-4 transition-colors ${
-                  showDragTargetHighlight
-                    ? isMonochrome
-                      ? 'text-white'
-                      : 'text-indigo-400'
-                    : 'text-white/50'
-                }`}
-              />
-              <span className="text-[11.5px] font-medium text-white/85">
-                Drop files, links, or text · Ctrl+V to paste
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                disabled={isPasting}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void handlePasteFromClipboard({ silentIfEmpty: false });
-                }}
-                className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.08] hover:bg-white/[0.16] border border-white/[0.10] text-[10px] font-medium text-white/90 transition-colors cursor-pointer disabled:opacity-50"
-              >
-                <ClipboardPaste className="w-3 h-3" />
-                <span>Paste (Ctrl+V)</span>
-              </button>
-              <button
-                type="button"
-                disabled={isPicking}
-                onClick={handlePickFiles}
-                className="inline-flex items-center gap-1 px-2.5 h-[22px] rounded-full bg-white/[0.05] hover:bg-white/[0.14] border border-white/[0.08] text-[10px] font-medium text-white/75 hover:text-white transition-colors cursor-pointer disabled:opacity-50"
-              >
-                <Plus className="w-3 h-3" />
-                <span>+ Files</span>
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div
-            ref={shelfRef}
-            onWheel={handleShelfWheel}
-            className="w-full h-full flex items-center gap-2 overflow-x-auto no-scrollbar"
-          >
-            <AnimatePresence initial={false} mode="popLayout">
-              {items.map((item) => (
-                <DropShelfCard
-                  key={item.id}
-                  item={item}
-                  isHighlighted={lastActionFeedback?.id === item.id}
-                  onRemove={removeItem}
-                  onOpenMusic={onOpenMusic}
-                  onCopiedFeedback={() => flashLocalHint('Tersalin')}
-                  onDragOutFeedback={(status, draggedItem) => {
-                    if (status === 'dropped') {
-                      const label =
-                        draggedItem.type === 'link'
-                          ? 'Link'
-                          : draggedItem.type === 'text'
-                          ? 'Teks'
-                          : 'File';
-                      flashLocalHint(`${label} dikirim keluar · dihapus dari rak`);
-                    } else {
-                      flashLocalHint('Berkas tidak ditemukan di disk');
-                    }
-                  }}
-                />
-              ))}
-            </AnimatePresence>
-          </div>
-        )}
-
-        {/* Magnetic Drag-Over Overlay Highlight */}
-        <AnimatePresence>
-          {showDragTargetHighlight && items.length > 0 && (
-            <motion.div
-              key="dropzone-drag-overlay"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.12 }}
-              className={`pointer-events-none absolute inset-0 rounded-xl border-2 border-dashed backdrop-blur-sm flex items-center justify-center gap-2 ${
-                isMonochrome
-                  ? 'border-white/55 bg-white/[0.06]'
-                  : 'border-indigo-500/60 bg-indigo-500/[0.08]'
-              }`}
-            >
-              <Inbox className={`w-4 h-4 ${isMonochrome ? 'text-white' : 'text-indigo-400'}`} />
-              <span className="text-[11.5px] font-medium text-white/90">
-                Lepaskan file, tautan, atau teks ke Drop Zone
-              </span>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </div>
+    </>
   );
 };

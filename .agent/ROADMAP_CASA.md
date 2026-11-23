@@ -35,7 +35,7 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 | `v2.1.3` | *Hotfix Stability — Drop-Out & Floating Pill* | Native OS drag-out (`CF_HDROP`) dengan verifikasi `DRAGDROP_S_DROP` + anti-flicker floating mode | `[DONE]` |
 | `v2.1.4` | *CASA Player — Smart Queue & Search Album/Playlist* | Auto-queue relasi lagu (`videoId`/`trackId` + `artistId`), transisi playlist→Smart Queue & *session-seeded* queue, region `gl`/`hl`, kategori Top Songs, Album & Playlist, 3-mode Repeat, & hygiene RAM/binary | `[DONE]` |
 | `v2.2.0` | *Dropzone 2.0 — Papan Teks Ephemeral* | Drag-in teks/link/file tanpa shortcut (`dragDropEnabled: false`), `Ctrl+V` eksplisit, sanitasi HTML/URI, `CF_UNICODETEXT`, & cleanup ephemeral | `[DONE]` |
-| `v2.3.0` | *Connect HP — Zero-App Local Web Drop* | Server `axum` HTTP+WebSocket sementara, QR token acak, transfer 2 arah Wi-Fi/Hotspot, auto-shutdown | `[PLANNED]` |
+| `v2.3.0` | *Connect HP — Zero-App Local Web Drop* | Server `axum` HTTP+WebSocket sementara, QR token CSPRNG, transfer 2 arah Wi-Fi/Hotspot (`192.168.137.1`), Drag-In & Drag-Out Folder, `+ File`/`+ Folder` native, antrean upload mobile persisten, batch >5 auto-folder, streaming ZIP `STORE`, & auto-shutdown 10m | `[DONE]` |
 | `v2.4.0` | *Quick Calculator & Instant Converter* | Kalkulator ekspresi inline aman di pil, salin hasil 1 klik, serta konversi satuan/kurs ringkas | `[PLANNED]` |
 | `v2.5.0` | *Calendar & Smart Reminders* | Jadwal harian lokal, countdown `H-15m`/`T-0` di pil, tombol *snooze* 5 menit | `[PLANNED]` |
 
@@ -90,24 +90,23 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 
 ---
 
-### `v2.3.0` — Connect HP: Zero-App Local Web Drop `[PLANNED]`
+### `v2.3.0` — Connect HP: Zero-App Local Web Drop `[DONE]`
 **Tujuan:** Menghubungkan ponsel (*HP*) dan laptop dua arah lewat browser HP tanpa instalasi aplikasi tambahan (*Zero-App*) melalui jaringan Wi-Fi atau Hotspot lokal.
 
-1. **Server HTTP + WebSocket Sementara di Rust (`src-tauri/Cargo.toml`, `src-tauri/src/`):**
-   - Tambah modul server lokal ringan berbasis **`axum`**, **`tokio`**, **`local-ip-address`**, **`qrcode`**, dan **`arboard`**.
-   - Ketika fitur **Connect HP** diaktifkan dari UI CASA, nyalakan listener sementara pada IP LAN aktif dengan **token sesi acak** (tersemat pada URL di QR Code SVG/Canvas serta divalidasi di setiap request HTTP & WebSocket upgrade).
-   - Matikan server secara deterministik (**auto-shutdown**) saat timer idle habis, panel ditutup, atau `quit_app` dipanggil.
+1. **Server HTTP + WebSocket Sementara di Rust ([Cargo.toml](../src-tauri/Cargo.toml), [connect_hp.rs](../src-tauri/src/connect_hp.rs), [drop_zone.rs](../src-tauri/src/drop_zone.rs)):**
+   - Memakai crate ringan **`axum`** (`http1, tokio, ws, multipart, json, query`), **`tokio-util`** (`io`), **`qrcode`** (`svg`), dan Win32 `BCryptGenRandom` + `GetAdaptersAddresses` + `INetworkListManager` + `write_clipboard_text` (`CF_UNICODETEXT`) tanpa tambahan crate `arboard`/`local-ip-address`.
+   - Saat diaktifkan, listener bind `0.0.0.0:0` dengan token sesi CSPRNG 128-bit (`ct_token_eq`), guard IPv4 RFC 1918 & CSWSH `Origin`, pergantian adapter Wi-Fi ↔ Hotspot `192.168.137.1` tanpa restart server, serta **auto-shutdown 10 menit idle** maupun deterministik pada tombol tutup sesi, `quit_app`, & Tray Quit (tetap hidup saat kapsul menciut/ganti tab).
 
-2. **Alur Transfer Dua Arah Wi-Fi / Hotspot:**
+2. **Alur Transfer Dua Arah Wi-Fi / Hotspot (`useConnectHpStore.ts`, `useDropZoneStore.ts`, `DropZoneView.tsx`):**
    - **HP → Laptop:**
-     - Kirim teks/tautan dari browser HP langsung menuliskan ke **Windows Clipboard** (`arboard`) sekaligus menampilkannya sementara di Dropzone bila diinginkan, disertai umpan balik halus.
-     - Kirim file dari HP di-*streaming* langsung ke disk ke direktori **`Downloads\CASA Drop`** (menggunakan streaming async agar RAM tetap rendah, sanitasi nama file aman, penanganan bentrok nama, dan validasi ukuran).
+     - Teks/tautan menulis opsional ke **Windows Clipboard** dan masuk ke `useDropZoneStore` (terlindung `sanitizeDropText` + `parseSafeHttpUrl`).
+     - Berkas di-*stream* `O(1)` RAM (`BufWriter` 64 KB, `DefaultBodyLimit::disable()`, batas 4 GB/file, `.part` atomic rename) ke **`Downloads\CASA Drop`**. Pemilihan **> 5 file** (`X-Casa-Batch-Id` / `X-Casa-Batch-Total`) otomatis membentuk 1 subfolder sesi (`Batch-HHMM`) & 1 kartu folder tunggal berprogres live.
    - **Laptop → HP:**
-     - Item berkas/teks/tautan yang ada di **Dropzone** di-**beam** langsung ke sesi WebSocket halaman web HP untuk diunduh atau disalin 1 tap di layar ponsel.
+     - Mendukung pemilihan **`+ File`** dan **`+ Folder`** native (`IFileOpenDialog` / `FOS_PICKFOLDERS`) untuk melewati limit RAM 25 MB WebView, sinkronisasi DTO aman `sync_connect_hp_items` (zero local-path leak), streaming file via `ReaderStream`, serta **streaming ZIP metode `STORE`** (0% kompresi, CRC-32 + Data Descriptor `0x08074b50`) untuk unduhan folder penuh ke HP.
 
-3. **Deteksi Kendala Jaringan & Keamanan:**
-   - Tambahkan deteksi & **indikator status kendala Firewall / AP Isolation** (misalnya deteksi antarmuka jaringan lokal/Hotspot yang valid, status jabat tangan client HP, peringatan bila port terblokir Windows Defender Firewall atau *Client/AP Isolation* pada router kampus/kantor, serta panduan *troubleshoot* ringkas).
-   - Pastikan CSP pada [tauri.conf.json](../src-tauri/tauri.conf.json) tidak membuka akses domain publik baru selain kebutuhan loopback/UI lokal.
+3. **Deteksi Kendala Jaringan, Mobile UI & Keamanan:**
+   - Right Satellite Pod (`204 × 177 px` di dalam kanvas `1100×340` via `effectiveRightPodOpen` & `update_island_hitboxes`), deteksi profil jaringan Windows (`Private`/`Public`/`Domain`), serta panduan cepat Hotspot/Firewall tanpa UAC.
+   - Web UI HP self-contained (`0` CDN, nol `innerHTML`, token scrub via `history.replaceState`, salin teks HTTP-safe `<textarea>` + `execCommand('copy')`, antrean upload mobile persisten lintas batch dengan maksimal `2` worker paralel + 1x retry). Mendukung pula Drag-In folder Explorer rekursif (`webkitGetAsEntry`/`readEntries` loop penuh → `Downloads\CASA Drop`) serta drag-out `CF_HDROP` direktori penuh ke Explorer. CSP [tauri.conf.json](../src-tauri/tauri.conf.json) tetap terkunci.
 
 ---
 
