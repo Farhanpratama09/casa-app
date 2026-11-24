@@ -335,13 +335,19 @@ function applyIncomingTelemetry(rawNext: SystemTelemetry) {
       accentColor: palette.brightness,
     });
   } else if (next.has_battery && next.is_charging !== prev.is_charging) {
+    const unpluggedColor =
+      next.battery_percentage <= 10
+        ? '#ef4444'
+        : next.battery_percentage <= 20
+        ? '#f59e0b'
+        : '#22c55e';
     triggerSystemHud({
       kind: 'charging',
       label: next.is_charging ? 'Charging' : 'On Battery',
       detail: `${next.battery_percentage}%`,
       percent: next.battery_percentage,
       isActive: next.is_charging,
-      accentColor: next.is_charging ? palette.rest : palette.timer,
+      accentColor: next.is_charging ? '#22c55e' : unpluggedColor,
     });
   } else if (
     next.has_battery &&
@@ -355,7 +361,7 @@ function applyIncomingTelemetry(rawNext: SystemTelemetry) {
       detail: `${next.battery_percentage}%`,
       percent: next.battery_percentage,
       isActive: false,
-      accentColor: palette.danger,
+      accentColor: next.battery_percentage <= 10 ? '#ef4444' : '#f59e0b',
     });
   } else if (next.is_caps_locked !== prev.is_caps_locked) {
     triggerSystemHud({

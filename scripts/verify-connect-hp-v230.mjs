@@ -60,10 +60,13 @@ async function runSuiteA(viteServer) {
       connectHpRs.includes('DefaultBodyLimit::disable()') &&
       connectHpRs.includes('x-casa-batch-id') &&
       connectHpRs.includes('x-casa-batch-total') &&
+      connectHpRs.includes('pub fn prepare_store_zip_plan') &&
+      connectHpRs.includes("filename*=UTF-8''") &&
+      connectHpRs.includes('header::CACHE_CONTROL') &&
       connectHpRs.includes('write_streaming_store_zip') &&
       connectHpRs.includes('0x0807_4b50u32') &&
       connectHpRs.includes('crc32_update'),
-    'connect_hp.rs implements CSPRNG, constant-time token compare, RFC 1918/Origin guard, 4 GB streaming, batch folder & ZIP STORE CRC32'
+    'connect_hp.rs implements CSPRNG, constant-time token compare, RFC 1918/Origin guard, exact Content-Length ZIP STORE plan, RFC5987 & Cache-Control'
   );
 
   const htmlStart = connectHpRs.indexOf('const MOBILE_WEB_UI_HTML: &str = r##"');
@@ -72,13 +75,17 @@ async function runSuiteA(viteServer) {
   check(
     htmlSlice.length > 500 &&
       htmlSlice.includes('history.replaceState') &&
+      htmlSlice.includes('sessionStorage') &&
+      htmlSlice.includes('visibilitychange') &&
+      htmlSlice.includes('Hubungkan Ulang') &&
+      htmlSlice.includes('Jika Chrome menampilkan peringatan HTTP lokal, pilih Tetap simpan') &&
       htmlSlice.includes("execCommand('copy')") &&
       htmlSlice.includes('uploadQueue') &&
       htmlSlice.includes('inFlightBytes') &&
       htmlSlice.includes('renderUploadProgress') &&
       htmlSlice.includes('pumpQueue') &&
       !htmlSlice.includes('innerHTML'),
-    'Mobile Web UI scrubs ?t= token, uses persistent upload queue + HTTP-safe copy, and forbids innerHTML'
+    'Mobile Web UI persists token in sessionStorage before scrub, auto-reconnects on visibilitychange, includes Hubungkan Ulang + Chrome HTTP note, persistent queue & zero innerHTML'
   );
 
   const docsHtml = fs.readFileSync(path.resolve('docs/index.html'), 'utf8');
@@ -109,12 +116,23 @@ async function runSuiteA(viteServer) {
   );
 
   const dropZoneStoreSrc = fs.readFileSync(path.resolve('src/stores/useDropZoneStore.ts'), 'utf8');
+  const batteryPillSrc = fs.readFileSync(path.resolve('src/components/system/BatteryPill.tsx'), 'utf8');
   check(
     dropZoneStoreSrc.includes('webkitGetAsEntry') &&
       dropZoneStoreSrc.includes('readEntries') &&
       dropZoneStoreSrc.includes('createDropTransitDirectory') &&
-      dropZoneStoreSrc.includes('saveDroppedDirectoryFile'),
-    'useDropZoneStore.ts implements recursive webkitGetAsEntry/readEntries loop folder drag-in pipeline'
+      dropZoneStoreSrc.includes('saveDroppedDirectoryFile') &&
+      dropZoneStoreSrc.includes('File >25 MB: gunakan tombol + File, + Folder, atau Paste (Ctrl+V).'),
+    'useDropZoneStore.ts implements recursive webkitGetAsEntry/readEntries loop folder drag-in pipeline & exact >25 MB warning'
+  );
+
+  check(
+    batteryPillSrc.includes('#22c55e') &&
+      batteryPillSrc.includes('#f59e0b') &&
+      batteryPillSrc.includes('#ef4444') &&
+      batteryPillSrc.includes('#facc15') &&
+      docsHtml.includes('stroke="#22c55e"'),
+    'Battery indicator uses green #22c55e (normal/charging), amber #f59e0b (<=20%), red #ef4444 (<=10%) & yellow lightning bolt #facc15 synced to docs/'
   );
 
   check(
@@ -237,22 +255,40 @@ async function runSuiteB() {
       ];
       let currentIp = '192.168.1.45';
       let currentActive = false;
+      let sessionSeq = 0;
 
-      const buildSession = (reason = null) => ({
-        active: currentActive,
-        ip: currentIp,
-        port: 54820,
-        url: `http://${currentIp}:54820/?t=testtoken1234`,
-        qrSize: 21,
-        qrPath: 'M1 1h7v7H1zM13 1h7v7h-7zM1 13h7v7H1z',
-        networkCategory: 'Public',
-        candidateInterfaces: mockCandidates,
-        connectedClients: 0,
-        autoCopyClipboard: true,
-        idleTimeoutSecs: 600,
-        downloadDir: 'C:\\Users\\Demo\\Downloads\\CASA Drop',
-        reason,
-      });
+      const buildSession = (reason = null) =>
+        currentActive
+          ? {
+              active: true,
+              ip: currentIp,
+              port: 54819 + Math.max(1, sessionSeq),
+              url: `http://${currentIp}:${54819 + Math.max(1, sessionSeq)}/?t=testtoken_${Math.max(1, sessionSeq)}`,
+              qrSize: 21,
+              qrPath: 'M1 1h7v7H1zM13 1h7v7h-7zM1 13h7v7H1z',
+              networkCategory: 'Public',
+              candidateInterfaces: mockCandidates,
+              connectedClients: 0,
+              autoCopyClipboard: true,
+              idleTimeoutSecs: 600,
+              downloadDir: 'C:\\Users\\Demo\\Downloads\\CASA Drop',
+              reason,
+            }
+          : {
+              active: false,
+              ip: '',
+              port: 0,
+              url: '',
+              qrSize: 0,
+              qrPath: '',
+              networkCategory: 'Unknown',
+              candidateInterfaces: mockCandidates,
+              connectedClients: 0,
+              autoCopyClipboard: true,
+              idleTimeoutSecs: 600,
+              downloadDir: '',
+              reason,
+            };
 
       window.__EMIT_TAURI_EVENT__ = (eventName, payload) => {
         const ids = window.__EVENT_BY_NAME__[eventName] || [];
@@ -298,6 +334,7 @@ async function runSuiteB() {
             return buildSession(null);
           }
           if (cmd === 'start_connect_hp') {
+            sessionSeq += 1;
             currentActive = true;
             if (args?.preferredIp) currentIp = args.preferredIp;
             window.__CONNECT_HP_CALLS__.push({ cmd, args });
@@ -648,6 +685,58 @@ async function runSuiteB() {
       JSON.stringify(droppedFolderAudit)
     );
 
+    // Oversized (>25 MB) file drop renders full-width non-truncated warning strip + dismiss button
+    await page.evaluate(async () => {
+      const container = document.querySelector('[data-dropzone-pick-folder]')?.closest('div[tabindex="-1"]');
+      if (!container) throw new Error('DropZoneView container missing');
+      const hugeFile = { name: 'giant-video.mov', size: 30 * 1024 * 1024, type: 'video/quicktime' };
+      const mockDt = {
+        files: [hugeFile],
+        items: [
+          {
+            kind: 'file',
+            type: 'video/quicktime',
+            webkitGetAsEntry: () => ({ isFile: true, isDirectory: false, name: 'giant-video.mov' }),
+            getAsFile: () => hugeFile,
+          },
+        ],
+        types: ['Files'],
+        getData: () => '',
+      };
+      const dropEv = new Event('drop', { bubbles: true, cancelable: true });
+      Object.defineProperty(dropEv, 'dataTransfer', { value: mockDt });
+      container.dispatchEvent(dropEv);
+    });
+    await new Promise((r) => setTimeout(r, 220));
+
+    const largeNoticeAudit = await page.evaluate(() => {
+      const noticeEl = document.querySelector('[data-security-notice="true"]');
+      const rect = noticeEl?.getBoundingClientRect();
+      const spanEl = noticeEl?.querySelector('span');
+      return {
+        exists: Boolean(noticeEl),
+        text: spanEl?.textContent || noticeEl?.textContent || '',
+        width: rect ? Math.round(rect.width) : 0,
+        hasTruncateClass: Boolean(spanEl?.className?.includes('truncate')),
+        hasDismissBtn: Boolean(document.querySelector('[data-security-notice-dismiss="true"]')),
+      };
+    });
+    await page.click('[data-security-notice-dismiss="true"]');
+    await new Promise((r) => setTimeout(r, 180));
+    const dismissedAfterClick = await page.evaluate(
+      () => !document.querySelector('[data-security-notice="true"]')
+    );
+    check(
+      largeNoticeAudit.exists &&
+        largeNoticeAudit.text === 'File >25 MB: gunakan tombol + File, + Folder, atau Paste (Ctrl+V).' &&
+        largeNoticeAudit.width >= 500 &&
+        !largeNoticeAudit.hasTruncateClass &&
+        largeNoticeAudit.hasDismissBtn &&
+        dismissedAfterClick,
+      'Oversized >25 MB drop renders full-width non-truncated warning banner with dismiss button',
+      JSON.stringify({ largeNoticeAudit, dismissedAfterClick })
+    );
+
     // Switch tab -> collapse capsule -> server must stay alive (stop_connect_hp calls === 0)
     await page.evaluate(() => {
       const musicBtn = Array.from(document.querySelectorAll('button')).find((b) =>
@@ -690,6 +779,32 @@ async function runSuiteB() {
       JSON.stringify(afterExplicitStop)
     );
 
+    // Re-click Connect HP after explicit Stop -> MUST start fresh session without restarting CASA
+    await page.click('[data-dropzone-connect-hp="true"]');
+    await new Promise((r) => setTimeout(r, 340));
+
+    const restartedSessionAudit = await page.evaluate(() => {
+      const pod = document.querySelector('[data-connect-hp-pod="true"]');
+      const qrPathD = pod?.querySelector('svg path')?.getAttribute('d') || '';
+      return {
+        startCalls: window.__CONNECT_HP_CALLS__.filter((c) => c.cmd === 'start_connect_hp').length,
+        podReopened: Boolean(pod),
+        hasNewPort54821: (pod?.textContent || '').includes('192.168.137.1:54821'),
+        hasQrSvgPath: qrPathD.startsWith('M'),
+      };
+    });
+    check(
+      restartedSessionAudit.startCalls === 2 &&
+        restartedSessionAudit.podReopened &&
+        restartedSessionAudit.hasNewPort54821 &&
+        restartedSessionAudit.hasQrSvgPath,
+      'Clicking Connect HP again after explicit Stop starts fresh session (port 54821 + new QR) without quitting CASA',
+      JSON.stringify(restartedSessionAudit)
+    );
+
+    await page.click('[data-connect-hp-stop="true"]');
+    await new Promise((r) => setTimeout(r, 420));
+
     check(pageErrors.length === 0, `Zero uncaught Chromium page errors (${pageErrors.length})`);
   } finally {
     await browser.close();
@@ -697,7 +812,7 @@ async function runSuiteB() {
 }
 
 async function runSuiteC() {
-  console.log('\n[Suite C] Mobile Web UI Persistent Upload Queue E2E (Append While Active & Sequential Reset)\n');
+  console.log('\n[Suite C] Mobile Web UI Re-Scan, Reload Persistence, Auto-Reconnect, .zip Content-Length & Upload Queue E2E\n');
 
   const connectHpRs = fs.readFileSync(path.resolve('src-tauri/src/connect_hp.rs'), 'utf8');
   const startMarker = 'const MOBILE_WEB_UI_HTML: &str = r##"';
@@ -708,8 +823,72 @@ async function runSuiteC() {
   }
   const mobileHtml = connectHpRs.slice(htmlStartIdx + startMarker.length, htmlEndIdx).trimStart();
 
+  // Deterministic valid STORE ZIP payload (LFH + payload + EOCD) for Content-Length parity verification
+  const dummyZipBuffer = Buffer.from(
+    '504b030414000000000000002100000000000400000004000000080000006e6f74652e74787463617361' +
+      '504b01021400140000000000000021000000000004000000040000000800000000000000000020000000000000006e6f74652e747874' +
+      '504b05060000000001000100360000002a0000000000',
+    'hex'
+  );
+
   const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    const reqUrl = new URL(req.url || '/', 'http://127.0.0.1');
+    const hdrToken = String(req.headers['x-casa-token'] || '');
+    const queryToken = reqUrl.searchParams.get('t') || '';
+
+    if (reqUrl.pathname === '/api/items') {
+      if (hdrToken !== 'testtoken1234' && queryToken !== 'testtoken1234') {
+        res.writeHead(401);
+        res.end('Unauthorized');
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+      });
+      res.end(
+        JSON.stringify({
+          items: [
+            {
+              id: 'folder-zip-1',
+              itemType: 'folder',
+              title: 'Trip Album',
+              fileCount: 2,
+              sizeBytes: dummyZipBuffer.length,
+            },
+          ],
+        })
+      );
+      return;
+    }
+
+    if (reqUrl.pathname === '/api/file/folder-zip-1') {
+      if (hdrToken !== 'testtoken1234' && queryToken !== 'testtoken1234') {
+        res.writeHead(401);
+        res.end('Unauthorized');
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': 'application/zip',
+        'Content-Length': String(dummyZipBuffer.length),
+        'Content-Disposition': "attachment; filename=\"Trip Album.zip\"; filename*=UTF-8''Trip%20Album.zip",
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      res.end(dummyZipBuffer);
+      return;
+    }
+
+    if (queryToken && queryToken !== 'testtoken1234') {
+      res.writeHead(401);
+      res.end('Unauthorized');
+      return;
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store, max-age=0',
+    });
     res.end(mobileHtml);
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -744,18 +923,32 @@ async function runSuiteC() {
       window.__MOCK_XHRS__ = [];
       window.__ACTIVE_XHR_COUNT__ = 0;
       window.__MAX_CONCURRENT_XHRS__ = 0;
+      window.__MOCK_WS_INSTANCES__ = [];
 
       class MockWebSocket {
-        constructor(_url) {
-          this.readyState = 1;
+        constructor(url) {
+          this.url = url;
+          this.readyState = 0;
+          window.__MOCK_WS_INSTANCES__.push(this);
           setTimeout(() => {
-            if (typeof this.onopen === 'function') this.onopen();
+            if (this.readyState === 0) {
+              this.readyState = 1;
+              if (typeof this.onopen === 'function') this.onopen();
+            }
           }, 0);
         }
+        simulateDisconnect() {
+          this.readyState = 3;
+          if (typeof this.onclose === 'function') this.onclose();
+        }
         send() {}
-        close() {}
+        close() {
+          this.readyState = 3;
+        }
       }
+      MockWebSocket.CONNECTING = 0;
       MockWebSocket.OPEN = 1;
+      MockWebSocket.CLOSED = 3;
       window.WebSocket = MockWebSocket;
 
       class MockXMLHttpRequest {
@@ -814,9 +1007,121 @@ async function runSuiteC() {
 
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('#file-input', { timeout: 10000 });
+    await new Promise((r) => setTimeout(r, 60));
 
-    const tokenScrubbed = await page.evaluate(() => window.location.search === '');
-    check(tokenScrubbed, 'Suite C: URL ?t= token scrubbed via history.replaceState');
+    const initialAuthAudit = await page.evaluate(() => ({
+      search: window.location.search,
+      storedToken: window.sessionStorage.getItem('casa_hp_token'),
+      wsBadge: document.getElementById('ws-badge')?.textContent,
+      reconnectHidden: document.getElementById('reconnect-btn')?.hidden,
+      listText: document.getElementById('laptop-list')?.textContent || '',
+      zipHref: document.querySelector('#laptop-list a[download]')?.getAttribute('href') || '',
+    }));
+    check(
+      initialAuthAudit.search === '' &&
+        initialAuthAudit.storedToken === 'testtoken1234' &&
+        initialAuthAudit.wsBadge === 'Terhubung' &&
+        initialAuthAudit.reconnectHidden === true &&
+        initialAuthAudit.listText.includes('Jika Chrome menampilkan peringatan HTTP lokal, pilih Tetap simpan') &&
+        initialAuthAudit.zipHref.includes('/api/file/folder-zip-1?t=testtoken1234'),
+      'Suite C: Token saved to sessionStorage before scrub, WS connects & .zip card displays Chrome HTTP note',
+      JSON.stringify(initialAuthAudit)
+    );
+
+    // Reload directly at '/' (without ?t= query) to simulate Chrome Android tab reload from background
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#file-input', { timeout: 10000 });
+    await new Promise((r) => setTimeout(r, 60));
+
+    const afterReloadAudit = await page.evaluate(() => ({
+      pathname: window.location.pathname,
+      search: window.location.search,
+      wsBadge: document.getElementById('ws-badge')?.textContent,
+      listText: document.getElementById('laptop-list')?.textContent || '',
+    }));
+    check(
+      afterReloadAudit.pathname === '/' &&
+        afterReloadAudit.search === '' &&
+        afterReloadAudit.wsBadge === 'Terhubung' &&
+        afterReloadAudit.listText.includes('Trip Album'),
+      'Suite C: Reloading / without ?t= keeps sessionStorage token & restores live Connect HP items',
+      JSON.stringify(afterReloadAudit)
+    );
+
+    // Verify exact Content-Length, Content-Type, Content-Disposition (RFC 5987), & Cache-Control on .zip download
+    const zipDownloadAudit = await page.evaluate(async () => {
+      const link = document.querySelector('#laptop-list a[download]');
+      const href = link?.getAttribute('href') || '';
+      const resp = await fetch(href);
+      const buf = await resp.arrayBuffer();
+      return {
+        status: resp.status,
+        contentType: resp.headers.get('content-type'),
+        contentLengthHeader: Number(resp.headers.get('content-length')),
+        actualByteLength: buf.byteLength,
+        contentDisposition: resp.headers.get('content-disposition'),
+        cacheControl: resp.headers.get('cache-control'),
+      };
+    });
+    check(
+      zipDownloadAudit.status === 200 &&
+        zipDownloadAudit.contentType === 'application/zip' &&
+        zipDownloadAudit.contentLengthHeader === dummyZipBuffer.length &&
+        zipDownloadAudit.actualByteLength === dummyZipBuffer.length &&
+        Boolean(zipDownloadAudit.contentDisposition?.includes("filename*=UTF-8''Trip%20Album.zip")) &&
+        zipDownloadAudit.cacheControl === 'no-store',
+      'Suite C: Folder .zip endpoint returns exact Content-Length, application/zip, RFC5987 filename* & no-store headers',
+      JSON.stringify(zipDownloadAudit)
+    );
+
+    // Simulate WS drop -> Hubungkan Ulang button appears -> visibilitychange auto-reconnects seamlessly
+    await page.evaluate(() => {
+      const latestWs = window.__MOCK_WS_INSTANCES__.at(-1);
+      latestWs?.simulateDisconnect();
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    const disconnectedAudit = await page.evaluate(() => ({
+      wsBadge: document.getElementById('ws-badge')?.textContent,
+      reconnectHidden: document.getElementById('reconnect-btn')?.hidden,
+      wsCountBefore: window.__MOCK_WS_INSTANCES__.length,
+    }));
+
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'visible',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await new Promise((r) => setTimeout(r, 40));
+
+    const reconnectedAudit = await page.evaluate(() => ({
+      wsBadge: document.getElementById('ws-badge')?.textContent,
+      reconnectHidden: document.getElementById('reconnect-btn')?.hidden,
+      wsCountAfter: window.__MOCK_WS_INSTANCES__.length,
+    }));
+    check(
+      disconnectedAudit.wsBadge === 'Terputus' &&
+        disconnectedAudit.reconnectHidden === false &&
+        reconnectedAudit.wsBadge === 'Terhubung' &&
+        reconnectedAudit.reconnectHidden === true &&
+        reconnectedAudit.wsCountAfter > disconnectedAudit.wsCountBefore,
+      'Suite C: WS disconnect reveals Hubungkan Ulang button & visibilitychange auto-reconnects cleanly',
+      JSON.stringify({ disconnectedAudit, reconnectedAudit })
+    );
+
+    // Simulate QR re-scan navigation back to /?t=testtoken1234 before running upload queue checks
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#file-input', { timeout: 10000 });
+    await new Promise((r) => setTimeout(r, 30));
+    const rescanAudit = await page.evaluate(() => ({
+      search: window.location.search,
+      wsBadge: document.getElementById('ws-badge')?.textContent,
+    }));
+    check(
+      rescanAudit.search === '' && rescanAudit.wsBadge === 'Terhubung',
+      'Suite C: Re-scanning QR URL while session active re-authenticates seamlessly'
+    );
 
     // Case 1 (Appending while active): 5 files (100KB video + four 10KB files = 140KB) + 3 extra 20KB photos = 200KB
     const batch1State = await page.evaluate(() => {

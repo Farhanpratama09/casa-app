@@ -44,16 +44,18 @@ export const MiniCircularBattery: React.FC<{
   const offset = circumference - (clamped / 100) * circumference;
 
   const strokeColor = isCharging
-    ? '#34D399'
+    ? '#22c55e'
+    : clamped <= 10
+    ? '#ef4444'
     : clamped <= 20
-    ? '#F43F5E'
-    : '#38BDF8';
+    ? '#f59e0b'
+    : '#22c55e';
 
-  const glowStyle = isCharging
-    ? { filter: 'drop-shadow(0 0 3px rgba(52, 211, 153, 0.7))' }
-    : clamped <= 20
-    ? { filter: 'drop-shadow(0 0 3px rgba(244, 63, 94, 0.7))' }
-    : { filter: 'drop-shadow(0 0 3px rgba(56, 189, 248, 0.6))' };
+  const glowStyle = isCharging || clamped > 20
+    ? { filter: 'drop-shadow(0 0 3px rgba(34, 197, 94, 0.65))' }
+    : clamped <= 10
+    ? { filter: 'drop-shadow(0 0 3px rgba(239, 68, 68, 0.7))' }
+    : { filter: 'drop-shadow(0 0 3px rgba(245, 158, 11, 0.65))' };
 
   return (
     <div
@@ -90,7 +92,7 @@ export const MiniCircularBattery: React.FC<{
         </svg>
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           {isCharging ? (
-            <Zap className="w-2.5 h-2.5 text-[#34D399] animate-pulse fill-[#34D399]/30" />
+            <Zap className="w-2.5 h-2.5 animate-pulse fill-current" style={{ color: '#facc15' }} />
           ) : (
             <span className="w-1 h-1 rounded-full bg-white/40" />
           )}

@@ -608,12 +608,17 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
         );
       case 'charging':
         return alert.isActive ? (
-          <BatteryCharging className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--casa-rest, #10B981)' }} />
+          <Zap className="w-3.5 h-3.5 shrink-0 fill-current" style={{ color: '#facc15' }} />
         ) : (
-          <Zap className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--casa-timer, #F59E0B)' }} />
+          <BatteryCharging className="w-3.5 h-3.5 shrink-0" style={{ color: alert.accentColor || '#22c55e' }} />
         );
       case 'low_battery':
-        return <BatteryWarning className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--casa-danger, #F43F5E)' }} />;
+        return (
+          <BatteryWarning
+            className="w-3.5 h-3.5 shrink-0"
+            style={{ color: (alert.percent ?? 20) <= 10 ? '#ef4444' : '#f59e0b' }}
+          />
+        );
       case 'caps_lock':
         return (
           <ArrowBigUpDash

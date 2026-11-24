@@ -11,6 +11,8 @@ export type DropItemType = 'file' | 'image' | 'folder' | 'text' | 'link';
 
 export const MAX_DROP_TEXT_LENGTH = 50_000;
 export const MAX_STAGED_FILE_BYTES = 25 * 1024 * 1024;
+export const LARGE_FILE_DROP_WARNING =
+  'File >25 MB: gunakan tombol + File, + Folder, atau Paste (Ctrl+V).';
 const FRESH_SEED_WINDOW_MS = 15_000;
 const DRAG_OUT_UNDO_MS = 4_000;
 
@@ -610,7 +612,7 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
       securityNoticeTimer = setTimeout(() => {
         securityNoticeTimer = null;
         set({ securityNotice: null });
-      }, 4200);
+      }, 6000);
     }
   },
 
@@ -1049,7 +1051,7 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
             }
 
             if (skippedInDir > 0) {
-              skippedLargeNotice = `${skippedInDir} file >25 MB dilewati; pakai + Folder untuk ukuran besar.`;
+              skippedLargeNotice = LARGE_FILE_DROP_WARNING;
             }
 
             const title = rootDir.replace(/^.*[\\/]/, '') || dirEntry.name || 'Dropped Folder';
@@ -1090,7 +1092,7 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
 
           if (isTauri) {
             if (file.size > MAX_STAGED_FILE_BYTES) {
-              skippedLargeNotice = `Berkas "${file.name}" melebihi batas transit 25 MB; gunakan + File.`;
+              skippedLargeNotice = LARGE_FILE_DROP_WARNING;
               continue;
             }
             if (file.size > 0) {
@@ -1121,7 +1123,10 @@ export const useDropZoneStore = create<DropZoneStore>((set, get) => ({
         get().setSecurityNotice(skippedLargeNotice);
       }
       set({ isDragging: false });
-      return { added: foldersAdded + filesAdded, blocked: false };
+      return {
+        added: foldersAdded + filesAdded,
+        blocked: Boolean(skippedLargeNotice && foldersAdded + filesAdded === 0),
+      };
     }
 
     const htmlAnchor = extractAnchorFromHtml(htmlData);

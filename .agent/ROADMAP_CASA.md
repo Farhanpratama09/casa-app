@@ -36,6 +36,7 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 | `v2.1.4` | *CASA Player — Smart Queue & Search Album/Playlist* | Auto-queue relasi lagu (`videoId`/`trackId` + `artistId`), transisi playlist→Smart Queue & *session-seeded* queue, region `gl`/`hl`, kategori Top Songs, Album & Playlist, 3-mode Repeat, & hygiene RAM/binary | `[DONE]` |
 | `v2.2.0` | *Dropzone 2.0 — Papan Teks Ephemeral* | Drag-in teks/link/file tanpa shortcut (`dragDropEnabled: false`), `Ctrl+V` eksplisit, sanitasi HTML/URI, `CF_UNICODETEXT`, & cleanup ephemeral | `[DONE]` |
 | `v2.3.0` | *Connect HP — Zero-App Local Web Drop* | Server `axum` HTTP+WebSocket sementara, QR token CSPRNG, transfer 2 arah Wi-Fi/Hotspot (`192.168.137.1`), Drag-In & Drag-Out Folder, `+ File`/`+ Folder` native, antrean upload mobile persisten, batch >5 auto-folder, streaming ZIP `STORE`, & auto-shutdown 10m | `[DONE]` |
+| `v2.3.1` | *Hotfix Android & Polish UI* | Persistensi token multi-scan & `sessionStorage` + auto-reconnect, restart sesi bersih, `Content-Length` eksak ZIP `STORE`, warna ring baterai `#22c55e`/petir `#facc15`, & strip peringatan Dropzone >25 MB non-truncate | `[DONE]` |
 | `v2.4.0` | *Quick Calculator & Instant Converter* | Kalkulator ekspresi inline aman di pil, salin hasil 1 klik, serta konversi satuan/kurs ringkas | `[PLANNED]` |
 | `v2.5.0` | *Calendar & Smart Reminders* | Jadwal harian lokal, countdown `H-15m`/`T-0` di pil, tombol *snooze* 5 menit | `[PLANNED]` |
 
@@ -106,7 +107,14 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 
 3. **Deteksi Kendala Jaringan, Mobile UI & Keamanan:**
    - Right Satellite Pod (`204 × 177 px` di dalam kanvas `1100×340` via `effectiveRightPodOpen` & `update_island_hitboxes`), deteksi profil jaringan Windows (`Private`/`Public`/`Domain`), serta panduan cepat Hotspot/Firewall tanpa UAC.
-   - Web UI HP self-contained (`0` CDN, nol `innerHTML`, token scrub via `history.replaceState`, salin teks HTTP-safe `<textarea>` + `execCommand('copy')`, antrean upload mobile persisten lintas batch dengan maksimal `2` worker paralel + 1x retry). Mendukung pula Drag-In folder Explorer rekursif (`webkitGetAsEntry`/`readEntries` loop penuh → `Downloads\CASA Drop`) serta drag-out `CF_HDROP` direktori penuh ke Explorer. CSP [tauri.conf.json](../src-tauri/tauri.conf.json) tetap terkunci.
+   - Web UI HP self-contained (`0` CDN, nol `innerHTML`, token scrub via `history.replaceState` setelah `sessionStorage`, auto-reconnect `visibilitychange` + tombol `Hubungkan Ulang`, salin teks HTTP-safe `<textarea>` + `execCommand('copy')`, antrean upload mobile persisten terpadu lintas batch dengan maksimal `2` worker paralel + 1x retry). Mendukung pula Drag-In folder Explorer rekursif (`webkitGetAsEntry`/`readEntries` loop penuh → `Downloads\CASA Drop`), strip peringatan >25 MB non-truncate, serta drag-out `CF_HDROP` direktori penuh ke Explorer. CSP [tauri.conf.json](../src-tauri/tauri.conf.json) tetap terkunci.
+
+---
+
+### `v2.3.1` — Hotfix Android Connect HP & UI Polish `[DONE]`
+- **Multi-Scan & Reload Aman:** Token sesi berlaku sepanjang sesi aktif, disimpan di `sessionStorage` sebelum scrub `/`, auto-reconnect saat kembali ke tab Android, plus tombol **`Hubungkan Ulang`**, dan `shutdown_connect_hp_server_async` memastikan restart Connect HP tanpa perlu keluar CASA.
+- **ZIP `Content-Length` Eksak & MIME:** `prepare_store_zip_plan` menghitung total ukuran ZIP sebelum streaming (`Content-Type: application/zip`, `Content-Length` eksak, `filename*=UTF-8''`, `Cache-Control: no-store`, dan catatan Chrome HTTP *"Tetap simpan"*).
+- **UI Polish (`BatteryPill.tsx` & `DropZoneView.tsx`):** Lingkar baterai hijau `#22c55e` (normal & charging), kuning `#f59e0b` (`<=20%`), merah `#ef4444` (`<=10%`), petir charging kuning `#facc15`, serta strip peringatan Dropzone `File >25 MB: gunakan tombol + File, + Folder, atau Paste (Ctrl+V).` di bawah header tanpa pemotongan elipsis.
 
 ---
 

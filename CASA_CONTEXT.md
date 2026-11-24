@@ -1,4 +1,4 @@
-# CASA_CONTEXT.md — Single Source of Truth (`v2.3.0`)
+# CASA_CONTEXT.md — Single Source of Truth (`v2.3.1`)
 
 > Dibuat dari implementasi nyata pada `src/`, `src-tauri/`, dan `docs/` (bukan asumsi). Wajib diperbarui setiap kali kode atau arsitektur berubah.  
 > **CASA** — *Dynamic Rabbit Island for Windows* (`com.farhanpratama.casa`) · MIT License.
@@ -10,7 +10,7 @@
 | Aspek | Detail |
 |---|---|
 | Form factor | Window Tauri transparan, frameless, `alwaysOnTop`, `skipTaskbar`, `shadow:false`, dipusatkan di tepi atas monitor aktif |
-| Identifier / Versi | `com.farhanpratama.casa` / **`2.3.0`** (`tauri.conf.json`, `Cargo.toml`, `package.json`, `docs/`) |
+| Identifier / Versi | `com.farhanpratama.casa` / **`2.3.1`** (`tauri.conf.json`, `Cargo.toml`, `package.json`, `docs/`) |
 | Window utama | `1100×340` terkunci (kanvas logis 1100 px menghindari *DWM swapchain ResizeBuffers hitch*; hitbox dinamis via `WS_EX_TRANSPARENT` per `HitRect`) |
 | Settings window | Window sekunder `settings` (`DesktopSettingsWindow.tsx`) berarsitektur flat OLED 2-kolom (5 tab sidebar termasuk **`Ibadah & Lokasi`**) + tombol **`Quit CASA`** |
 | Frontend | React 19, TypeScript 5.7 (`strict`), Vite 6 (dev `127.0.0.1:1420`, `manualChunks` & lazy `Settings`), Tailwind 3.4, framer-motion 12, zustand 5, lucide-react |
@@ -42,7 +42,7 @@ asaverse/
 │  ├─ styles.css             ← Pure OLED theme + native Mode 6 capsule & Play Store reviews styling
 │  ├─ 404.html               ← Clean SPA sub-route restoration (/playground, /arsitektur, /unduh, /feedback)
 │  ├─ favicon.svg            ← Obsidian Bunny icon (`× ♥`)
-│  ├─ PRD.md                 ← Product Requirements Document v2.3.0
+│  ├─ PRD.md                 ← Product Requirements Document v2.3.1
 │  └─ sasha-character-spec.md
 ├─ supabase/                 ← Backend moderasi ulasan publik (`ivlyujaafwqziogajjtk.supabase.co`)
 │  ├─ config.toml            ← `verify_jwt = false` untuk `submit-review` & `telegram-webhook`
@@ -60,7 +60,7 @@ asaverse/
 │  ├─ verify-connect-hp-v230.mjs     ← Verifikasi Connect HP v2.3.0 (keamanan LAN/Origin/token, ZIP STORE, batch folder & Right Satellite Pod 204×177)
 │  └─ verify-*.{ts,js}                ← Logic test suite (lyrics, queue, browser sanitizer, time-sync, hitbox)
 ├─ src-tauri/
-│  ├─ tauri.conf.json        ← v2.3.0, com.farhanpratama.casa, 1100x340, dragDropEnabled:false, CSP, updater pubkey + endpoints
+│  ├─ tauri.conf.json        ← v2.3.1, com.farhanpratama.casa, 1100x340, dragDropEnabled:false, CSP, updater pubkey + endpoints
 │  ├─ capabilities/default.json
 │  └─ src/
 │     ├─ main.rs / lib.rs    ← DPI window align (`position_window_top`), 50Hz hitbox, `Alt+Space`, tray EN, `quit_app`, updater
@@ -118,7 +118,7 @@ asaverse/
 
 ---
 
-## 4. Arsitektur Frontend & UX `v2.3.0` (`src/` & `docs/`)
+## 4. Arsitektur Frontend & UX `v2.3.1` (`src/` & `docs/`)
 
 ### 4.1 Dimensi Kapsul (`islandLayoutState.ts`)
 - **Smart-Tuck:** `120×4 px` (sensor hover Docked `136×12 px`, Floating `140×18 px`), cooldown hysteresis hover/transisi terpadu **`220 ms`** (`HOVER_TRANSITION_HYSTERESIS_MS`), dan kompensasi *top-bridge* `0..12 px` di Floating Mode (`computePrimaryIslandHitboxAndSensor`) untuk transisi `tucked ↔ tucked_peek ↔ idle ↔ idle_peek`, plus cooldown pasca-fullscreen `450 ms`.
@@ -141,9 +141,9 @@ asaverse/
   - *Smart Drag-In & `Ctrl+V` Eksplisit:* `dragDropEnabled: false` pada window `main` memungkinkan DOM `dragenter`/`dragover`/`drop` menerima `Files`, `text/uri-list`, `text/plain`, dan `text/html` langsung ke kapsul (termasuk membangunkan mode `tucked`/`idle`/`resting`), dilengkapi tombol **`Paste`** & pintasan `Ctrl+V` on-demand tanpa *clipboard snooping* latar belakang.
   - *Sanitasi & Blokir Skema URI Berbahaya:* `sanitizeDropText` membersihkan tag HTML/skrip dan karakter kontrol/bidi; `parseSafeHttpUrl` membatasi tautan hanya pada `http://` & `https://` serta memblokir `javascript:`, `data:`, `vbscript:`, `file://`, dll. dengan indikator `securityNotice`.
   - *Native Drag-Out `CF_UNICODETEXT`, Clipboard 1-Klik & Safeguard Undo 4 Detik:* `DropZoneView.tsx` mendukung drag-out kartu `file`/`image` (`native_drag_drop_files` `CF_HDROP`) dan `text`/`link` (`native_drag_drop_text` `CF_UNICODETEXT` + `CF_TEXT` + `CF_OEMTEXT` + `CF_LOCALE` lewat `run_drag_drop_on_sta`) dengan auto-hapus bersyarat `DRAGDROP_S_DROP` + anti-self-drop; klik tunggal badan kartu `text`/`link` langsung menyalin `item.payload` (`Tersalin`), sementara 1 item terakhir hasil drag-out ditahan in-memory selama `4 detik` disertai banner **Urungkan** (`undoLastDraggedOut`); seluruh isi Dropzone + direktori transit dibersihkan otomatis saat `beforeunload`, `pagehide`, startup, tray `"quit"`, maupun `quit_app` (`cleanup_ephemeral_transit_dir`).
-- **Connect HP — Zero-App Local Web Drop (`v2.3.0`, `connect_hp.rs`, `useConnectHpStore.ts`, `DropZoneView.tsx`):**
-  - *Server `axum` + WebSocket Lokal Sementara & Hitbox Pod Kanan (`204 × 177 px`):* Diaktifkan melalui tombol **`Connect HP`** pada rak Dropzone (`580×192`), menampilkan pod satelit kanan `204 × 177 px` (`x=850..1054`, terdaftar di `effectiveRightPodOpen` & `update_island_hitboxes`) berisi QR Code SVG deklaratif, pemilih adapter LAN (Wi-Fi vs Windows Mobile Hotspot `192.168.137.1` tanpa restart server), diagnosa profil Windows (`Private`/`Public`/`Domain`), serta tetap bertahan saat kapsul menciut (*idle timeout* 10 menit / mati deterministik pada tombol tutup, `quit_app`, & tray `"quit"`).
-  - *Keamanan LAN, Transfer 4 GB, Batch Auto-Folder, Folder Drag-In/Out & Streaming ZIP `STORE`:* Menggunakan token CSPRNG 128-bit (`BCryptGenRandom`) + `ct_token_eq`, guard RFC 1918 & CSWSH `Origin`, token scrub (`history.replaceState`), HTTP-safe `<textarea>` + `execCommand('copy')`, antrean upload mobile persisten multi-batch (`uploadQueue`/`inFlightBytes`), **Drag-In Folder Explorer rekursif** (`webkitGetAsEntry`/`readEntries` loop penuh ke `Downloads\CASA Drop` via `create_drop_transit_directory`/`save_dropped_directory_file` + drag-out `CF_HDROP` direktori lewat `asset_protocol_scope::allow_directory`) serta **`+ File`** / **`+ Folder`** (`IFileOpenDialog` / `FOS_PICKFOLDERS`), *streaming upload* 64 KB (`>5` file otomatis menjadi 1 subfolder `Batch-HHMM`), *zero local-path leak* pada `sync_connect_hp_items`, dan *streaming ZIP* metode `STORE` + CRC-32 + Data Descriptor `0x08074b50` untuk unduhan folder penuh ke HP.
+- **Connect HP — Zero-App Local Web Drop (`v2.3.0`–`v2.3.1`, `connect_hp.rs`, `useConnectHpStore.ts`, `DropZoneView.tsx`):**
+  - *Server `axum` + WebSocket Lokal Sementara & Hitbox Pod Kanan (`204 × 177 px`):* Diaktifkan melalui tombol **`Connect HP`** pada rak Dropzone (`580×192`), menampilkan pod satelit kanan `204 × 177 px` (`x=850..1054`, terdaftar di `effectiveRightPodOpen` & `update_island_hitboxes`) berisi QR Code SVG deklaratif, pemilih adapter LAN (Wi-Fi vs Windows Mobile Hotspot `192.168.137.1` tanpa restart server), diagnosa profil Windows (`Private`/`Public`/`Domain`), token multi-scan & reload aman `sessionStorage`, auto-reconnect `visibilitychange` + tombol `Hubungkan Ulang`, serta lifecycle stop/restart bersih (`shutdown_connect_hp_server_async` + tetap bertahan saat kapsul menciut hingga *idle timeout* 10 menit / stop manual).
+  - *Keamanan LAN, Transfer 4 GB, Batch Auto-Folder, Folder Drag-In/Out & Streaming ZIP `STORE` Ber-`Content-Length` Eksak:* Menggunakan token CSPRNG 128-bit (`BCryptGenRandom`) + `ct_token_eq`, guard RFC 1918 & CSWSH `Origin`, token scrub (`history.replaceState`), HTTP-safe `<textarea>` + `execCommand('copy')`, antrean upload mobile persisten multi-batch (`uploadQueue`/`inFlightBytes`), **Drag-In Folder Explorer rekursif** (`webkitGetAsEntry`/`readEntries` loop penuh ke `Downloads\CASA Drop` via `create_drop_transit_directory`/`save_dropped_directory_file` + drag-out `CF_HDROP` direktori lewat `asset_protocol_scope::allow_directory`) + strip peringatan non-truncate untuk berkas >25 MB, serta **`+ File`** / **`+ Folder`** (`IFileOpenDialog` / `FOS_PICKFOLDERS`), *streaming upload* 64 KB (`>5` file otomatis menjadi 1 subfolder `Batch-HHMM`), *zero local-path leak* pada `sync_connect_hp_items`, dan *streaming ZIP* metode `STORE` (`prepare_store_zip_plan` dengan `Content-Length` eksak + CRC-32 + `filename*=UTF-8''`). Selain itu **`BatteryPill.tsx`** menampilkan ring `#22c55e` (normal & charging), `#f59e0b` (`<=20%`), `#ef4444` (`<=10%`), serta petir kuning `#facc15` saat charging.
 
 - **Single Clock Sync, `Unsynced` Auto-Scroll & To-Do Alarm `v2.0.4`:**
   - *Single Playback Clock:* `playbackClock.ts` menyatukan `resolvePlaybackPositionMs`, `computeLyricAdjustedTimeMs` (`75 ms` companion, `0 ms` native), dan `computeSyncedLyricIndex` (`50 ms` hysteresis) untuk Mode 6 & Idle Pill, disertai re-anchor SMTC (`reanchorMediaPlaybackClock`) saat transisi expanded/idle & Playing/Paused.

@@ -876,7 +876,7 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
       playChimeCue('tap');
       const willOpen = !isConnectHpPodOpen;
       onToggleConnectHpPod?.();
-      if (willOpen && !connectHp.active && !connectHp.isLoading) {
+      if (willOpen && (!connectHp.active || !connectHp.qrPath) && !connectHp.isLoading) {
         void connectHp.startSession();
       }
     },
@@ -1007,10 +1007,23 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
                     <rect width={connectHp.qrSize} height={connectHp.qrSize} fill="#ffffff" />
                     <path d={connectHp.qrPath} fill="#000000" />
                   </svg>
-                ) : (
+                ) : connectHp.isLoading ? (
                   <span className="text-[8.5px] font-mono text-black/70 text-center leading-tight">
-                    {connectHp.isLoading ? 'Memuat...' : 'Offline'}
+                    Memuat...
                   </span>
+                ) : (
+                  <button
+                    type="button"
+                    data-connect-hp-restart="true"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playChimeCue('tap');
+                      void connectHp.startSession();
+                    }}
+                    className="px-2 py-1 rounded-md bg-black text-white text-[8.5px] font-mono font-semibold cursor-pointer"
+                  >
+                    Mulai Ulang
+                  </button>
                 )}
               </div>
 
@@ -1177,36 +1190,7 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
             </span>
 
             <AnimatePresence initial={false}>
-              {securityNotice ? (
-                <motion.button
-                  key={securityNotice}
-                  type="button"
-                  initial={{ opacity: 0, x: -4 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -4 }}
-                  transition={{ duration: 0.14 }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSecurityNotice(null);
-                  }}
-                  data-security-notice="true"
-                  style={
-                    isMonochrome
-                      ? undefined
-                      : {
-                          borderColor: `${themePalette.danger}66`,
-                          backgroundColor: `${themePalette.danger}1F`,
-                          color: themePalette.danger,
-                        }
-                  }
-                  className={`inline-flex items-center gap-1 px-2 py-[1px] rounded-full border text-[9.5px] font-medium truncate cursor-pointer ${
-                    isMonochrome ? 'bg-white/[0.12] border-white/30 text-white' : ''
-                  }`}
-                >
-                  <ShieldAlert className="w-2.5 h-2.5 shrink-0" />
-                  <span className="truncate">{securityNotice}</span>
-                </motion.button>
-              ) : lastDraggedOutItem ? (
+              {lastDraggedOutItem ? (
                 <motion.button
                   key={`undo-${lastDraggedOutItem.id}`}
                   type="button"
@@ -1333,6 +1317,49 @@ export const DropZoneView: React.FC<DropZoneViewProps> = ({
 
         {/* Main Content Area: Empty State vs Horizontal Card Shelf */}
         <div className="relative flex-1 min-h-0 flex items-center">
+          <AnimatePresence>
+            {securityNotice && (
+              <motion.div
+                key={securityNotice}
+                role="alert"
+                data-security-notice="true"
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.14 }}
+                onClick={(e) => e.stopPropagation()}
+                style={
+                  isMonochrome
+                    ? undefined
+                    : {
+                        borderColor: `${themePalette.danger}66`,
+                        backgroundColor: '#141013F2',
+                        color: themePalette.danger,
+                      }
+                }
+                className={`absolute left-0 right-0 top-0 z-20 flex items-start justify-between gap-2 px-2.5 py-1.5 rounded-lg border shadow-[0_8px_20px_rgba(0,0,0,0.85)] backdrop-blur-sm ${
+                  isMonochrome ? 'bg-[#121215]/95 border-white/30 text-white' : ''
+                }`}
+              >
+                <ShieldAlert className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span className="text-[10px] font-medium leading-[1.35] whitespace-normal break-words line-clamp-2 flex-1 min-w-0">
+                  {securityNotice}
+                </span>
+                <button
+                  type="button"
+                  data-security-notice-dismiss="true"
+                  aria-label="Tutup peringatan"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSecurityNotice(null);
+                  }}
+                  className="w-4 h-4 rounded flex items-center justify-center shrink-0 opacity-75 hover:opacity-100 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
           {items.length === 0 ? (
             <div
               onClick={handlePickFiles}

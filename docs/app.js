@@ -105,7 +105,7 @@
       id: 'text-snippet',
       kind: 'text',
       name: 'Ephemeral transit note',
-      snippet: 'Checklist v2.3.0: Drag-In Folder, Ctrl+V & Connect HP.',
+      snippet: 'Checklist v2.3.1: Drag-In Folder, Ctrl+V & Connect HP.',
       ext: 'TXT',
       meta: 'TXT · 54 chars',
     },
@@ -2651,7 +2651,7 @@
           ? exeVersion.trim().startsWith('v')
             ? exeVersion.trim()
             : `v${exeVersion.trim()}`
-          : 'v2.3.0';
+          : 'v2.3.1';
       el.downloadSizeText.textContent = `${versionTag} · NSIS Setup (.exe) · ${exeSize}`;
     }
     if (el.downloadCountText) {
@@ -2753,13 +2753,13 @@
       let exeSize = null;
       let exeVersion = null;
       if (v2Release && Array.isArray(v2Release.assets)) {
-        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.3.0';
+        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.3.1';
         const exeAsset = v2Release.assets.find(
           (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
         );
         if (exeAsset && isSafeGitHubUrl(exeAsset.browser_download_url)) {
           exeUrl = exeAsset.browser_download_url;
-          exeSize = formatMegabytes(exeAsset.size) || '4.65 MB';
+          exeSize = formatMegabytes(exeAsset.size) || '4.66 MB';
         }
       }
 
@@ -2778,7 +2778,7 @@
         );
       } catch (_err) {}
     } catch (_err) {
-      // Keep static v2.3.0 fallback link & hide download count gracefully when offline/rate-limited
+      // Keep static v2.3.1 fallback link & hide download count gracefully when offline/rate-limited
     }
   }
 

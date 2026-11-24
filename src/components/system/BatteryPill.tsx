@@ -1,7 +1,6 @@
 import React from 'react';
 import { Zap } from 'lucide-react';
 import { BatteryTelemetry } from '../../hooks/useSystemTelemetry';
-import { useSettingsStore } from '../../stores/useSettingsStore';
 
 export interface BatteryPillProps {
   battery: BatteryTelemetry;
@@ -19,9 +18,8 @@ const STATUS_TEXT: Record<BatteryTelemetry['status'], string> = {
 };
 
 /**
- * Circular Progress Battery Ring (CASA v2.0.1):
- * Dynamic SVG stroke-dashoffset ring + optional charging Zap indicator + tabular percentage.
- * Adapts stroke colors cleanly to the active user theme palette.
+ * Circular Progress Battery Ring (CASA v2.3.1):
+ * Dynamic SVG stroke-dashoffset ring + contrasting electric-yellow charging bolt + tabular percentage.
  */
 export const BatteryPill: React.FC<BatteryPillProps> = ({
   battery,
@@ -30,8 +28,6 @@ export const BatteryPill: React.FC<BatteryPillProps> = ({
   size = 15,
   className = '',
 }) => {
-  const { palette } = useSettingsStore();
-
   if (!battery.has_battery) {
     return null;
   }
@@ -42,17 +38,18 @@ export const BatteryPill: React.FC<BatteryPillProps> = ({
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (clamped / 100) * circumference;
 
-  const isPluggedIn = battery.is_plugged_in;
-  const isLow = !isPluggedIn && (battery.status === 'low' || clamped <= 20);
-  const isMid = !isPluggedIn && !isLow && clamped <= 50;
+  const isChargingOrPlugged = Boolean(battery.is_charging || battery.is_plugged_in);
+  const isCritical = !isChargingOrPlugged && clamped <= 10;
+  const isLow = !isChargingOrPlugged && !isCritical && (battery.status === 'low' || clamped <= 20);
 
-  const ringColor = isPluggedIn
-    ? palette.rest
+  const ringColor = isChargingOrPlugged
+    ? '#22c55e'
+    : isCritical
+    ? '#ef4444'
     : isLow
-    ? palette.danger
-    : isMid
-    ? palette.timer
-    : '#E4E4E7';
+    ? '#f59e0b'
+    : '#22c55e';
+  const boltColor = '#facc15';
 
   const tooltipLabel = `${clamped}% · ${STATUS_TEXT[battery.status]}`;
 
@@ -65,7 +62,7 @@ export const BatteryPill: React.FC<BatteryPillProps> = ({
       {/* Circular SVG Progress Ring */}
       <div
         className={`relative flex items-center justify-center shrink-0 ${
-          isLow ? 'animate-pulse' : ''
+          isCritical || isLow ? 'animate-pulse' : ''
         }`}
         style={{ width: size, height: size }}
       >
@@ -83,6 +80,7 @@ export const BatteryPill: React.FC<BatteryPillProps> = ({
             strokeWidth="1.7"
           />
           <circle
+            data-battery-ring="true"
             cx={center}
             cy={center}
             r={radius}
@@ -96,11 +94,12 @@ export const BatteryPill: React.FC<BatteryPillProps> = ({
           />
         </svg>
 
-        {isPluggedIn && (
+        {isChargingOrPlugged && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <Zap
+              data-battery-bolt="true"
               className="w-[8px] h-[8px] fill-current"
-              style={{ color: ringColor }}
+              style={{ color: boltColor }}
               aria-hidden="true"
             />
           </div>
@@ -110,7 +109,7 @@ export const BatteryPill: React.FC<BatteryPillProps> = ({
       {showPercentage && (
         <span
           className="font-sans text-[10.5px] font-semibold tracking-[-0.02em] tabular-nums leading-none antialiased"
-          style={{ color: isLow || isPluggedIn ? ringColor : 'rgba(255,255,255,0.9)' }}
+          style={{ color: isCritical || isLow ? ringColor : 'rgba(255,255,255,0.92)' }}
         >
           {clamped}%
         </span>

@@ -201,12 +201,15 @@ export const StardustBatteryCapsule: React.FC<StardustBatteryCapsuleProps> = ({
   const clamped = Math.max(0, Math.min(100, Math.round(percentage)));
   const fillWidth = Math.max(1, (clamped / 100) * 13.5);
 
-  const isLow = clamped <= 20 && !isCharging;
+  const isCritical = clamped <= 10 && !isCharging;
+  const isLow = clamped <= 20 && !isCritical && !isCharging;
   const fillColor = isCharging
-    ? '#34D399'
+    ? '#22c55e'
+    : isCritical
+    ? '#ef4444'
     : isLow
-    ? '#F43F5E'
-    : '#98BBD6';
+    ? '#f59e0b'
+    : '#22c55e';
 
   return (
     <svg
@@ -249,9 +252,11 @@ export const StardustBatteryCapsule: React.FC<StardustBatteryCapsuleProps> = ({
         fillOpacity={isCharging ? 0.75 : 0.6}
         style={{
           filter: isCharging
-            ? 'drop-shadow(0 0 4px rgba(52, 211, 153, 0.7))'
+            ? 'drop-shadow(0 0 4px rgba(34, 197, 94, 0.7))'
+            : isCritical
+            ? 'drop-shadow(0 0 3px rgba(239, 68, 68, 0.6))'
             : isLow
-            ? 'drop-shadow(0 0 3px rgba(244, 63, 94, 0.6))'
+            ? 'drop-shadow(0 0 3px rgba(245, 158, 11, 0.6))'
             : undefined,
         }}
       />
@@ -260,10 +265,10 @@ export const StardustBatteryCapsule: React.FC<StardustBatteryCapsuleProps> = ({
       {isCharging && (
         <path
           d="M10.5 2.5 L7.5 7.5 H10.5 L8.5 11.5 L13 6.8 H10 L11.5 2.5 Z"
-          fill="#34D399"
+          fill="#facc15"
           stroke="#08090C"
           strokeWidth="0.6"
-          style={{ filter: 'drop-shadow(0 0 3px #34D399)' }}
+          style={{ filter: 'drop-shadow(0 0 3px #facc15)' }}
         />
       )}
     </svg>

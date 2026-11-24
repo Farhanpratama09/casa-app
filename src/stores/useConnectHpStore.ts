@@ -64,13 +64,36 @@ let unlistenStatus: UnlistenFn | null = null;
 let unlistenIncoming: UnlistenFn | null = null;
 let unsubscribeDropStore: (() => void) | null = null;
 let transferNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+let sessionOpSeq = 0;
+let pendingStopPromise: Promise<void> | null = null;
 
 function applySessionSnapshot(
   set: (partial: Partial<ConnectHpStoreState>) => void,
   info: ConnectHpSessionInfo
 ) {
+  if (!info.active) {
+    set({
+      active: false,
+      ip: '',
+      port: 0,
+      url: '',
+      qrSize: 0,
+      qrPath: '',
+      networkCategory: info.networkCategory,
+      candidateInterfaces: info.candidateInterfaces,
+      connectedClients: 0,
+      autoCopyClipboard: info.autoCopyClipboard,
+      idleTimeoutSecs: info.idleTimeoutSecs,
+      downloadDir: info.downloadDir,
+      reason: info.reason ?? null,
+      isLoading: false,
+      error: null,
+    });
+    return;
+  }
+
   set({
-    active: info.active,
+    active: true,
     ip: info.ip,
     port: info.port,
     url: info.url,
@@ -135,6 +158,9 @@ export const useConnectHpStore = create<ConnectHpStoreState>((set, get) => ({
 
       void listen<ConnectHpSessionInfo>('casa://connect-hp-status', (event) => {
         if (event.payload) {
+          if (pendingStopPromise !== null && event.payload.active) {
+            return;
+          }
           applySessionSnapshot(set, event.payload);
         }
       }).then((fn) => {
@@ -189,15 +215,21 @@ export const useConnectHpStore = create<ConnectHpStoreState>((set, get) => ({
   },
 
   startSession: async (preferredIp?: string) => {
+    if (pendingStopPromise) {
+      await pendingStopPromise;
+    }
     if (get().isLoading) return;
+    const seq = ++sessionOpSeq;
     set({ isLoading: true, error: null });
     try {
       const info = await startConnectHp(preferredIp, get().autoCopyClipboard);
+      if (seq !== sessionOpSeq) return;
       applySessionSnapshot(set, info);
       if (info.active) {
         await get().pushItemsToBackend();
       }
     } catch (err) {
+      if (seq !== sessionOpSeq) return;
       set({
         isLoading: false,
         error: err instanceof Error ? err.message : 'Gagal menyalakan server Connect HP',
@@ -206,21 +238,56 @@ export const useConnectHpStore = create<ConnectHpStoreState>((set, get) => ({
   },
 
   stopSession: async () => {
-    try {
-      await stopConnectHp();
-    } catch {
-      // Ignore cleanly
+    const seq = ++sessionOpSeq;
+    if (transferNoticeTimer) {
+      clearTimeout(transferNoticeTimer);
+      transferNoticeTimer = null;
     }
     set({
       active: false,
+      ip: '',
+      port: 0,
+      url: '',
+      qrSize: 0,
+      qrPath: '',
       connectedClients: 0,
       isLoading: false,
       error: null,
+      lastTransferNotice: null,
       reason: 'manual_stop',
     });
+
+    const p = stopConnectHp()
+      .catch(() => {
+        // Ignore cleanly
+      })
+      .finally(() => {
+        if (pendingStopPromise === p) {
+          pendingStopPromise = null;
+        }
+      });
+    pendingStopPromise = p;
+    await p;
+
+    if (seq === sessionOpSeq) {
+      set({
+        active: false,
+        ip: '',
+        port: 0,
+        url: '',
+        qrSize: 0,
+        qrPath: '',
+        connectedClients: 0,
+        isLoading: false,
+        reason: 'manual_stop',
+      });
+    }
   },
 
   selectInterface: async (ip: string) => {
+    if (pendingStopPromise) {
+      await pendingStopPromise;
+    }
     if (!get().active) {
       await get().startSession(ip);
       return;

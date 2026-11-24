@@ -321,7 +321,7 @@ struct ReverseGeocodeApiResponse {
 async fn reverse_geocode_coords(lat: f64, lon: f64) -> (Option<String>, Option<String>, Option<String>) {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(4))
-        .user_agent("CASA-Desktop/2.3.0")
+        .user_agent("CASA-Desktop/2.3.1")
         .build()
     {
         Ok(c) => c,
@@ -557,7 +557,7 @@ pub async fn search_prayer_city(query: String) -> Result<Vec<CitySearchItem>, St
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(6))
-        .user_agent("CASA-Desktop/2.3.0")
+        .user_agent("CASA-Desktop/2.3.1")
         .build()
         .map_err(|e| format!("Gagal menginisialisasi HTTP client: {e}"))?;
 

@@ -15,7 +15,7 @@ use qrcode::{EcLevel, QrCode};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager};
@@ -143,6 +143,7 @@ struct ServerRuntime {
     session_id: u64,
     token: String,
     port: u16,
+    stopped: AtomicBool,
     selected_ip: Mutex<String>,
     candidate_interfaces: Mutex<Vec<NetworkInterfaceOption>>,
     network_category: Mutex<String>,
@@ -156,6 +157,8 @@ struct ServerRuntime {
     batch_folders: tokio::sync::Mutex<HashMap<String, BatchFolderState>>,
     ws_broadcast: broadcast::Sender<String>,
     shutdown_tx: Mutex<Option<oneshot::Sender<()>>>,
+    serve_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    watchdog_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     app_handle: tauri::AppHandle,
 }
 
@@ -199,7 +202,7 @@ impl ServerRuntime {
         let (qr_size, qr_path) = build_qr_svg_path(&url);
 
         ConnectHpSessionInfo {
-            active: true,
+            active: !self.stopped.load(Ordering::SeqCst),
             ip,
             port: self.port,
             url,
@@ -803,6 +806,80 @@ fn collect_zip_entries_under_folder(root: &Path) -> Vec<(PathBuf, String)> {
     result
 }
 
+#[derive(Clone, Debug)]
+pub struct ZipPlanEntry {
+    pub disk_path: PathBuf,
+    pub name_bytes: Vec<u8>,
+    pub expected_size: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct PreparedZipPlan {
+    pub entries: Vec<ZipPlanEntry>,
+    pub total_zip_bytes: u64,
+}
+
+fn truncate_utf8_bytes(s: &str, max_bytes: usize) -> Vec<u8> {
+    if s.len() <= max_bytes {
+        return s.as_bytes().to_vec();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s.as_bytes()[..end].to_vec()
+}
+
+/// Menghitung manifest & ukuran total arsip ZIP metode `STORE` secara deterministik sebelum streaming,
+/// sehingga header HTTP `Content-Length` selalu tepat hingga satuan byte (chrome mobile menampilkan total MB).
+pub fn prepare_store_zip_plan(folder: &Path) -> Result<PreparedZipPlan, String> {
+    if !folder.is_dir() {
+        return Err("Folder tidak ditemukan di disk".to_string());
+    }
+    let raw_files = collect_zip_entries_under_folder(folder);
+    let mut entries = Vec::with_capacity(raw_files.len());
+    let mut local_cursor: u64 = 0;
+    let mut cd_bytes: u64 = 0;
+
+    for (disk_path, zip_name) in raw_files {
+        if entries.len() >= u16::MAX as usize {
+            break;
+        }
+        let Ok(meta) = std::fs::metadata(&disk_path) else {
+            continue;
+        };
+        if !meta.is_file() || meta.len() >= (u32::MAX as u64) {
+            continue;
+        }
+        if std::fs::File::open(&disk_path).is_err() {
+            continue;
+        }
+
+        let name_bytes = truncate_utf8_bytes(&zip_name, u16::MAX as usize);
+        let name_len = name_bytes.len() as u64;
+        let expected_size = meta.len() as u32;
+        let entry_local_bytes = 30u64 + name_len + (expected_size as u64) + 16u64;
+
+        if local_cursor.saturating_add(entry_local_bytes) > (u32::MAX as u64 - 1024) {
+            break;
+        }
+
+        local_cursor += entry_local_bytes;
+        cd_bytes += 46u64 + name_len;
+        entries.push(ZipPlanEntry {
+            disk_path,
+            name_bytes,
+            expected_size,
+        });
+    }
+
+    let total_zip_bytes = local_cursor.saturating_add(cd_bytes).saturating_add(22);
+    Ok(PreparedZipPlan {
+        entries,
+        total_zip_bytes,
+    })
+}
+
 struct ZipCentralEntry {
     name_bytes: Vec<u8>,
     crc32: u32,
@@ -812,39 +889,32 @@ struct ZipCentralEntry {
     dos_date: u16,
 }
 
-/// Menuliskan arsip ZIP murni metode `STORE` (0% kompresi) secara 1-pass streaming dengan Data Descriptor (`0x08074b50`) & UTF-8 flag (`0x0808`).
-pub async fn write_streaming_store_zip<W: tokio::io::AsyncWrite + Unpin>(
-    folder: &Path,
+/// Menuliskan arsip ZIP murni metode `STORE` sesuai `PreparedZipPlan` secara 1-pass streaming
+/// (strict exact-byte length agar tidak pernah memicu `ERR_CONTENT_LENGTH_MISMATCH`).
+pub async fn write_streaming_store_zip_from_plan<W: tokio::io::AsyncWrite + Unpin>(
+    plan: &PreparedZipPlan,
     mut writer: W,
     on_chunk: impl Fn() + Send + Sync,
 ) -> std::io::Result<()> {
-    let files = collect_zip_entries_under_folder(folder);
     let (dos_time, dos_date) = dos_now_time_date();
-    let mut central_entries: Vec<ZipCentralEntry> = Vec::with_capacity(files.len());
+    let mut central_entries: Vec<ZipCentralEntry> = Vec::with_capacity(plan.entries.len());
     let mut cursor_pos: u64 = 0;
     let mut buf = vec![0u8; STREAM_CHUNK_BYTES];
+    let zero_pad = vec![0u8; STREAM_CHUNK_BYTES];
 
-    for (disk_path, zip_name) in files {
-        let Ok(mut file) = tokio::fs::File::open(&disk_path).await else {
-            continue;
-        };
-        if cursor_pos > (u32::MAX as u64 - 1024) {
-            break;
-        }
+    for planned in &plan.entries {
         let local_offset = cursor_pos as u32;
-        let name_bytes = zip_name.into_bytes();
-        let name_len_u16 = (name_bytes.len().min(u16::MAX as usize)) as u16;
-        let trimmed_name = &name_bytes[..name_len_u16 as usize];
+        let trimmed_name = &planned.name_bytes;
+        let name_len_u16 = trimmed_name.len() as u16;
 
         // Local File Header (30 bytes) + filename: flags=0x0808 (Data Descriptor + UTF-8), method=0 (STORE)
         let mut lfh = [0u8; 30];
         lfh[0..4].copy_from_slice(&0x0403_4b50u32.to_le_bytes());
-        lfh[4..6].copy_from_slice(&20u16.to_le_bytes()); // version needed 2.0
-        lfh[6..8].copy_from_slice(&0x0808u16.to_le_bytes()); // UTF-8 + Data Descriptor
-        lfh[8..10].copy_from_slice(&0u16.to_le_bytes()); // method 0 = STORE
+        lfh[4..6].copy_from_slice(&20u16.to_le_bytes());
+        lfh[6..8].copy_from_slice(&0x0808u16.to_le_bytes());
+        lfh[8..10].copy_from_slice(&0u16.to_le_bytes());
         lfh[10..12].copy_from_slice(&dos_time.to_le_bytes());
         lfh[12..14].copy_from_slice(&dos_date.to_le_bytes());
-        // crc32, compressed size, uncompressed size are 0 in LFH when bit 3 is set
         lfh[26..28].copy_from_slice(&name_len_u16.to_le_bytes());
 
         writer.write_all(&lfh).await?;
@@ -852,21 +922,34 @@ pub async fn write_streaming_store_zip<W: tokio::io::AsyncWrite + Unpin>(
         cursor_pos += 30 + (trimmed_name.len() as u64);
 
         let mut crc = 0u32;
-        let mut file_size = 0u64;
-        loop {
-            let n = file.read(&mut buf).await?;
-            if n == 0 {
-                break;
+        let mut remaining = planned.expected_size as usize;
+
+        if let Ok(mut file) = tokio::fs::File::open(&planned.disk_path).await {
+            while remaining > 0 {
+                let to_read = remaining.min(buf.len());
+                let n = file.read(&mut buf[..to_read]).await?;
+                if n == 0 {
+                    break;
+                }
+                crc = crc32_update(crc, &buf[..n]);
+                writer.write_all(&buf[..n]).await?;
+                cursor_pos += n as u64;
+                remaining -= n;
+                on_chunk();
             }
-            crc = crc32_update(crc, &buf[..n]);
-            file_size += n as u64;
-            writer.write_all(&buf[..n]).await?;
-            cursor_pos += n as u64;
-            on_chunk();
         }
 
-        let size_u32 = file_size as u32;
-        // Data Descriptor (16 bytes): sig 0x08074b50 + crc + comp_size + uncomp_size
+        // Pad any unexpected file shrinkage/unavailability so streamed length matches Content-Length byte-for-byte
+        while remaining > 0 {
+            let chunk_len = remaining.min(zero_pad.len());
+            let slice = &zero_pad[..chunk_len];
+            crc = crc32_update(crc, slice);
+            writer.write_all(slice).await?;
+            cursor_pos += chunk_len as u64;
+            remaining -= chunk_len;
+        }
+
+        let size_u32 = planned.expected_size;
         let mut dd = [0u8; 16];
         dd[0..4].copy_from_slice(&0x0807_4b50u32.to_le_bytes());
         dd[4..8].copy_from_slice(&crc.to_le_bytes());
@@ -876,7 +959,7 @@ pub async fn write_streaming_store_zip<W: tokio::io::AsyncWrite + Unpin>(
         cursor_pos += 16;
 
         central_entries.push(ZipCentralEntry {
-            name_bytes: trimmed_name.to_vec(),
+            name_bytes: trimmed_name.clone(),
             crc32: crc,
             size: size_u32,
             local_offset,
@@ -892,17 +975,17 @@ pub async fn write_streaming_store_zip<W: tokio::io::AsyncWrite + Unpin>(
         let name_len = entry.name_bytes.len() as u16;
         let mut cdfh = [0u8; 46];
         cdfh[0..4].copy_from_slice(&0x0201_4b50u32.to_le_bytes());
-        cdfh[4..6].copy_from_slice(&20u16.to_le_bytes()); // version made by
-        cdfh[6..8].copy_from_slice(&20u16.to_le_bytes()); // version needed
+        cdfh[4..6].copy_from_slice(&20u16.to_le_bytes());
+        cdfh[6..8].copy_from_slice(&20u16.to_le_bytes());
         cdfh[8..10].copy_from_slice(&0x0808u16.to_le_bytes());
-        cdfh[10..12].copy_from_slice(&0u16.to_le_bytes()); // STORE
+        cdfh[10..12].copy_from_slice(&0u16.to_le_bytes());
         cdfh[12..14].copy_from_slice(&entry.dos_time.to_le_bytes());
         cdfh[14..16].copy_from_slice(&entry.dos_date.to_le_bytes());
         cdfh[16..20].copy_from_slice(&entry.crc32.to_le_bytes());
         cdfh[20..24].copy_from_slice(&entry.size.to_le_bytes());
         cdfh[24..28].copy_from_slice(&entry.size.to_le_bytes());
         cdfh[28..30].copy_from_slice(&name_len.to_le_bytes());
-        cdfh[38..42].copy_from_slice(&0x20u32.to_le_bytes()); // Archive attr
+        cdfh[38..42].copy_from_slice(&0x20u32.to_le_bytes());
         cdfh[42..46].copy_from_slice(&entry.local_offset.to_le_bytes());
 
         writer.write_all(&cdfh).await?;
@@ -921,6 +1004,18 @@ pub async fn write_streaming_store_zip<W: tokio::io::AsyncWrite + Unpin>(
     writer.write_all(&eocd).await?;
     writer.flush().await?;
     Ok(())
+}
+
+/// Menuliskan arsip ZIP murni metode `STORE` (0% kompresi) secara 1-pass streaming dengan Data Descriptor (`0x08074b50`) & UTF-8 flag (`0x0808`).
+#[cfg(test)]
+pub async fn write_streaming_store_zip<W: tokio::io::AsyncWrite + Unpin>(
+    folder: &Path,
+    writer: W,
+    on_chunk: impl Fn() + Send + Sync,
+) -> std::io::Result<()> {
+    let plan = prepare_store_zip_plan(folder)
+        .map_err(|msg| std::io::Error::new(std::io::ErrorKind::NotFound, msg))?;
+    write_streaming_store_zip_from_plan(&plan, writer, on_chunk).await
 }
 
 // =========================================================================
@@ -961,10 +1056,30 @@ async fn handle_index(
     headers: HeaderMap,
     Query(query): Query<TokenQuery>,
 ) -> Response {
-    if let Err((code, msg)) =
-        verify_request_access(&runtime, addr.ip(), &headers, query.t.as_deref(), false)
-    {
-        return (code, msg).into_response();
+    if !is_allowed_lan_ip(addr.ip()) {
+        return (StatusCode::FORBIDDEN, "LAN IP only").into_response();
+    }
+    if runtime.stopped.load(Ordering::SeqCst) {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Connect HP session closed").into_response();
+    }
+
+    // Jika `?t=` disertakan (scan QR / buka ulang URL QR), wajib valid;
+    // jika kosong (reload `/` pasca history.replaceState di Chrome Android), sajikan shell HTML statis
+    // agar JS dapat memulihkan token dari sessionStorage lalu memverifikasi /ws & /api/items.
+    let provided_query_token = query
+        .t
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let header_token = headers
+        .get("x-casa-token")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(tok) = provided_query_token.or(header_token) {
+        if !ct_token_eq(tok.as_bytes(), runtime.token.as_bytes()) {
+            return (StatusCode::UNAUTHORIZED, "Invalid session token").into_response();
+        }
     }
     runtime.touch_activity();
 
@@ -990,6 +1105,9 @@ async fn handle_ws_upgrade(
     Query(query): Query<TokenQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
+    if runtime.stopped.load(Ordering::SeqCst) {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Connect HP session closed").into_response();
+    }
     if let Err((code, msg)) =
         verify_request_access(&runtime, addr.ip(), &headers, query.t.as_deref(), true)
     {
@@ -1000,6 +1118,11 @@ async fn handle_ws_upgrade(
 }
 
 async fn handle_ws_connection(runtime: Arc<ServerRuntime>, mut socket: WebSocket) {
+    if runtime.stopped.load(Ordering::SeqCst) {
+        let _ = socket.close().await;
+        return;
+    }
+
     let clients_now = runtime.connected_clients.fetch_add(1, Ordering::Relaxed) + 1;
     let _ = runtime
         .app_handle
@@ -1026,6 +1149,10 @@ async fn handle_ws_connection(runtime: Arc<ServerRuntime>, mut socket: WebSocket
     let mut rx = runtime.ws_broadcast.subscribe();
 
     loop {
+        if runtime.stopped.load(Ordering::SeqCst) {
+            let _ = socket.close().await;
+            break;
+        }
         tokio::select! {
             ws_msg = socket.recv() => {
                 match ws_msg {
@@ -1065,9 +1192,17 @@ async fn handle_ws_connection(runtime: Arc<ServerRuntime>, mut socket: WebSocket
     }
 
     runtime.connected_clients.fetch_sub(1, Ordering::Relaxed);
-    let _ = runtime
-        .app_handle
-        .emit("casa://connect-hp-status", runtime.to_session_info(None));
+    let still_active_current = !runtime.stopped.load(Ordering::SeqCst)
+        && GLOBAL_RUNTIME
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|r| r.session_id == runtime.session_id))
+            .unwrap_or(false);
+    if still_active_current {
+        let _ = runtime
+            .app_handle
+            .emit("casa://connect-hp-status", runtime.to_session_info(None));
+    }
 }
 
 async fn handle_get_items(
@@ -1383,6 +1518,81 @@ fn sanitize_content_disposition_name(raw: &str) -> String {
     }
 }
 
+pub fn guess_download_mime_type(file_name: &str) -> &'static str {
+    let ext = file_name
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "zip" => "application/zip",
+        "pdf" => "application/pdf",
+        "txt" | "log" | "md" => "text/plain; charset=utf-8",
+        "csv" => "text/csv; charset=utf-8",
+        "json" => "application/json; charset=utf-8",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" | "opus" => "audio/ogg",
+        "m4a" => "audio/mp4",
+        "flac" => "audio/flac",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "mkv" => "video/x-matroska",
+        _ => "application/octet-stream",
+    }
+}
+
+fn encode_rfc5987_utf8(input: &str) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(input.len());
+    for &b in input.as_bytes() {
+        let unreserved = b.is_ascii_alphanumeric()
+            || matches!(
+                b,
+                b'!' | b'#' | b'$' | b'&' | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~'
+            );
+        if unreserved {
+            out.push(b as char);
+        } else {
+            let _ = write!(&mut out, "%{:02X}", b);
+        }
+    }
+    out
+}
+
+pub fn build_content_disposition_attachment(raw_name: &str) -> String {
+    let utf8_name = raw_name
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '"' | '\\' | '/' | ':' | ';' | '<' | '>') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect::<String>()
+        .trim()
+        .to_string();
+    let clean_utf8 = if utf8_name.is_empty() {
+        "casa-download.bin".to_string()
+    } else {
+        utf8_name
+    };
+    let ascii_fallback = sanitize_content_disposition_name(&clean_utf8);
+    let encoded_utf8 = encode_rfc5987_utf8(&clean_utf8);
+    format!(
+        "attachment; filename=\"{}\"; filename*=UTF-8''{}",
+        ascii_fallback, encoded_utf8
+    )
+}
+
 async fn handle_download_file(
     State(runtime): State<Arc<ServerRuntime>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -1390,6 +1600,9 @@ async fn handle_download_file(
     AxumPath(item_id): AxumPath<String>,
     Query(query): Query<TokenQuery>,
 ) -> Response {
+    if runtime.stopped.load(Ordering::SeqCst) {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Connect HP session closed").into_response();
+    }
     if let Err((code, msg)) =
         verify_request_access(&runtime, addr.ip(), &headers, query.t.as_deref(), false)
     {
@@ -1415,22 +1628,42 @@ async fn handle_download_file(
     };
 
     // Streaming Folder sebagai ZIP STORE (0% kompresi, 1-pass Data Descriptor, O(1) RAM)
+    // disertai header Content-Length eksak sebelum streaming agar Chrome Android menampilkan progres ukuran penuh.
     if meta.is_dir() {
-        let folder_label = sanitize_content_disposition_name(&entry.public.title);
-        let zip_name = if folder_label.to_ascii_lowercase().ends_with(".zip") {
+        let folder_label = entry.public.title.trim().to_string();
+        let raw_zip_name = if folder_label.is_empty() {
+            "casa-folder.zip".to_string()
+        } else if folder_label.to_ascii_lowercase().ends_with(".zip") {
             folder_label
         } else {
             format!("{}.zip", folder_label)
         };
 
+        let folder_for_plan = disk_path.clone();
+        let plan = match tauri::async_runtime::spawn_blocking(move || {
+            prepare_store_zip_plan(&folder_for_plan)
+        })
+        .await
+        {
+            Ok(Ok(p)) => p,
+            Ok(Err(e)) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Gagal menghitung ukuran arsip ZIP: {}", e),
+                )
+                    .into_response()
+            }
+        };
+
+        let total_zip_bytes = plan.total_zip_bytes;
         let (duplex_writer, duplex_reader) = tokio::io::duplex(128 * 1024);
         let runtime_clone = Arc::clone(&runtime);
-        let folder_clone = disk_path.clone();
 
         tokio::spawn(async move {
             let _guard = ActiveTransferGuard::new(&runtime_clone.active_transfers);
             let rt_ref = &runtime_clone;
-            let _ = write_streaming_store_zip(&folder_clone, duplex_writer, move || {
+            let _ = write_streaming_store_zip_from_plan(&plan, duplex_writer, move || {
                 rt_ref.touch_activity();
             })
             .await;
@@ -1443,12 +1676,19 @@ async fn handle_download_file(
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/zip"),
         );
-        if let Ok(cd) = HeaderValue::from_str(&format!("attachment; filename=\"{}\"", zip_name)) {
+        if let Ok(cl) = HeaderValue::from_str(&total_zip_bytes.to_string()) {
+            resp.headers_mut().insert(header::CONTENT_LENGTH, cl);
+        }
+        if let Ok(cd) = HeaderValue::from_str(&build_content_disposition_attachment(&raw_zip_name)) {
             resp.headers_mut().insert(header::CONTENT_DISPOSITION, cd);
         }
         resp.headers_mut().insert(
             header::CACHE_CONTROL,
             HeaderValue::from_static("no-store"),
+        );
+        resp.headers_mut().insert(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
         );
         return resp;
     }
@@ -1459,28 +1699,32 @@ async fn handle_download_file(
         Err(_) => return (StatusCode::NOT_FOUND, "Gagal membuka berkas").into_response(),
     };
 
-    let file_name = disk_path
+    let raw_file_name = disk_path
         .file_name()
-        .map(|s| sanitize_content_disposition_name(&s.to_string_lossy()))
+        .map(|s| s.to_string_lossy().into_owned())
+        .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "casa-file.bin".to_string());
+    let mime_type = guess_download_mime_type(&raw_file_name);
     let file_len = meta.len();
 
     let stream = ReaderStream::with_capacity(file, STREAM_CHUNK_BYTES);
     let body = Body::from_stream(stream);
     let mut resp = Response::new(body);
-    resp.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/octet-stream"),
-    );
+    resp.headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(mime_type));
     if let Ok(cl) = HeaderValue::from_str(&file_len.to_string()) {
         resp.headers_mut().insert(header::CONTENT_LENGTH, cl);
     }
-    if let Ok(cd) = HeaderValue::from_str(&format!("attachment; filename=\"{}\"", file_name)) {
+    if let Ok(cd) = HeaderValue::from_str(&build_content_disposition_attachment(&raw_file_name)) {
         resp.headers_mut().insert(header::CONTENT_DISPOSITION, cd);
     }
     resp.headers_mut().insert(
         header::CACHE_CONTROL,
         HeaderValue::from_static("no-store"),
+    );
+    resp.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
     );
     resp
 }
@@ -1488,12 +1732,53 @@ async fn handle_download_file(
 pub fn shutdown_connect_hp_server() {
     if let Ok(mut guard) = GLOBAL_RUNTIME.lock() {
         if let Some(rt) = guard.take() {
+            rt.stopped.store(true, Ordering::SeqCst);
             let _ = rt.ws_broadcast.send("__casa_shutdown__".to_string());
             if let Ok(mut tx_guard) = rt.shutdown_tx.lock() {
                 if let Some(tx) = tx_guard.take() {
                     let _ = tx.send(());
                 }
             }
+            if let Ok(mut wd) = rt.watchdog_task.lock() {
+                if let Some(handle) = wd.take() {
+                    handle.abort();
+                }
+            }
+            if let Ok(mut st) = rt.serve_task.lock() {
+                if let Some(handle) = st.take() {
+                    handle.abort();
+                }
+            }
+        }
+    }
+}
+
+pub async fn shutdown_connect_hp_server_async() {
+    let rt_opt = GLOBAL_RUNTIME.lock().ok().and_then(|mut guard| guard.take());
+    let Some(rt) = rt_opt else {
+        return;
+    };
+
+    rt.stopped.store(true, Ordering::SeqCst);
+    let _ = rt.ws_broadcast.send("__casa_shutdown__".to_string());
+    if let Ok(mut tx_guard) = rt.shutdown_tx.lock() {
+        if let Some(tx) = tx_guard.take() {
+            let _ = tx.send(());
+        }
+    }
+    if let Ok(mut wd) = rt.watchdog_task.lock() {
+        if let Some(handle) = wd.take() {
+            handle.abort();
+        }
+    }
+    let serve_handle_opt = rt.serve_task.lock().ok().and_then(|mut st| st.take());
+    if let Some(mut handle) = serve_handle_opt {
+        if tokio::time::timeout(std::time::Duration::from_millis(120), &mut handle)
+            .await
+            .is_err()
+        {
+            handle.abort();
+            let _ = handle.await;
         }
     }
 }
@@ -1510,27 +1795,29 @@ pub async fn start_connect_hp(
 
     if let Ok(existing_opt) = GLOBAL_RUNTIME.lock().map(|g| g.clone()) {
         if let Some(rt) = existing_opt {
-            if let Some(pref) = preferred_ip.as_deref() {
-                if candidates.iter().any(|c| c.ip == pref) {
-                    if let Ok(mut sel) = rt.selected_ip.lock() {
-                        *sel = pref.to_string();
+            if !rt.stopped.load(Ordering::SeqCst) {
+                if let Some(pref) = preferred_ip.as_deref() {
+                    if candidates.iter().any(|c| c.ip == pref) {
+                        if let Ok(mut sel) = rt.selected_ip.lock() {
+                            *sel = pref.to_string();
+                        }
                     }
                 }
+                if let Ok(mut cand_guard) = rt.candidate_interfaces.lock() {
+                    *cand_guard = candidates;
+                }
+                if let Ok(mut cat_guard) = rt.network_category.lock() {
+                    *cat_guard = net_category;
+                }
+                if let Some(ac) = auto_copy_clipboard {
+                    rt.auto_copy_clipboard
+                        .store(if ac { 1 } else { 0 }, Ordering::Relaxed);
+                }
+                rt.touch_activity();
+                let info = rt.to_session_info(None);
+                let _ = app.emit("casa://connect-hp-status", &info);
+                return Ok(info);
             }
-            if let Ok(mut cand_guard) = rt.candidate_interfaces.lock() {
-                *cand_guard = candidates;
-            }
-            if let Ok(mut cat_guard) = rt.network_category.lock() {
-                *cat_guard = net_category;
-            }
-            if let Some(ac) = auto_copy_clipboard {
-                rt.auto_copy_clipboard
-                    .store(if ac { 1 } else { 0 }, Ordering::Relaxed);
-            }
-            rt.touch_activity();
-            let info = rt.to_session_info(None);
-            let _ = app.emit("casa://connect-hp-status", &info);
-            return Ok(info);
         }
     }
 
@@ -1555,6 +1842,7 @@ pub async fn start_connect_hp(
         session_id,
         token,
         port,
+        stopped: AtomicBool::new(false),
         selected_ip: Mutex::new(chosen_ip),
         candidate_interfaces: Mutex::new(candidates),
         network_category: Mutex::new(net_category),
@@ -1568,6 +1856,8 @@ pub async fn start_connect_hp(
         batch_folders: tokio::sync::Mutex::new(HashMap::new()),
         ws_broadcast,
         shutdown_tx: Mutex::new(Some(shutdown_tx)),
+        serve_task: Mutex::new(None),
+        watchdog_task: Mutex::new(None),
         app_handle: app.clone(),
     });
 
@@ -1589,7 +1879,7 @@ pub async fn start_connect_hp(
         .with_state(Arc::clone(&runtime));
 
     let rt_serve = Arc::clone(&runtime);
-    tauri::async_runtime::spawn(async move {
+    let serve_handle = tauri::async_runtime::spawn(async move {
         let _ = axum::serve(
             listener,
             router.into_make_service_with_connect_info::<SocketAddr>(),
@@ -1599,24 +1889,29 @@ pub async fn start_connect_hp(
         })
         .await;
 
+        rt_serve.stopped.store(true, Ordering::SeqCst);
         if let Ok(mut guard) = GLOBAL_RUNTIME.lock() {
             if guard.as_ref().map(|r| r.session_id) == Some(rt_serve.session_id) {
                 *guard = None;
             }
         }
     });
+    if let Ok(mut guard) = runtime.serve_task.lock() {
+        *guard = Some(serve_handle);
+    }
 
     // Idle Watchdog: matikan otomatis jika benar-benar idle > 10 menit tanpa transfer/WS aktif
     let rt_watchdog = Arc::clone(&runtime);
-    tauri::async_runtime::spawn(async move {
+    let watchdog_handle = tauri::async_runtime::spawn(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(15));
         loop {
             ticker.tick().await;
-            let still_current = GLOBAL_RUNTIME
-                .lock()
-                .ok()
-                .and_then(|g| g.as_ref().map(|r| r.session_id == rt_watchdog.session_id))
-                .unwrap_or(false);
+            let still_current = !rt_watchdog.stopped.load(Ordering::SeqCst)
+                && GLOBAL_RUNTIME
+                    .lock()
+                    .ok()
+                    .and_then(|g| g.as_ref().map(|r| r.session_id == rt_watchdog.session_id))
+                    .unwrap_or(false);
             if !still_current {
                 break;
             }
@@ -1628,6 +1923,10 @@ pub async fn start_connect_hp(
                 rt_watchdog.last_activity_epoch.load(Ordering::Relaxed),
             );
             if elapsed >= IDLE_TIMEOUT_SECS {
+                rt_watchdog.stopped.store(true, Ordering::SeqCst);
+                let _ = rt_watchdog
+                    .ws_broadcast
+                    .send("__casa_shutdown__".to_string());
                 if let Ok(mut guard) = GLOBAL_RUNTIME.lock() {
                     if guard.as_ref().map(|r| r.session_id) == Some(rt_watchdog.session_id) {
                         *guard = None;
@@ -1646,6 +1945,9 @@ pub async fn start_connect_hp(
             }
         }
     });
+    if let Ok(mut guard) = runtime.watchdog_task.lock() {
+        *guard = Some(watchdog_handle);
+    }
 
     let info = runtime.to_session_info(None);
     let _ = app.emit("casa://connect-hp-status", &info);
@@ -1653,8 +1955,8 @@ pub async fn start_connect_hp(
 }
 
 #[tauri::command]
-pub fn stop_connect_hp(app: tauri::AppHandle) -> Result<(), String> {
-    shutdown_connect_hp_server();
+pub async fn stop_connect_hp(app: tauri::AppHandle) -> Result<(), String> {
+    shutdown_connect_hp_server_async().await;
     let _ = app.emit(
         "casa://connect-hp-status",
         ConnectHpSessionInfo::inactive(Some("manual_stop".to_string())),
@@ -1742,12 +2044,29 @@ async fn apply_sync_items_to_runtime(
             None
         };
 
+        let resolved_size_bytes = if item.item_type == "folder" && item.size_bytes.is_none() {
+            if let Some(dir_path) = local_path.as_ref().filter(|p| p.is_dir()).cloned() {
+                tauri::async_runtime::spawn_blocking(move || {
+                    prepare_store_zip_plan(&dir_path)
+                        .ok()
+                        .map(|p| p.total_zip_bytes)
+                })
+                .await
+                .ok()
+                .flatten()
+            } else {
+                None
+            }
+        } else {
+            item.size_bytes
+        };
+
         let public_item = ConnectHpPublicItem {
             id: item.id.clone(),
             item_type: item.item_type,
             title: item.title,
             extension: item.extension,
-            size_bytes: item.size_bytes,
+            size_bytes: resolved_size_bytes,
             file_count: item.file_count,
             text_payload: if is_text_or_link {
                 item.text_payload
@@ -1849,8 +2168,11 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; padding: 0; background: #000000; color: #f4f4f5; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; min-height: 100%; }
   body { padding: 14px 14px 36px; max-width: 540px; margin: 0 auto; }
-  .head { display: flex; align-items: center; justify-content: space-between; padding: 8px 2px 14px; border-bottom: 1px solid rgba(255,255,255,0.09); margin-bottom: 14px; }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 2px 14px; border-bottom: 1px solid rgba(255,255,255,0.09); margin-bottom: 14px; }
+  .head-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
   .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; letter-spacing: -0.02em; }
+  .reconnect-btn { border: 1px solid rgba(255,255,255,0.22); background: rgba(255,255,255,0.12); color: #ffffff; border-radius: 999px; padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer; }
+  [hidden] { display: none !important; }
   .status-pill { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.06); color: #e4e4e7; }
   .status-pill.ok { background: #ffffff; color: #000000; border-color: #ffffff; font-weight: 600; }
   .card { background: #09090b; border: 1px solid rgba(255,255,255,0.10); border-radius: 16px; padding: 14px; margin-bottom: 14px; }
@@ -1871,10 +2193,12 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
   .prog-fill { height: 100%; width: 0%; background: #ffffff; transition: width 0.15s linear; }
   .wake-note { margin-top: 8px; font-size: 11px; color: #d4d4d8; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 7px 10px; }
   .list { display: flex; flex-direction: column; gap: 8px; }
+  .item-block { display: flex; flex-direction: column; gap: 4px; }
   .item-row { background: #000000; border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .item-info { min-width: 0; flex: 1; }
   .item-name { font-size: 13px; font-weight: 500; color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .item-sub { font-size: 11px; font-family: ui-monospace, monospace; color: #a1a1aa; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .zip-note { font-size: 10.5px; color: #a1a1aa; padding: 0 6px; line-height: 1.35; }
   .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #ffffff; color: #000000; font-size: 12px; font-weight: 600; padding: 8px 14px; border-radius: 999px; display: none; z-index: 99; box-shadow: 0 6px 24px rgba(0,0,0,0.7); }
   .toast.show { display: block; }
 </style>
@@ -1882,7 +2206,10 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
 <body>
   <header class="head">
     <div class="brand">CASA &times; Connect HP</div>
-    <span class="status-pill" id="ws-badge">Menghubungkan...</span>
+    <div class="head-actions">
+      <button type="button" class="reconnect-btn" id="reconnect-btn" hidden>Hubungkan Ulang</button>
+      <span class="status-pill" id="ws-badge">Menghubungkan...</span>
+    </div>
   </header>
 
   <section class="card">
@@ -1927,13 +2254,25 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
 <script>
 (() => {
   'use strict';
+  const TOKEN_STORAGE_KEY = 'casa_hp_token';
   const params = new URLSearchParams(window.location.search);
-  const SESSION_TOKEN = (params.get('t') || '').trim();
-  if (SESSION_TOKEN && window.history && typeof window.history.replaceState === 'function') {
-    window.history.replaceState(null, '', '/');
+  const urlToken = (params.get('t') || '').trim();
+  if (urlToken) {
+    try {
+      window.sessionStorage.setItem(TOKEN_STORAGE_KEY, urlToken);
+    } catch (_err) {}
+    if (window.history && typeof window.history.replaceState === 'function') {
+      window.history.replaceState(null, '', '/');
+    }
   }
+  let storedToken = '';
+  try {
+    storedToken = (window.sessionStorage.getItem(TOKEN_STORAGE_KEY) || '').trim();
+  } catch (_err) {}
+  const SESSION_TOKEN = urlToken || storedToken;
 
   const wsBadge = document.getElementById('ws-badge');
+  const reconnectBtn = document.getElementById('reconnect-btn');
   const textInput = document.getElementById('text-input');
   const sendTextBtn = document.getElementById('send-text-btn');
   const fileInput = document.getElementById('file-input');
@@ -2020,7 +2359,10 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
       if (it.itemType === 'text' || it.itemType === 'link') {
         sub.textContent = it.textPayload || '';
       } else if (it.itemType === 'folder') {
-        sub.textContent = 'FOLDER (.zip STORE)' + (it.fileCount != null ? ' · ' + it.fileCount + ' file' : '');
+        sub.textContent =
+          'FOLDER (.zip STORE)' +
+          (it.fileCount != null ? ' · ' + it.fileCount + ' file' : '') +
+          (it.sizeBytes ? ' · ' + formatSize(it.sizeBytes) : '');
       } else {
         sub.textContent = (it.extension ? it.extension.toUpperCase() : 'FILE') + (it.sizeBytes ? ' · ' + formatSize(it.sizeBytes) : '');
       }
@@ -2039,6 +2381,7 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
           showToast(ok ? 'Tersalin ke clipboard HP' : 'Gagal menyalin teks');
         });
         row.appendChild(cp);
+        laptopList.appendChild(row);
       } else {
         const dl = document.createElement('a');
         dl.className = 'btn';
@@ -2047,9 +2390,20 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
         dl.setAttribute('download', dlName);
         dl.textContent = it.itemType === 'folder' ? 'Unduh .zip' : 'Unduh';
         row.appendChild(dl);
-      }
 
-      laptopList.appendChild(row);
+        if (it.itemType === 'folder') {
+          const block = document.createElement('div');
+          block.className = 'item-block';
+          block.appendChild(row);
+          const zipNote = document.createElement('div');
+          zipNote.className = 'zip-note';
+          zipNote.textContent = 'Jika Chrome menampilkan peringatan HTTP lokal, pilih Tetap simpan';
+          block.appendChild(zipNote);
+          laptopList.appendChild(block);
+        } else {
+          laptopList.appendChild(row);
+        }
+      }
     });
   }
 
@@ -2221,23 +2575,90 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
     pumpQueue();
   });
 
-  function connectWs() {
+  let currentWs = null;
+  let wsPingTimer = null;
+  let wsReconnectTimer = null;
+  let sessionExpired = false;
+
+  async function refreshItemsHttp() {
+    if (!SESSION_TOKEN) return;
+    try {
+      const resp = await fetch('/api/items', {
+        headers: { 'X-Casa-Token': SESSION_TOKEN },
+        cache: 'no-store'
+      });
+      if (resp.status === 401 || resp.status === 503) {
+        sessionExpired = true;
+        if (wsReconnectTimer) {
+          clearTimeout(wsReconnectTimer);
+          wsReconnectTimer = null;
+        }
+        wsBadge.textContent = 'Sesi berakhir · Scan QR';
+        wsBadge.classList.remove('ok');
+        if (reconnectBtn) reconnectBtn.hidden = false;
+        showToast('Sesi Connect HP di laptop berakhir · silakan scan QR baru');
+        return;
+      }
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && Array.isArray(data.items)) {
+          renderItems(data.items);
+        }
+      }
+    } catch (_err) {}
+  }
+
+  function connectWs(force) {
     if (!SESSION_TOKEN) {
       wsBadge.textContent = 'Token hilang';
+      if (reconnectBtn) reconnectBtn.hidden = true;
       return;
     }
+    if (force) {
+      sessionExpired = false;
+    }
+    if (sessionExpired) return;
+    if (wsReconnectTimer) {
+      clearTimeout(wsReconnectTimer);
+      wsReconnectTimer = null;
+    }
+    if (currentWs) {
+      if (!force && (currentWs.readyState === WebSocket.OPEN || currentWs.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+      try {
+        currentWs.onopen = null;
+        currentWs.onmessage = null;
+        currentWs.onerror = null;
+        currentWs.onclose = null;
+        currentWs.close();
+      } catch (_err) {}
+      currentWs = null;
+    }
+    if (wsPingTimer) {
+      clearInterval(wsPingTimer);
+      wsPingTimer = null;
+    }
+
+    wsBadge.textContent = 'Menghubungkan...';
+    wsBadge.classList.remove('ok');
+
     const proto = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
     const ws = new WebSocket(proto + window.location.host + '/ws?t=' + encodeURIComponent(SESSION_TOKEN));
-    let pingId = null;
+    currentWs = ws;
 
     ws.onopen = () => {
+      if (currentWs !== ws) return;
+      sessionExpired = false;
       wsBadge.textContent = 'Terhubung';
       wsBadge.classList.add('ok');
-      pingId = setInterval(() => {
+      if (reconnectBtn) reconnectBtn.hidden = true;
+      wsPingTimer = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) ws.send('ping');
       }, 25000);
     };
     ws.onmessage = (ev) => {
+      if (currentWs !== ws) return;
       try {
         const data = JSON.parse(ev.data);
         if (data && data.type === 'items') {
@@ -2246,14 +2667,45 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
       } catch (_err) {}
     };
     ws.onclose = () => {
-      if (pingId) clearInterval(pingId);
-      wsBadge.textContent = 'Terputus';
+      if (currentWs !== ws) return;
+      currentWs = null;
+      if (wsPingTimer) {
+        clearInterval(wsPingTimer);
+        wsPingTimer = null;
+      }
+      wsBadge.textContent = sessionExpired ? 'Sesi berakhir · Scan QR' : 'Terputus';
       wsBadge.classList.remove('ok');
-      setTimeout(connectWs, 2500);
+      if (reconnectBtn) reconnectBtn.hidden = false;
+      void refreshItemsHttp();
+      if (!sessionExpired) {
+        wsReconnectTimer = setTimeout(() => {
+          connectWs(false);
+        }, 2500);
+      }
     };
   }
 
-  connectWs();
+  if (reconnectBtn) {
+    reconnectBtn.addEventListener('click', () => {
+      connectWs(true);
+      void refreshItemsHttp();
+    });
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      connectWs(false);
+      void refreshItemsHttp();
+    }
+  });
+
+  window.addEventListener('online', () => {
+    connectWs(true);
+    void refreshItemsHttp();
+  });
+
+  connectWs(false);
+  void refreshItemsHttp();
 })();
 </script>
 </body>
@@ -2319,10 +2771,17 @@ mod tests {
         std::fs::write(temp_root.join("note.txt"), f1_bytes).unwrap();
         std::fs::write(sub.join("sub.txt"), f2_bytes).unwrap();
 
+        let plan = prepare_store_zip_plan(&temp_root).expect("prepare_store_zip_plan failed");
         let mut zip_bytes: Vec<u8> = Vec::new();
         write_streaming_store_zip(&temp_root, &mut zip_bytes, || {})
             .await
             .expect("write_streaming_store_zip failed");
+
+        assert_eq!(plan.total_zip_bytes, zip_bytes.len() as u64);
+        assert_eq!(guess_download_mime_type("album.zip"), "application/zip");
+        let cd = build_content_disposition_attachment("Trip Folder.zip");
+        assert!(cd.contains("attachment; filename=\"Trip Folder.zip\""));
+        assert!(cd.contains("filename*=UTF-8''"));
 
         // Verify signatures: LFH (0x04034b50), DD (0x08074b50), CDFH (0x02014b50), EOCD (0x06054b50)
         assert_eq!(&zip_bytes[0..4], &0x0403_4b50u32.to_le_bytes());
@@ -2385,6 +2844,10 @@ mod tests {
     #[test]
     fn mobile_ui_uses_history_scrub_exec_command_and_zero_inner_html() {
         assert!(MOBILE_WEB_UI_HTML.contains("history.replaceState"));
+        assert!(MOBILE_WEB_UI_HTML.contains("sessionStorage"));
+        assert!(MOBILE_WEB_UI_HTML.contains("visibilitychange"));
+        assert!(MOBILE_WEB_UI_HTML.contains("Hubungkan Ulang"));
+        assert!(MOBILE_WEB_UI_HTML.contains("Jika Chrome menampilkan peringatan HTTP lokal, pilih Tetap simpan"));
         assert!(MOBILE_WEB_UI_HTML.contains("execCommand('copy')"));
         assert!(MOBILE_WEB_UI_HTML.contains("X-Casa-Batch-Id"));
         assert!(MOBILE_WEB_UI_HTML.contains("X-Casa-Batch-Total"));
