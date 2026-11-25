@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -223,10 +223,39 @@ struct AudioStreamEntry {
     user_agent: String,
 }
 
+const MAX_STREAM_REGISTRY_ENTRIES: usize = 64;
+
+#[derive(Default)]
+struct StreamRegistryCache {
+    map: HashMap<String, Vec<AudioStreamEntry>>,
+    order: VecDeque<String>,
+}
+
+impl StreamRegistryCache {
+    fn insert(&mut self, video_id: String, entries: Vec<AudioStreamEntry>) {
+        if let Some(pos) = self.order.iter().position(|id| id == &video_id) {
+            self.order.remove(pos);
+        }
+        while self.order.len() >= MAX_STREAM_REGISTRY_ENTRIES {
+            if let Some(oldest) = self.order.pop_front() {
+                self.map.remove(&oldest);
+            } else {
+                break;
+            }
+        }
+        self.order.push_back(video_id.clone());
+        self.map.insert(video_id, entries);
+    }
+
+    fn get(&self, video_id: &str) -> Option<&Vec<AudioStreamEntry>> {
+        self.map.get(video_id)
+    }
+}
+
 static API_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static STREAM_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static VISITOR_DATA_CACHE: OnceLock<Mutex<Option<(String, Instant)>>> = OnceLock::new();
-static STREAM_REGISTRY: OnceLock<Mutex<HashMap<String, Vec<AudioStreamEntry>>>> = OnceLock::new();
+static STREAM_REGISTRY: OnceLock<Mutex<StreamRegistryCache>> = OnceLock::new();
 static PROXY_PORT: AtomicU16 = AtomicU16::new(0);
 static PROXY_INIT_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 static YTDLP_BOOTSTRAP_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
@@ -245,7 +274,7 @@ fn api_client() -> &'static reqwest::Client {
     })
 }
 
-/// Long-lived streaming client (connect timeout only, no total body timeout) for audio proxy & binary bootstrap.
+/// Long-lived streaming client (connect timeout only, no total body timeout) for audio proxy.
 fn stream_client() -> &'static reqwest::Client {
     STREAM_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
@@ -256,8 +285,8 @@ fn stream_client() -> &'static reqwest::Client {
     })
 }
 
-fn stream_registry() -> &'static Mutex<HashMap<String, Vec<AudioStreamEntry>>> {
-    STREAM_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+fn stream_registry() -> &'static Mutex<StreamRegistryCache> {
+    STREAM_REGISTRY.get_or_init(|| Mutex::new(StreamRegistryCache::default()))
 }
 
 /// Strictly validates that a YouTube video ID is exactly 11 safe characters `^[a-zA-Z0-9_-]{11}$`.
@@ -536,23 +565,36 @@ async fn ensure_local_stream_proxy() -> Result<u16, String> {
     Ok(port)
 }
 
+fn sanitize_header_value(raw: &str) -> String {
+    raw.chars()
+        .filter(|&c| c != '\r' && c != '\n' && !c.is_control())
+        .collect()
+}
+
 async fn handle_proxy_connection(mut socket: TcpStream) -> Result<(), String> {
     let conn_start = Instant::now();
-    // 1. Read full HTTP request headers from client until \r\n\r\n
+    // 1. Read full HTTP request headers from client until \r\n\r\n with bounded timeout (5s)
     let mut header_buf = Vec::with_capacity(2048);
     let mut temp = [0u8; 1024];
-    loop {
-        let n = socket
-            .read(&mut temp)
-            .await
-            .map_err(|e| format!("Socket read error: {}", e))?;
-        if n == 0 {
-            return Ok(());
+    let read_res = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let n = socket
+                .read(&mut temp)
+                .await
+                .map_err(|e| format!("Socket read error: {}", e))?;
+            if n == 0 {
+                return Ok::<bool, String>(false);
+            }
+            header_buf.extend_from_slice(&temp[..n]);
+            if header_buf.windows(4).any(|w| w == b"\r\n\r\n") || header_buf.len() >= 8192 {
+                return Ok(true);
+            }
         }
-        header_buf.extend_from_slice(&temp[..n]);
-        if header_buf.windows(4).any(|w| w == b"\r\n\r\n") || header_buf.len() >= 8192 {
-            break;
-        }
+    })
+    .await
+    .map_err(|_| "Local proxy header read timed out after 5s".to_string())??;
+    if !read_res {
+        return Ok(());
     }
 
     let req_str = String::from_utf8_lossy(&header_buf);
@@ -670,21 +712,29 @@ async fn handle_proxy_connection(mut socket: TcpStream) -> Result<(), String> {
         "HTTP/1.1 200 OK"
     };
 
-    // Forward CDN Headers Transparently
+    // Forward CDN Headers Transparently (strict CR/LF/control sanitization against header injection)
     let headers = upstream_res.headers();
-    let content_type = headers
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or(&entry.mime_type)
-        .to_string();
+    let content_type = sanitize_header_value(
+        headers
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or(&entry.mime_type),
+    );
+    let content_type = if content_type.is_empty() {
+        "audio/mp4".to_string()
+    } else {
+        content_type
+    };
     let content_length = headers
         .get(reqwest::header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+        .map(sanitize_header_value)
+        .filter(|s| !s.is_empty());
     let content_range = headers
         .get(reqwest::header::CONTENT_RANGE)
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+        .map(sanitize_header_value)
+        .filter(|s| !s.is_empty());
 
     println!(
         "[NativeAudio Proxy] <-- Upstream Google CDN OK: HTTP {}, Content-Type='{}', Content-Length={:?}, Content-Range={:?} ({}ms)",
@@ -2088,17 +2138,62 @@ async fn resolve_tier1_android_vr(
 }
 
 // =========================================================================
-// TIER 2: AUTO-BOOTSTRAPPED YT-DLP SIDECAR IN %LOCALAPPDATA%
+// TIER 2: PINNED & SHA-256 VERIFIED YT-DLP SIDECAR IN %LOCALAPPDATA%
 // =========================================================================
 
-/// Ensures `yt-dlp.exe` is present in `%LOCALAPPDATA%\com.crimson.casa\bin\yt-dlp.exe`.
-/// Performs a one-time silent atomic download from the official yt-dlp GitHub release if missing.
-async fn ensure_yt_dlp_bootstrapped(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let bin_name = if cfg!(windows) {
-        "yt-dlp.exe"
+const YTDLP_PINNED_TAG: &str = "2026.11.23";
+const YTDLP_WIN_URL: &str =
+    "https://github.com/yt-dlp/yt-dlp/releases/download/2026.11.23/yt-dlp.exe";
+const YTDLP_WIN_SHA256: &str =
+    "622ed48023cac1daa52a3bf3a6ac38f03514de214b5f0fa069389fd0f6d17e5c";
+const YTDLP_MACOS_URL: &str =
+    "https://github.com/yt-dlp/yt-dlp/releases/download/2026.11.23/yt-dlp_macos";
+const YTDLP_MACOS_SHA256: &str =
+    "57654854886d0398a798895aadf5173e2749fbb5e249b9f3728022ab376e11fb";
+const YTDLP_LINUX_URL: &str =
+    "https://github.com/yt-dlp/yt-dlp/releases/download/2026.11.23/yt-dlp";
+const YTDLP_LINUX_SHA256: &str =
+    "e8665ed64d6b9172773e812f891fb707a0cb1ee8d9ef4fc1acb00cabee4c5256";
+const YTDLP_MAX_BINARY_BYTES: usize = 35 * 1024 * 1024;
+const YTDLP_DOWNLOAD_TIMEOUT_SECS: u64 = 30;
+
+fn pinned_ytdlp_release() -> (&'static str, &'static str, &'static str) {
+    if cfg!(windows) {
+        ("yt-dlp.exe", YTDLP_WIN_URL, YTDLP_WIN_SHA256)
+    } else if cfg!(target_os = "macos") {
+        ("yt-dlp_macos", YTDLP_MACOS_URL, YTDLP_MACOS_SHA256)
     } else {
-        "yt-dlp"
-    };
+        ("yt-dlp", YTDLP_LINUX_URL, YTDLP_LINUX_SHA256)
+    }
+}
+
+pub fn verify_ytdlp_binary_sha256(path: &Path, expected_hex: &str) -> Result<(), String> {
+    if !path.is_file() {
+        return Err("Biner sidecar tidak ditemukan untuk verifikasi SHA-256".to_string());
+    }
+    let meta = std::fs::metadata(path)
+        .map_err(|e| format!("Gagal membaca metadata biner sidecar: {}", e))?;
+    if meta.len() == 0 || meta.len() > YTDLP_MAX_BINARY_BYTES as u64 {
+        let _ = std::fs::remove_file(path);
+        return Err("Ukuran biner yt-dlp berada di luar batas wajar (berkas dihapus)".to_string());
+    }
+    let actual = crate::security_utils::sha256_file_hex(path)?;
+    if !crate::security_utils::ct_eq(
+        actual.as_bytes(),
+        expected_hex.to_ascii_lowercase().as_bytes(),
+    ) {
+        let _ = std::fs::remove_file(path);
+        return Err(format!(
+            "Verifikasi SHA-256 biner yt-dlp gagal (actual={actual}) — berkas dihapus"
+        ));
+    }
+    Ok(())
+}
+
+/// Ensures pinned `yt-dlp.exe` (`2026.11.23`) is present in `%LOCALAPPDATA%\...\bin\yt-dlp.exe`
+/// and matches its pinned SHA-256 checksum before execution.
+async fn ensure_yt_dlp_bootstrapped(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let (bin_name, download_url, expected_sha256) = pinned_ytdlp_release();
 
     let local_data = app
         .path()
@@ -2107,36 +2202,34 @@ async fn ensure_yt_dlp_bootstrapped(app: &tauri::AppHandle) -> Result<PathBuf, S
     let bin_dir = local_data.join("bin");
     let target_bin = bin_dir.join(bin_name);
 
-    if target_bin.is_file() {
+    if target_bin.is_file() && verify_ytdlp_binary_sha256(&target_bin, expected_sha256).is_ok() {
         return Ok(target_bin);
     }
 
     let bootstrap_mutex = YTDLP_BOOTSTRAP_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
     let _guard = bootstrap_mutex.lock().await;
 
-    if target_bin.is_file() {
+    if target_bin.is_file() && verify_ytdlp_binary_sha256(&target_bin, expected_sha256).is_ok() {
         return Ok(target_bin);
     }
 
     std::fs::create_dir_all(&bin_dir)
         .map_err(|e| format!("Failed creating bin directory {:?}: {}", bin_dir, e))?;
 
-    let download_url = if cfg!(windows) {
-        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
-    } else if cfg!(target_os = "macos") {
-        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
-    } else {
-        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
-    };
-
     println!(
-        "[NativeAudio] Bootstrapping official {} to {:?}...",
-        bin_name, target_bin
+        "[NativeAudio] Bootstrapping pinned {} ({}) to {:?}...",
+        bin_name, YTDLP_PINNED_TAG, target_bin
     );
 
-    let res = stream_client()
+    let download_client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(8))
+        .timeout(Duration::from_secs(YTDLP_DOWNLOAD_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| format!("Failed building yt-dlp download HTTP client: {}", e))?;
+
+    let mut res = download_client
         .get(download_url)
-        .header("User-Agent", "CASA-Desktop-Audio-Engine/0.1")
+        .header("User-Agent", "CASA-Desktop-Audio-Engine/2.3.2")
         .send()
         .await
         .map_err(|e| format!("Failed downloading yt-dlp binary: {}", e))?;
@@ -2148,10 +2241,37 @@ async fn ensure_yt_dlp_bootstrapped(app: &tauri::AppHandle) -> Result<PathBuf, S
         ));
     }
 
-    let bytes = res
-        .bytes()
+    if let Some(cl) = res.content_length() {
+        if cl > YTDLP_MAX_BINARY_BYTES as u64 {
+            return Err(format!(
+                "Ukuran unduhan yt-dlp ({} bytes) melebihi batas 35 MiB",
+                cl
+            ));
+        }
+    }
+
+    let mut bytes = Vec::new();
+    while let Some(chunk) = res
+        .chunk()
         .await
-        .map_err(|e| format!("Failed reading yt-dlp binary bytes: {}", e))?;
+        .map_err(|e| format!("Failed reading yt-dlp binary chunk: {}", e))?
+    {
+        if bytes.len().saturating_add(chunk.len()) > YTDLP_MAX_BINARY_BYTES {
+            return Err("Ukuran stream unduhan yt-dlp melebihi batas 35 MiB".to_string());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+
+    let digest_hex = crate::security_utils::sha256_hex(&bytes);
+    if !crate::security_utils::ct_eq(
+        digest_hex.as_bytes(),
+        expected_sha256.to_ascii_lowercase().as_bytes(),
+    ) {
+        return Err(format!(
+            "Hash SHA-256 unduhan yt-dlp ({}) tidak cocok dengan rilis tepercaya ({})",
+            digest_hex, YTDLP_PINNED_TAG
+        ));
+    }
 
     let tmp_path = bin_dir.join(format!("{}.part", bin_name));
     std::fs::write(&tmp_path, &bytes)
@@ -2170,8 +2290,10 @@ async fn ensure_yt_dlp_bootstrapped(app: &tauri::AppHandle) -> Result<PathBuf, S
     std::fs::rename(&tmp_path, &target_bin)
         .map_err(|e| format!("Failed renaming {:?} to {:?}: {}", tmp_path, target_bin, e))?;
 
+    verify_ytdlp_binary_sha256(&target_bin, expected_sha256)?;
+
     println!(
-        "[NativeAudio] Successfully bootstrapped {} ({:.2} MB)",
+        "[NativeAudio] Verified & bootstrapped {} ({:.2} MB, SHA-256 ok)",
         bin_name,
         bytes.len() as f64 / (1024.0 * 1024.0)
     );
@@ -2188,6 +2310,8 @@ async fn resolve_tier2_yt_dlp(
     }
 
     let bin_path = ensure_yt_dlp_bootstrapped(app).await?;
+    let (_, _, expected_sha256) = pinned_ytdlp_release();
+    verify_ytdlp_binary_sha256(&bin_path, expected_sha256)?;
     let safe_url = format!("https://www.youtube.com/watch?v={}", video_id);
 
     println!(
@@ -3245,5 +3369,39 @@ mod tests {
                 assert!(received >= 524_288);
             }
         });
+    }
+
+    #[test]
+    fn verifies_and_removes_tampered_ytdlp_binary_and_caps_stream_registry() {
+        let tmp = std::env::temp_dir().join(format!(
+            "casa_ytdlp_verify_test_{}.bin",
+            std::process::id()
+        ));
+        let payload = b"clean yt-dlp binary mock bytes";
+        let good_sha = crate::security_utils::sha256_hex(payload);
+
+        std::fs::write(&tmp, payload).unwrap();
+        assert!(verify_ytdlp_binary_sha256(&tmp, &good_sha).is_ok());
+        assert!(tmp.exists());
+
+        // Corrupt bytes -> must reject AND delete binary from disk
+        std::fs::write(&tmp, b"tampered bytes!").unwrap();
+        assert!(verify_ytdlp_binary_sha256(&tmp, &good_sha).is_err());
+        assert!(!tmp.exists(), "Tampered binary must be deleted immediately");
+
+        // Header injection guard
+        assert_eq!(
+            sanitize_header_value("audio/webm\r\nX-Injected: evil\n"),
+            "audio/webmX-Injected: evil"
+        );
+
+        // Bounded LRU cache cap
+        let mut cache = StreamRegistryCache::default();
+        for i in 0..70 {
+            cache.insert(format!("vid_{i}"), vec![]);
+        }
+        assert_eq!(cache.map.len(), MAX_STREAM_REGISTRY_ENTRIES);
+        assert!(cache.get("vid_0").is_none());
+        assert!(cache.get("vid_69").is_some());
     }
 }

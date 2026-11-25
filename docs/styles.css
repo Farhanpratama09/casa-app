@@ -2784,6 +2784,53 @@ textarea {
   color: var(--text-secondary);
 }
 
+.smartscreen-guide[hidden] {
+  display: none !important;
+}
+
+.smartscreen-guide-inline {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.smartscreen-guide-inline.is-visible {
+  animation: smartscreenFadeIn 0.22s ease both;
+}
+
+@keyframes smartscreenFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.smartscreen-guide-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--bg-surface);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: #ffffff;
+}
+
+.smartscreen-guide-text {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
 .smartscreen-guide strong {
   color: #ffffff;
 }

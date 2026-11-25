@@ -1,12 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default permissions for CASA application",
+  "description": "Shared baseline permissions for CASA main and settings windows",
   "windows": ["main", "settings"],
   "permissions": [
     "core:default",
-    "core:window:allow-create",
-    "core:webview:allow-create-webview-window",
     "core:window:allow-set-focus",
     "core:window:allow-close",
     "core:window:allow-minimize",
@@ -19,7 +17,6 @@
     "drag:default",
     "global-shortcut:default",
     "autostart:default",
-    "process:default",
     "updater:default"
   ]
 }

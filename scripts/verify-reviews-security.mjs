@@ -5,6 +5,9 @@
  */
 
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   containsDisallowedUrl,
   containsSpamKeyword,
@@ -148,7 +151,122 @@ async function run() {
   const hDiffSalt = await hmacHashIp('2001:db8:abcd:12::1', 'other-salt-0123456789');
   check(h1 === h2 && h1 !== hDiffSalt && /^[0-9a-f]{64}$/.test(h1), 'HMAC-SHA256 groups /64 IPv6 & depends on salt');
 
-  console.log(`\n  REVIEWS SECURITY UNIT TESTS: ${passed} passed, 0 failed\n`);
+  // 6. CASA v2.3.2 Security Hardening Baseline Checks (All 14 Audit Findings)
+  console.log('\n[CASA v2.3.2 Security Hardening Baseline Checks]\n');
+  const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const readRepo = (rel) => readFileSync(resolve(rootDir, rel), 'utf8');
+
+  const connectHpRs = readRepo('src-tauri/src/connect_hp.rs');
+  const nativeAudioRs = readRepo('src-tauri/src/native_audio.rs');
+  const spotifyOauthRs = readRepo('src-tauri/src/spotify_oauth.rs');
+  const securityUtilsRs = readRepo('src-tauri/src/security_utils.rs');
+  const dropZoneRs = readRepo('src-tauri/src/drop_zone.rs');
+  const prayerRs = readRepo('src-tauri/src/prayer.rs');
+  const systemHardwareRs = readRepo('src-tauri/src/system_hardware.rs');
+  const gsmtcRs = readRepo('src-tauri/src/media/gsmtc.rs');
+  const spotifyWin32Rs = readRepo('src-tauri/src/media/providers/spotify_win32.rs');
+  const hitboxRs = readRepo('src-tauri/src/hitbox.rs');
+  const libRs = readRepo('src-tauri/src/lib.rs');
+  const spotifyServiceTs = readRepo('src/utils/spotifyService.ts');
+  const envExample = readRepo('.env.example');
+  const indexHtml = readRepo('index.html');
+  const capDefault = JSON.parse(readRepo('src-tauri/capabilities/default.json'));
+  const capMain = JSON.parse(readRepo('src-tauri/capabilities/main-window.json'));
+  const capSettings = JSON.parse(readRepo('src-tauri/capabilities/settings-window.json'));
+
+  // HIGH-01 & MED-05: Axum middleware auth/origin/host before extractors, per-route body limits, WS/batch caps, headers, MOTW
+  check(
+    connectHpRs.includes('DefaultBodyLimit::max(MAX_DEFAULT_HTTP_BODY_BYTES)') &&
+      connectHpRs.includes('DefaultBodyLimit::disable()') &&
+      connectHpRs.includes('from_fn_with_state') &&
+      connectHpRs.includes('is_allowed_host') &&
+      connectHpRs.includes('X_FRAME_OPTIONS') &&
+      connectHpRs.includes('MAX_WS_CLIENTS') &&
+      connectHpRs.includes('MAX_BATCH_FOLDERS_PER_SESSION') &&
+      connectHpRs.includes('write_mark_of_the_web'),
+    'HIGH-01/MED-05: connect_hp.rs enforces middleware auth/Host/Origin, per-route body limits, WS/batch caps, headers & MOTW'
+  );
+
+  // HIGH-02 & LOW-05 (proxy): Pinned yt-dlp SHA-256 verification before rename & exec + bounded cache & no invalid-TLS override
+  check(
+    nativeAudioRs.includes('YTDLP_PINNED_TAG') &&
+      nativeAudioRs.includes('verify_ytdlp_binary_sha256') &&
+      nativeAudioRs.includes('YTDLP_DOWNLOAD_TIMEOUT_SECS') &&
+      nativeAudioRs.includes('YTDLP_MAX_BINARY_BYTES') &&
+      nativeAudioRs.includes('StreamRegistryCache') &&
+      nativeAudioRs.includes('MAX_STREAM_REGISTRY_ENTRIES') &&
+      !nativeAudioRs.includes('danger_accept_invalid_certs(true)'),
+    'HIGH-02/LOW-05: native_audio.rs enforces pinned yt-dlp SHA-256 on download & exec, bounded stream cache & TLS verification'
+  );
+
+  // MED-01 & MED-02: PKCE S256 OAuth + DPAPI storage + zero frontend client_secret
+  check(
+    spotifyOauthRs.includes('code_challenge_method=S256') &&
+      spotifyOauthRs.includes('spotify_tokens.dpapi') &&
+      spotifyOauthRs.includes('ct_eq') &&
+      securityUtilsRs.includes('CryptProtectData') &&
+      securityUtilsRs.includes('CryptUnprotectData') &&
+      spotifyServiceTs.includes('saveSpotifyUserTokens') &&
+      spotifyServiceTs.includes('clearSpotifyUserTokens') &&
+      !spotifyServiceTs.includes('VITE_SPOTIFY_CLIENT_SECRET') &&
+      !envExample.includes('VITE_SPOTIFY_CLIENT_SECRET'),
+    'MED-01/MED-02: Spotify OAuth uses PKCE S256 + DPAPI storage with zero shipped client_secret'
+  );
+
+  // MED-03: In-process Shell/PIDL API, safe rundll32 SystemRoot resolution, COM RAII guards
+  check(
+    dropZoneRs.includes('ILCreateFromPathW') &&
+      dropZoneRs.includes('SHOpenFolderAndSelectItems') &&
+      dropZoneRs.includes('ShellExecuteW') &&
+      dropZoneRs.includes('ComGuard::init_sta') &&
+      prayerRs.includes('SystemRoot') &&
+      prayerRs.includes('rundll32.exe') &&
+      prayerRs.includes('ComGuard::init_mta') &&
+      securityUtilsRs.includes('pub fn init_mta') &&
+      securityUtilsRs.includes('pub fn init_sta'),
+    'MED-03: drop_zone.rs & prayer.rs avoid shell argument injection and pair COM lifetimes via ComGuard'
+  );
+
+  // MED-04: Typed #[interface] COM for IPolicyConfig + active endpoint validation (no raw vtable transmute)
+  check(
+    systemHardwareRs.includes('trait IPolicyConfig: IUnknown') &&
+      systemHardwareRs.includes('trait IPolicyConfigVista: IUnknown') &&
+      !systemHardwareRs.includes('std::mem::transmute'),
+    'MED-04: system_hardware.rs uses typed windows_core::interface for IPolicyConfig without raw transmute'
+  );
+
+  // MED-06: Capabilities split per window + narrow file-only asset protocol scope
+  check(
+    !capDefault.permissions.includes('core:window:allow-create') &&
+      !capDefault.permissions.includes('core:webview:allow-create-webview-window') &&
+      !capDefault.permissions.includes('process:allow-restart') &&
+      capMain.windows.length === 1 &&
+      capMain.windows[0] === 'main' &&
+      capMain.permissions.includes('core:window:allow-create') &&
+      capSettings.windows.length === 1 &&
+      capSettings.windows[0] === 'settings' &&
+      capSettings.permissions.includes('process:allow-restart') &&
+      dropZoneRs.includes('is_blocked_asset_scope_path') &&
+      !dropZoneRs.includes('allow_directory'),
+    'MED-06: Least-privilege capabilities split across main/settings windows & file-only asset scope'
+  );
+
+  // LOW-01..LOW-06: Dangerous exts & reserved DOS device names, GSMTC cap, spotify.exe URI guard, COM RAII, bounded UI rects, no orphan CDN links
+  check(
+    dropZoneRs.includes('is_dangerous_executable_extension') &&
+      dropZoneRs.includes('is_windows_reserved_device_name') &&
+      gsmtcRs.includes('MAX_GSMTC_THUMBNAIL_BYTES') &&
+      spotifyWin32Rs.includes('sanitize_spotify_uri') &&
+      spotifyWin32Rs.includes('spotify.exe') &&
+      hitboxRs.includes('normalize_hit_rect') &&
+      libRs.includes('adjust_window_size') &&
+      !systemHardwareRs.includes('CoInitializeEx') &&
+      !indexHtml.includes('fonts.googleapis.com') &&
+      existsSync(resolve(rootDir, '.agent/SECURITY_BASELINE.md')),
+    'LOW-01..LOW-06: Executables/DOS names blocked, GSMTC & hitbox bounded, Spotify URI/exe verified, COM cleaned & zero orphan CDN links'
+  );
+
+  console.log(`\n  REVIEWS SECURITY & HARDENING TESTS: ${passed} passed, 0 failed\n`);
 }
 
 run().catch((err) => {

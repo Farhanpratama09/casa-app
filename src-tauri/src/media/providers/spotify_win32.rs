@@ -40,7 +40,10 @@ unsafe fn is_spotify_hwnd(hwnd: windows_sys::Win32::Foundation::HWND) -> bool {
         {
             return false;
         }
-        lower.ends_with("spotify.exe")
+        std::path::Path::new(&path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.eq_ignore_ascii_case("spotify.exe"))
     } else {
         false
     }
@@ -580,10 +583,39 @@ pub async fn quit_spotify_app() -> Result<bool, String> {
     }
 }
 
+pub fn sanitize_spotify_uri(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.len() > 128 {
+        return Err("Spotify URI atau ID kosong/terlalu panjang".to_string());
+    }
+    if trimmed.chars().any(|c| !c.is_ascii_alphanumeric() && c != ':') {
+        return Err("Spotify URI mengandung karakter tidak valid".to_string());
+    }
+    if let Some(rest) = trimmed.strip_prefix("spotify:") {
+        let parts: Vec<&str> = rest.split(':').collect();
+        if parts.len() == 2
+            && matches!(
+                parts[0],
+                "track" | "album" | "playlist" | "artist" | "episode" | "show"
+            )
+            && !parts[1].is_empty()
+            && parts[1].chars().all(|c| c.is_ascii_alphanumeric())
+        {
+            return Ok(trimmed.to_string());
+        }
+        return Err("Format Spotify URI tidak diizinkan".to_string());
+    }
+    if trimmed.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Ok(format!("spotify:track:{}", trimmed));
+    }
+    Err("ID track Spotify tidak valid".to_string())
+}
+
 /// Plays track via Spotify URI directly via Win32 ShellExecuteW without spawning conhost or cmd.
 pub async fn spotify_play_track(track_id: String) -> Result<(), String> {
     #[cfg(windows)]
     {
+        let uri = sanitize_spotify_uri(&track_id)?;
         let is_running = tokio::task::spawn_blocking(is_spotify_process_running_native)
             .await
             .unwrap_or(false);
@@ -591,12 +623,6 @@ pub async fn spotify_play_track(track_id: String) -> Result<(), String> {
         if !is_running {
             return Ok(());
         }
-
-        let uri = if track_id.starts_with("spotify:") {
-            track_id
-        } else {
-            format!("spotify:track:{}", track_id)
-        };
 
         use windows_sys::Win32::UI::Shell::ShellExecuteW;
         use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWMINNOACTIVE;
@@ -619,7 +645,7 @@ pub async fn spotify_play_track(track_id: String) -> Result<(), String> {
     }
     #[cfg(not(windows))]
     {
-        let _ = track_id;
+        let _ = sanitize_spotify_uri(&track_id)?;
         Ok(())
     }
 }
@@ -655,6 +681,26 @@ pub async fn ensure_spotify_running_silent() -> Result<bool, String> {
     #[cfg(not(windows))]
     {
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_spotify_uri;
+
+    #[test]
+    fn validates_and_normalizes_spotify_uris() {
+        assert_eq!(
+            sanitize_spotify_uri("4cOdK2wGLETKBW3PvgPWqT").unwrap(),
+            "spotify:track:4cOdK2wGLETKBW3PvgPWqT"
+        );
+        assert_eq!(
+            sanitize_spotify_uri("spotify:playlist:37i9dQZF1DXcBWIGoYBM5M").unwrap(),
+            "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"
+        );
+        assert!(sanitize_spotify_uri("spotify:track:bad\"arg --cmd").is_err());
+        assert!(sanitize_spotify_uri("https://evil.example.com").is_err());
+        assert!(sanitize_spotify_uri("").is_err());
     }
 }
 

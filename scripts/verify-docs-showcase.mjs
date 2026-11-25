@@ -13,7 +13,7 @@ import puppeteer from 'puppeteer-core';
 
 const DOCS_DIR = path.resolve('docs');
 const EXE_BUNDLE_PATH = path.resolve(
-  'src-tauri/target/release/bundle/nsis/CASA_2.3.1_x64-setup.exe'
+  'src-tauri/target/release/bundle/nsis/CASA_2.3.2_x64-setup.exe'
 );
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -130,18 +130,18 @@ async function main() {
           contentType: 'application/json',
           body: JSON.stringify([
             {
-              tag_name: 'v2.3.1',
+              tag_name: 'v2.3.2',
               assets: [
                 {
-                  name: 'CASA_2.3.1_x64-setup.exe',
+                  name: 'CASA_2.3.2_x64-setup.exe',
                   size: 4882545,
                   download_count: 8,
                   browser_download_url:
-                    'https://github.com/Farhanpratama09/casa-app/releases/download/v2.3.1/CASA_2.3.1_x64-setup.exe',
+                    'https://github.com/Farhanpratama09/casa-app/releases/download/v2.3.2/CASA_2.3.2_x64-setup.exe',
                 },
-                { name: 'CASA_2.3.1_x64-setup.exe.sig', size: 444, download_count: 90 },
-                { name: 'CASA_2.3.1_x64_en-US.msi', size: 5865472, download_count: 3 },
-                { name: 'CASA_2.3.1_x64_en-US.msi.sig', size: 444, download_count: 45 },
+                { name: 'CASA_2.3.2_x64-setup.exe.sig', size: 444, download_count: 90 },
+                { name: 'CASA_2.3.2_x64_en-US.msi', size: 5865472, download_count: 3 },
+                { name: 'CASA_2.3.2_x64_en-US.msi.sig', size: 444, download_count: 45 },
                 { name: 'latest.json', size: 1200, download_count: 500 },
               ],
             },
@@ -228,8 +228,8 @@ async function main() {
     check(
       layoutAudit.hasPrimaryExe &&
         layoutAudit.primaryLabelText === 'Download CASA for Windows' &&
-        layoutAudit.dlSizeText.startsWith('v2.3.1 · NSIS Setup (.exe) ·') &&
-        layoutAudit.primaryHref.includes('CASA_2.3.1_x64-setup.exe') &&
+        layoutAudit.dlSizeText.startsWith('v2.3.2 · NSIS Setup (.exe) ·') &&
+        layoutAudit.primaryHref.includes('CASA_2.3.2_x64-setup.exe') &&
         layoutAudit.shaClosedInitially &&
         layoutAudit.shaSummaryText === 'Verify SHA-256 checksum' &&
         /^[0-9A-F]{64}$/.test(layoutAudit.shaText) &&
@@ -247,6 +247,8 @@ async function main() {
     const cooldownAudit = await page.evaluate(() => {
       const btn = document.getElementById('primary-download-btn');
       const label = document.getElementById('primary-download-label');
+      const guide = document.getElementById('download-smartscreen-guide');
+      const guideHiddenBefore = Boolean(guide && guide.hidden === true);
       let firstWasAllowed = false;
       btn.addEventListener(
         'click',
@@ -259,6 +261,8 @@ async function main() {
       btn.dispatchEvent(new MouseEvent('click', { cancelable: true, bubbles: true }));
       const disabledAfterFirst = btn.getAttribute('aria-disabled');
       const labelAfterFirst = label?.textContent?.trim();
+      const guideVisibleAfter = Boolean(guide && guide.hidden === false);
+      const guideText = guide?.textContent || '';
       const secondNotCanceled = btn.dispatchEvent(
         new MouseEvent('click', { cancelable: true, bubbles: true })
       );
@@ -266,6 +270,9 @@ async function main() {
         firstWasAllowed,
         disabledAfterFirst,
         labelAfterFirst,
+        guideHiddenBefore,
+        guideVisibleAfter,
+        hasEdgeKeepSteps: guideText.includes('Keep anyway') && guideText.includes('Run anyway'),
         secondBlocked: secondNotCanceled === false,
       };
     });
@@ -273,8 +280,11 @@ async function main() {
       cooldownAudit.firstWasAllowed &&
         cooldownAudit.disabledAfterFirst === 'true' &&
         cooldownAudit.labelAfterFirst === 'Memulai unduhan...' &&
+        cooldownAudit.guideHiddenBefore &&
+        cooldownAudit.guideVisibleAfter &&
+        cooldownAudit.hasEdgeKeepSteps &&
         cooldownAudit.secondBlocked,
-      `Download button activates 6s cooldown (${cooldownAudit.labelAfterFirst}) and blocks repeat clicks`
+      `Download button activates 6s cooldown (${cooldownAudit.labelAfterFirst}), reveals inline SmartScreen guide & blocks repeat clicks`
     );
     check(
       layoutAudit.introPhase === 'hi',

@@ -12,6 +12,7 @@ mod hitbox;
 mod media;
 mod native_audio;
 mod prayer;
+mod security_utils;
 mod spotify_oauth;
 mod system_hardware;
 mod system_stats;
@@ -310,7 +311,9 @@ fn set_ignore_cursor_events(window: tauri::WebviewWindow, ignore: bool) -> Resul
 /// while keeping the window perfectly centered with DPI awareness.
 #[tauri::command]
 fn adjust_window_size(window: tauri::WebviewWindow, width: u32, height: u32) -> Result<(), String> {
-    center_window_top(&window, Some(width as f64), Some(height as f64));
+    let clamped_w = (width.clamp(60, 1100)) as f64;
+    let clamped_h = (height.clamp(4, 340)) as f64;
+    center_window_top(&window, Some(clamped_w), Some(clamped_h));
     Ok(())
 }
 
@@ -542,6 +545,9 @@ pub fn run() {
             media::quit_spotify_app,
             spotify_oauth::start_spotify_login,
             spotify_oauth::refresh_spotify_user_token,
+            spotify_oauth::load_spotify_user_tokens,
+            spotify_oauth::save_spotify_user_tokens,
+            spotify_oauth::clear_spotify_user_tokens,
             native_audio::search_tracks_native,
             native_audio::search_catalog_native,
             native_audio::get_up_next_native,

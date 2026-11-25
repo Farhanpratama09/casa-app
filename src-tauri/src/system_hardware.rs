@@ -178,9 +178,9 @@ pub fn read_display_brightness_wmi() -> (u8, bool) {
     unsafe {
         use windows::core::{w, BSTR};
         use windows::Win32::System::Com::{
-            CoCreateInstance, CoInitializeEx, CoInitializeSecurity, CoSetProxyBlanket,
-            CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL,
-            RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
+            CoCreateInstance, CoInitializeSecurity, CoSetProxyBlanket, CLSCTX_INPROC_SERVER,
+            EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL, RPC_C_AUTHN_LEVEL_DEFAULT,
+            RPC_C_IMP_LEVEL_IMPERSONATE,
         };
         use windows::Win32::System::Variant::VARIANT;
         use windows::Win32::System::Wmi::{
@@ -191,7 +191,7 @@ pub fn read_display_brightness_wmi() -> (u8, bool) {
         const RPC_C_AUTHN_WINNT: u32 = 10;
         const RPC_C_AUTHZ_NONE: u32 = 0;
 
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let _com = crate::security_utils::ComGuard::init_mta();
         let _ = CoInitializeSecurity(
             None,
             -1,
@@ -277,15 +277,15 @@ static BRIGHTNESS_WORKER: OnceLock<(Mutex<Option<u8>>, Condvar)> = OnceLock::new
 unsafe fn connect_wmi_root() -> Option<windows::Win32::System::Wmi::IWbemServices> {
     use windows::core::BSTR;
     use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoSetProxyBlanket, CLSCTX_INPROC_SERVER,
-        COINIT_MULTITHREADED, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
+        CoCreateInstance, CoSetProxyBlanket, CLSCTX_INPROC_SERVER, EOAC_NONE,
+        RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
     };
     use windows::Win32::System::Wmi::{IWbemLocator, WbemLocator};
 
     const RPC_C_AUTHN_WINNT: u32 = 10;
     const RPC_C_AUTHZ_NONE: u32 = 0;
 
-    let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+    let _com = crate::security_utils::ComGuard::init_mta();
     let locator = CoCreateInstance::<_, IWbemLocator>(&WbemLocator, None, CLSCTX_INPROC_SERVER).ok()?;
     let namespace = BSTR::from("root\\wmi");
     let empty = BSTR::new();
@@ -426,8 +426,7 @@ pub fn set_display_brightness_native(val: u8) {
             let _ = std::thread::Builder::new()
                 .name("casa-brightness-wmi".into())
                 .spawn(|| unsafe {
-                    use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
-                    let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                    let _com = crate::security_utils::ComGuard::init_mta();
 
                     let mut cached_services = connect_wmi_root();
                     let (lock, cvar) = BRIGHTNESS_WORKER
@@ -629,11 +628,9 @@ pub fn read_audio_endpoint_status_with_bt(connected_bt: &[ConnectedBluetoothDevi
             eMultimedia, eRender, IMMDeviceEnumerator, MMDeviceEnumerator,
         };
         use windows::Win32::System::Com::StructuredStorage::PropVariantToUInt32;
-        use windows::Win32::System::Com::{
-            CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED, STGM_READ,
-        };
+        use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, STGM_READ};
 
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let _com = crate::security_utils::ComGuard::init_mta();
         if let Ok(enumerator) =
             CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL)
         {
@@ -724,11 +721,9 @@ pub fn set_master_volume_native(level_percent: u8) -> Result<(), String> {
         use windows::Win32::Media::Audio::{
             eMultimedia, eRender, IMMDeviceEnumerator, MMDeviceEnumerator,
         };
-        use windows::Win32::System::Com::{
-            CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
-        };
+        use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let _com = crate::security_utils::ComGuard::init_mta();
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
                 .map_err(|e| format!("CoCreateInstance failed: {e}"))?;
@@ -757,11 +752,9 @@ pub fn toggle_audio_mute_native() -> Result<bool, String> {
         use windows::Win32::Media::Audio::{
             eMultimedia, eRender, IMMDeviceEnumerator, MMDeviceEnumerator,
         };
-        use windows::Win32::System::Com::{
-            CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
-        };
+        use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let _com = crate::security_utils::ComGuard::init_mta();
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
                 .map_err(|e| format!("CoCreateInstance failed: {e}"))?;
@@ -994,11 +987,8 @@ pub fn read_connected_bluetooth_device_name_native() -> Option<String> {
         BluetoothConnectionStatus, BluetoothDevice, BluetoothLEDevice, BluetoothMajorClass,
     };
     use windows::Devices::Enumeration::DeviceInformation;
-    use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 
-    unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-    }
+    let _com = crate::security_utils::ComGuard::init_mta();
 
     // 1. Check Classic Bluetooth connected devices via WinRT DeviceInformation + BluetoothDevice
     let mut fallback_name: Option<String> = None;
@@ -1501,11 +1491,8 @@ pub fn read_radio_states_native() -> RadioStates {
     #[cfg(windows)]
     {
         use windows::Devices::Radios::{Radio, RadioKind, RadioState};
-        use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        }
+        let _com = crate::security_utils::ComGuard::init_mta();
 
         let mut states = RadioStates::default();
         if let Ok(async_op) = Radio::GetRadiosAsync() {
@@ -1581,13 +1568,10 @@ fn set_radio_kind_native(
     settings_fallback_uri: &str,
 ) -> Result<bool, String> {
     use windows::Devices::Radios::{Radio, RadioAccessStatus, RadioState};
-    use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 
     let uri = settings_fallback_uri.to_string();
     let handle = std::thread::spawn(move || -> Result<bool, String> {
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        }
+        let _com = crate::security_utils::ComGuard::init_mta();
 
         let access = Radio::RequestAccessAsync()
             .map_err(|e| format!("Radio access request failed: {e}"))?
@@ -1781,14 +1765,9 @@ pub fn start_hardware_telemetry_daemon(app: AppHandle) {
     std::thread::Builder::new()
         .name("casa-hardware-telemetry".into())
         .spawn(move || {
-            // Inisialisasi COM untuk dedicated thread ini (MTA)
+            // Inisialisasi COM untuk dedicated thread ini (MTA) dengan guard RAII
             #[cfg(windows)]
-            unsafe {
-                let _ = windows::Win32::System::Com::CoInitializeEx(
-                    None,
-                    windows::Win32::System::Com::COINIT_MULTITHREADED,
-                );
-            }
+            let _com = crate::security_utils::ComGuard::init_mta();
 
             let mut tick_counter: u64 = 0;
             let mut last_telemetry = SystemTelemetry::default();
@@ -1987,14 +1966,12 @@ pub fn enumerate_audio_output_devices() -> Result<Vec<AudioDeviceItem>, String> 
             eMultimedia, eRender, IMMDeviceCollection, IMMDeviceEnumerator,
             MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
         };
-        use windows::Win32::System::Com::{
-            CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED, STGM_READ,
-        };
+        use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, STGM_READ};
         use windows::Win32::Foundation::PROPERTYKEY;
         use windows::Win32::System::Com::StructuredStorage::PropVariantToUInt32;
         use windows::core::GUID;
 
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let _com = crate::security_utils::ComGuard::init_mta();
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
                 .map_err(|e| format!("CoCreateInstance MMDeviceEnumerator failed: {e}"))?;
@@ -2097,36 +2074,92 @@ pub fn enumerate_audio_output_devices() -> Result<Vec<AudioDeviceItem>, String> 
     Ok(vec![])
 }
 
+#[cfg(windows)]
+#[allow(non_snake_case)]
+mod policy_config_com {
+    use std::ffi::c_void;
+    use windows_core::{interface, HRESULT, IUnknown, IUnknown_Vtbl, PCWSTR};
+
+    #[interface("f8679f50-850a-41cf-9c72-430f290290c8")]
+    pub unsafe trait IPolicyConfig: IUnknown {
+        pub fn GetMixFormat(&self, device_name: PCWSTR, format: *mut *mut c_void) -> HRESULT;
+        pub fn GetDeviceFormat(&self, device_name: PCWSTR, default: i32, format: *mut *mut c_void) -> HRESULT;
+        pub fn ResetDeviceFormat(&self, device_name: PCWSTR) -> HRESULT;
+        pub fn SetDeviceFormat(&self, device_name: PCWSTR, ep_format: *const c_void, mix_format: *const c_void) -> HRESULT;
+        pub fn GetProcessingPeriod(&self, device_name: PCWSTR, default: i32, default_period: *mut i64, min_period: *mut i64) -> HRESULT;
+        pub fn SetProcessingPeriod(&self, device_name: PCWSTR, period: *const i64) -> HRESULT;
+        pub fn GetShareMode(&self, device_name: PCWSTR, mode: *mut c_void) -> HRESULT;
+        pub fn SetShareMode(&self, device_name: PCWSTR, mode: *const c_void) -> HRESULT;
+        pub fn GetPropertyValue(&self, device_name: PCWSTR, fx_store: i32, key: *const c_void, pv: *mut c_void) -> HRESULT;
+        pub fn SetPropertyValue(&self, device_name: PCWSTR, fx_store: i32, key: *const c_void, pv: *const c_void) -> HRESULT;
+        pub fn SetDefaultEndpoint(&self, wsz_device_id: PCWSTR, role: u32) -> HRESULT;
+        pub fn SetEndpointVisibility(&self, device_name: PCWSTR, visible: i32) -> HRESULT;
+    }
+
+    #[interface("568b9108-44bf-40b4-9006-86afe5b5a620")]
+    pub unsafe trait IPolicyConfigVista: IUnknown {
+        pub fn GetMixFormat(&self, device_name: PCWSTR, format: *mut *mut c_void) -> HRESULT;
+        pub fn GetDeviceFormat(&self, device_name: PCWSTR, default: i32, format: *mut *mut c_void) -> HRESULT;
+        pub fn SetDeviceFormat(&self, device_name: PCWSTR, ep_format: *const c_void, mix_format: *const c_void) -> HRESULT;
+        pub fn GetProcessingPeriod(&self, device_name: PCWSTR, default: i32, default_period: *mut i64, min_period: *mut i64) -> HRESULT;
+        pub fn SetProcessingPeriod(&self, device_name: PCWSTR, period: *const i64) -> HRESULT;
+        pub fn GetShareMode(&self, device_name: PCWSTR, mode: *mut c_void) -> HRESULT;
+        pub fn SetShareMode(&self, device_name: PCWSTR, mode: *const c_void) -> HRESULT;
+        pub fn GetPropertyValue(&self, device_name: PCWSTR, fx_store: i32, key: *const c_void, pv: *mut c_void) -> HRESULT;
+        pub fn SetPropertyValue(&self, device_name: PCWSTR, fx_store: i32, key: *const c_void, pv: *const c_void) -> HRESULT;
+        pub fn SetDefaultEndpoint(&self, wsz_device_id: PCWSTR, role: u32) -> HRESULT;
+        pub fn SetEndpointVisibility(&self, device_name: PCWSTR, visible: i32) -> HRESULT;
+    }
+}
+
 pub fn set_default_audio_endpoint_native(device_id: &str) -> Result<(), String> {
+    let trimmed_id = device_id.trim();
+    if trimmed_id.is_empty()
+        || trimmed_id.len() > 512
+        || trimmed_id.chars().any(|c| c == '\0' || c.is_control())
+    {
+        return Err("ID endpoint audio tidak valid.".to_string());
+    }
+
+    let active_devices = enumerate_audio_output_devices()?;
+    if !active_devices.iter().any(|dev| dev.id == trimmed_id) {
+        return Err("Endpoint audio tidak ditemukan pada daftar perangkat aktif.".to_string());
+    }
+
     #[cfg(windows)]
     unsafe {
-        use windows::core::{GUID, Interface};
-        use windows::Win32::System::Com::{
-            CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
-        };
-        use std::ffi::c_void;
+        use policy_config_com::{IPolicyConfig, IPolicyConfigVista};
+        use windows::core::{GUID, PCWSTR};
+        use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let _com = crate::security_utils::ComGuard::init_mta();
 
         const CLSID_POLICY_CONFIG_CLIENT: GUID =
             GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
         const CLSID_POLICY_CONFIG_FALLBACK: GUID =
             GUID::from_u128(0x294612b3_f092_4633_8a07_889b1ee9ee87);
 
-        let unk: windows::core::IUnknown = CoCreateInstance(&CLSID_POLICY_CONFIG_CLIENT, None, CLSCTX_ALL)
-            .or_else(|_| CoCreateInstance(&CLSID_POLICY_CONFIG_FALLBACK, None, CLSCTX_ALL))
-            .map_err(|e| format!("Failed to CoCreateInstance PolicyConfig: {e}"))?;
+        let wide_id: Vec<u16> = trimmed_id.encode_utf16().chain(std::iter::once(0)).collect();
+        let dev_pcwstr = PCWSTR(wide_id.as_ptr());
 
-        let raw = unk.as_raw();
-        let wide_id: Vec<u16> = device_id.encode_utf16().chain(std::iter::once(0)).collect();
-
-        let vtable = *(raw as *const *const usize);
-        let fn_set_default: unsafe extern "system" fn(*mut c_void, *const u16, u32) -> windows::core::HRESULT =
-            std::mem::transmute(*vtable.add(13));
-
-        let res0 = fn_set_default(raw, wide_id.as_ptr(), 0); // eConsole
-        let res1 = fn_set_default(raw, wide_id.as_ptr(), 1); // eMultimedia
-        let res2 = fn_set_default(raw, wide_id.as_ptr(), 2); // eCommunications
+        let (res0, res1, res2) = if let Ok(cfg) =
+            CoCreateInstance::<_, IPolicyConfig>(&CLSID_POLICY_CONFIG_CLIENT, None, CLSCTX_ALL)
+        {
+            (
+                cfg.SetDefaultEndpoint(dev_pcwstr, 0),
+                cfg.SetDefaultEndpoint(dev_pcwstr, 1),
+                cfg.SetDefaultEndpoint(dev_pcwstr, 2),
+            )
+        } else {
+            let cfg_vista: IPolicyConfigVista =
+                CoCreateInstance(&CLSID_POLICY_CONFIG_FALLBACK, None, CLSCTX_ALL)
+                    .map_err(|e| format!("Failed to CoCreateInstance IPolicyConfig: {e}"))?;
+            (
+                cfg_vista.SetDefaultEndpoint(dev_pcwstr, 0),
+                cfg_vista.SetDefaultEndpoint(dev_pcwstr, 1),
+                cfg_vista.SetDefaultEndpoint(dev_pcwstr, 2),
+            )
+        };
 
         if res0.is_err() && res1.is_err() && res2.is_err() {
             return Err(format!("SetDefaultEndpoint failed: hr={:?}", res0));
@@ -2558,11 +2591,8 @@ pub fn list_paired_bluetooth_native() -> Result<Vec<BluetoothDeviceItem>, String
         BluetoothConnectionStatus, BluetoothDevice, BluetoothLEDevice, BluetoothMajorClass,
     };
     use windows::Devices::Enumeration::DeviceInformation;
-    use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 
-    unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-    }
+    let _com = crate::security_utils::ComGuard::init_mta();
 
     let mut by_addr: HashMap<String, BluetoothDeviceItem> = HashMap::new();
 

@@ -329,35 +329,66 @@ export interface SpotifyTokens {
   scope?: string;
 }
 
+export interface StoredSpotifyTokens {
+  accessToken: string;
+  refreshToken?: string | null;
+  expiresAtMs: number;
+  scope?: string | null;
+}
+
 /**
- * Launch Spotify User OAuth 2.0 loopback flow on 127.0.0.1:8888
+ * Launch Spotify User OAuth 2.0 PKCE + state loopback flow on 127.0.0.1:8888
  */
-export async function startSpotifyLogin(clientId: string, clientSecret: string): Promise<SpotifyTokens> {
+export async function startSpotifyLogin(clientId: string): Promise<SpotifyTokens> {
   if (isTauriEnv) {
     return await invoke<SpotifyTokens>('start_spotify_login', {
       clientId,
-      clientSecret,
     });
   }
   throw new Error('Spotify OAuth loopback requires Tauri desktop runtime');
 }
 
 /**
- * Refresh expired user token via Spotify token endpoint
+ * Refresh expired user token via Spotify PKCE token endpoint (persists to DPAPI)
  */
 export async function refreshSpotifyUserToken(
-  refreshToken: string,
   clientId: string,
-  clientSecret: string
+  refreshToken?: string
 ): Promise<SpotifyTokens> {
   if (isTauriEnv) {
     return await invoke<SpotifyTokens>('refresh_spotify_user_token', {
-      refreshToken,
       clientId,
-      clientSecret,
+      refreshToken: refreshToken ?? null,
     });
   }
   throw new Error('Spotify OAuth refresh requires Tauri desktop runtime');
+}
+
+export async function loadSpotifyUserTokens(): Promise<StoredSpotifyTokens | null> {
+  if (!isTauriEnv) return null;
+  try {
+    return await invoke<StoredSpotifyTokens | null>('load_spotify_user_tokens');
+  } catch {
+    return null;
+  }
+}
+
+export async function saveSpotifyUserTokens(tokens: StoredSpotifyTokens): Promise<void> {
+  if (!isTauriEnv) return;
+  try {
+    await invoke('save_spotify_user_tokens', { tokens });
+  } catch (err) {
+    console.warn('[CASA Auth] save_spotify_user_tokens failed:', err);
+  }
+}
+
+export async function clearSpotifyUserTokens(): Promise<void> {
+  if (!isTauriEnv) return;
+  try {
+    await invoke('clear_spotify_user_tokens');
+  } catch (err) {
+    console.warn('[CASA Auth] clear_spotify_user_tokens failed:', err);
+  }
 }
 
 export interface HitRect {
@@ -657,7 +688,7 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
 export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   if (!isTauriEnv) {
     return {
-      currentVersion: '2.3.1',
+      currentVersion: '2.3.2',
       available: false,
       version: null,
       body: null,
@@ -672,7 +703,7 @@ export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
 export async function getUpdateNotificationStatus(): Promise<UpdateNotificationStatus> {
   if (!isTauriEnv) {
     return {
-      currentVersion: '2.3.1',
+      currentVersion: '2.3.2',
       latestVersion: null,
       releaseUrl: null,
       releaseNotes: null,
@@ -685,7 +716,7 @@ export async function getUpdateNotificationStatus(): Promise<UpdateNotificationS
     return await invoke<UpdateNotificationStatus>('get_update_notification_status');
   } catch {
     return {
-      currentVersion: '2.3.1',
+      currentVersion: '2.3.2',
       latestVersion: null,
       releaseUrl: null,
       releaseNotes: null,

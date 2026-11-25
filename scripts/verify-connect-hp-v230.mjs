@@ -56,8 +56,15 @@ async function runSuiteA(viteServer) {
     connectHpRs.includes('BCryptGenRandom') &&
       connectHpRs.includes('pub fn ct_token_eq') &&
       connectHpRs.includes('pub fn is_allowed_lan_ip') &&
+      connectHpRs.includes('pub fn is_allowed_host') &&
       connectHpRs.includes('pub fn is_allowed_origin') &&
+      connectHpRs.includes('from_fn_with_state') &&
+      connectHpRs.includes('DefaultBodyLimit::max(MAX_DEFAULT_HTTP_BODY_BYTES)') &&
       connectHpRs.includes('DefaultBodyLimit::disable()') &&
+      connectHpRs.includes('X_FRAME_OPTIONS') &&
+      connectHpRs.includes('MAX_WS_CLIENTS') &&
+      connectHpRs.includes('MAX_BATCH_FOLDERS_PER_SESSION') &&
+      connectHpRs.includes('write_mark_of_the_web') &&
       connectHpRs.includes('x-casa-batch-id') &&
       connectHpRs.includes('x-casa-batch-total') &&
       connectHpRs.includes('pub fn prepare_store_zip_plan') &&
@@ -66,7 +73,7 @@ async function runSuiteA(viteServer) {
       connectHpRs.includes('write_streaming_store_zip') &&
       connectHpRs.includes('0x0807_4b50u32') &&
       connectHpRs.includes('crc32_update'),
-    'connect_hp.rs implements CSPRNG, constant-time token compare, RFC 1918/Origin guard, exact Content-Length ZIP STORE plan, RFC5987 & Cache-Control'
+    'connect_hp.rs implements CSPRNG, constant-time token compare, middleware host/RFC1918/Origin guard, per-route body limits, security headers, MOTW, WS/batch caps & streaming ZIP'
   );
 
   const htmlStart = connectHpRs.indexOf('const MOBILE_WEB_UI_HTML: &str = r##"');
@@ -104,7 +111,8 @@ async function runSuiteA(viteServer) {
       dropZoneRs.includes('FOS_PICKFOLDERS') &&
       dropZoneRs.includes('pub fn create_drop_transit_directory') &&
       dropZoneRs.includes('pub fn save_dropped_directory_file') &&
-      dropZoneRs.includes('allow_directory') &&
+      dropZoneRs.includes('is_blocked_asset_scope_path') &&
+      !dropZoneRs.includes('allow_directory') &&
       dropZoneRs.includes('pub fn write_clipboard_text') &&
       libRs.includes('connect_hp::shutdown_connect_hp_server()') &&
       libRs.includes('connect_hp::start_connect_hp') &&
@@ -112,7 +120,7 @@ async function runSuiteA(viteServer) {
       libRs.includes('drop_zone::create_drop_transit_directory') &&
       libRs.includes('drop_zone::save_dropped_directory_file') &&
       libRs.includes('drop_zone::pick_drop_zone_folder'),
-    'drop_zone.rs and lib.rs wire folder drag-in/out scope, FOS_PICKFOLDERS, write_clipboard_text, shutdown hooks & Connect HP IPC commands'
+    'drop_zone.rs and lib.rs wire folder drag-in/out scope (strictly file-level, no allow_directory), FOS_PICKFOLDERS, write_clipboard_text, shutdown hooks & Connect HP IPC commands'
   );
 
   const dropZoneStoreSrc = fs.readFileSync(path.resolve('src/stores/useDropZoneStore.ts'), 'utf8');

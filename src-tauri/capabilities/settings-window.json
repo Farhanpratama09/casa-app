@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings-window",
+  "description": "Permissions restricted strictly to the CASA desktop settings window",
+  "windows": ["settings"],
+  "permissions": [
+    "process:allow-restart"
+  ]
+}

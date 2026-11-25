@@ -155,13 +155,15 @@ pub mod windows_media {
     }
 
     fn read_thumbnail_base64(session: &GlobalSystemMediaTransportControlsSession) -> Option<String> {
+        const MAX_GSMTC_THUMBNAIL_BYTES: u64 = 8 * 1024 * 1024;
         let media_props = session.TryGetMediaPropertiesAsync().ok()?.join().ok()?;
         let thumb_stream_ref = media_props.Thumbnail().ok()?;
         let stream = thumb_stream_ref.OpenReadAsync().ok()?.join().ok()?;
-        let size = stream.Size().ok()? as usize;
-        if size == 0 {
+        let size_u64 = stream.Size().ok()?;
+        if size_u64 == 0 || size_u64 > MAX_GSMTC_THUMBNAIL_BYTES {
             return None;
         }
+        let size = size_u64 as usize;
 
         let reader = DataReader::CreateDataReader(&stream).ok()?;
         reader.LoadAsync(size as u32).ok()?.join().ok()?;

@@ -321,7 +321,7 @@ struct ReverseGeocodeApiResponse {
 async fn reverse_geocode_coords(lat: f64, lon: f64) -> (Option<String>, Option<String>, Option<String>) {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(4))
-        .user_agent("CASA-Desktop/2.3.1")
+        .user_agent("CASA-Desktop/2.3.2")
         .build()
     {
         Ok(c) => c,
@@ -360,11 +360,8 @@ async fn reverse_geocode_coords(lat: f64, lon: f64) -> (Option<String>, Option<S
 #[cfg(windows)]
 fn query_windows_geolocator_blocking() -> Result<(f64, f64, Option<f64>), (String, String)> {
     use windows::Devices::Geolocation::{GeolocationAccessStatus, Geolocator, PositionAccuracy};
-    use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 
-    unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-    }
+    let _com = crate::security_utils::ComGuard::init_mta();
 
     // Request access first; on unpackaged Win32 apps Unspecified may still succeed if OS Location Services is enabled.
     if let Ok(req_op) = Geolocator::RequestAccessAsync() {
@@ -557,7 +554,7 @@ pub async fn search_prayer_city(query: String) -> Result<Vec<CitySearchItem>, St
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(6))
-        .user_agent("CASA-Desktop/2.3.1")
+        .user_agent("CASA-Desktop/2.3.2")
         .build()
         .map_err(|e| format!("Gagal menginisialisasi HTTP client: {e}"))?;
 
@@ -609,8 +606,13 @@ pub fn open_windows_location_settings() -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
+        use std::path::PathBuf;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        std::process::Command::new("rundll32")
+        let system_root = std::env::var_os("SystemRoot")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        let rundll32 = system_root.join("System32").join("rundll32.exe");
+        std::process::Command::new(rundll32)
             .args(["url.dll,FileProtocolHandler", "ms-settings:privacy-location"])
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()

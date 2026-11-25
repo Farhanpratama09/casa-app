@@ -5,7 +5,8 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         ConnectInfo, DefaultBodyLimit, Multipart, Path as AxumPath, Query, State,
     },
-    http::{header, HeaderMap, HeaderValue, StatusCode},
+    http::{header, HeaderMap, HeaderValue, Method, Request as HttpRequest, StatusCode},
+    middleware::{from_fn_with_state, Next},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -24,10 +25,16 @@ use tokio::sync::{broadcast, oneshot, RwLock};
 use tokio_util::io::ReaderStream;
 
 const MAX_UPLOAD_FILE_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4 GiB per file
+const MAX_DEFAULT_HTTP_BODY_BYTES: usize = 256 * 1024; // 256 KiB cap outside /api/upload
 const MAX_INCOMING_TEXT_CHARS: usize = 50_000;
 const IDLE_TIMEOUT_SECS: u64 = 600; // 10 menit
 const STREAM_CHUNK_BYTES: usize = 64 * 1024;
 const TOUCH_INTERVAL_BYTES: u64 = 512 * 1024;
+const MAX_WS_CLIENTS: usize = 8;
+const MAX_WS_MESSAGE_BYTES: usize = 4096;
+const MAX_BATCH_FOLDERS_PER_SESSION: usize = 32;
+
+static UPLOAD_PART_SEQ: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -159,7 +166,7 @@ struct ServerRuntime {
     shutdown_tx: Mutex<Option<oneshot::Sender<()>>>,
     serve_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     watchdog_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
-    app_handle: tauri::AppHandle,
+    app_handle: Option<tauri::AppHandle>,
 }
 
 impl ServerRuntime {
@@ -232,14 +239,7 @@ fn now_epoch_secs() -> u64 {
 
 /// Perbandingan token constant-time berbasis XOR accumulator untuk mencegah timing side-channel.
 pub fn ct_token_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.is_empty() || a.len() != b.len() {
-        return false;
-    }
-    let mut diff: u8 = 0;
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
+    crate::security_utils::ct_eq(a, b)
 }
 
 /// Hanya mengizinkan IPv4 privat RFC 1918 dan loopback lokal (termasuk IPv4-mapped IPv6).
@@ -252,6 +252,23 @@ pub fn is_allowed_lan_ip(ip: IpAddr) -> bool {
         },
     };
     v4.is_loopback() || v4.is_private()
+}
+
+/// Memvalidasi header `Host` terhadap daftar IP lokal laptop pada port aktif (proteksi DNS rebinding).
+pub fn is_allowed_host(host: Option<&str>, allowed_ips: &[String], port: u16) -> bool {
+    let Some(raw) = host else {
+        return false;
+    };
+    let trimmed = raw.trim().to_ascii_lowercase();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed == format!("127.0.0.1:{}", port) || trimmed == format!("localhost:{}", port) {
+        return true;
+    }
+    allowed_ips
+        .iter()
+        .any(|ip| trimmed == format!("{}:{}", ip.trim().to_ascii_lowercase(), port))
 }
 
 /// Memvalidasi header `Origin` browser terhadap daftar IP lokal laptop pada port aktif (proteksi CSWSH/CSRF).
@@ -273,33 +290,9 @@ pub fn is_allowed_origin(origin: Option<&str>, allowed_ips: &[String], port: u16
         .any(|ip| trimmed == format!("http://{}:{}", ip.to_ascii_lowercase(), port))
 }
 
+/// Generates a 128-bit session token using OS CSPRNG (`BCryptGenRandom` on Windows).
 fn generate_csprng_token_hex() -> Result<String, String> {
-    let mut raw = [0u8; 16];
-
-    #[cfg(windows)]
-    {
-        use windows::Win32::Security::Cryptography::{
-            BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
-        };
-        unsafe {
-            let status = BCryptGenRandom(None, &mut raw, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
-            if status.is_err() {
-                return Err(format!("BCryptGenRandom gagal: 0x{:08x}", status.0 as u32));
-            }
-        }
-    }
-
-    #[cfg(not(windows))]
-    {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        for (i, slot) in raw.iter_mut().enumerate() {
-            *slot = ((nanos >> ((i % 8) * 8)) & 0xFF) as u8;
-        }
-    }
-
+    let raw = crate::security_utils::random_bytes::<16>()?;
     let mut hex = String::with_capacity(32);
     for b in raw {
         use std::fmt::Write;
@@ -1022,6 +1015,103 @@ pub async fn write_streaming_store_zip<W: tokio::io::AsyncWrite + Unpin>(
 // HTTP & WebSocket Handlers (Axum)
 // =========================================================================
 
+fn attach_security_headers(resp: &mut Response) {
+    let h = resp.headers_mut();
+    h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    h.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    if !h.contains_key(header::CACHE_CONTROL) {
+        h.insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store, max-age=0"),
+        );
+    }
+}
+
+fn security_error_response(status: StatusCode, msg: &'static str) -> Response {
+    let mut resp = (status, msg).into_response();
+    attach_security_headers(&mut resp);
+    resp
+}
+
+fn extract_query_param_t(query: Option<&str>) -> Option<String> {
+    let q = query?;
+    for pair in q.split('&') {
+        if let Some((k, v)) = pair.split_once('=') {
+            if k == "t" {
+                let trimmed = v.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+async fn connect_hp_security_middleware(
+    State(runtime): State<Arc<ServerRuntime>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: HttpRequest<Body>,
+    next: Next,
+) -> Response {
+    if !is_allowed_lan_ip(addr.ip()) {
+        return security_error_response(StatusCode::FORBIDDEN, "LAN IP only");
+    }
+
+    let allowed_ips = runtime.allowed_ips();
+    let host_hdr = req.headers().get(header::HOST).and_then(|v| v.to_str().ok());
+    if !is_allowed_host(host_hdr, &allowed_ips, runtime.port) {
+        return security_error_response(StatusCode::FORBIDDEN, "Invalid host header");
+    }
+
+    if runtime.stopped.load(Ordering::SeqCst) {
+        return security_error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Connect HP session closed",
+        );
+    }
+
+    let path = req.uri().path();
+    let query_t = extract_query_param_t(req.uri().query());
+    let header_t = req
+        .headers()
+        .get("x-casa-token")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let provided_t = query_t.as_deref().or(header_t.as_deref());
+
+    if path == "/" {
+        if let Some(tok) = provided_t {
+            if !ct_token_eq(tok.as_bytes(), runtime.token.as_bytes()) {
+                return security_error_response(StatusCode::UNAUTHORIZED, "Invalid session token");
+            }
+            runtime.touch_activity();
+        }
+    } else {
+        let enforce_origin = matches!(path, "/ws" | "/api/text" | "/api/upload")
+            || !matches!(*req.method(), Method::GET | Method::HEAD);
+        if let Err((code, msg)) = verify_request_access(
+            &runtime,
+            addr.ip(),
+            req.headers(),
+            query_t.as_deref(),
+            enforce_origin,
+        ) {
+            return security_error_response(code, msg);
+        }
+        runtime.touch_activity();
+    }
+
+    let mut resp = next.run(req).await;
+    attach_security_headers(&mut resp);
+    resp
+}
+
 fn verify_request_access(
     runtime: &ServerRuntime,
     peer_ip: IpAddr,
@@ -1057,10 +1147,13 @@ async fn handle_index(
     Query(query): Query<TokenQuery>,
 ) -> Response {
     if !is_allowed_lan_ip(addr.ip()) {
-        return (StatusCode::FORBIDDEN, "LAN IP only").into_response();
+        return security_error_response(StatusCode::FORBIDDEN, "LAN IP only");
     }
     if runtime.stopped.load(Ordering::SeqCst) {
-        return (StatusCode::SERVICE_UNAVAILABLE, "Connect HP session closed").into_response();
+        return security_error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Connect HP session closed",
+        );
     }
 
     // Jika `?t=` disertakan (scan QR / buka ulang URL QR), wajib valid;
@@ -1078,10 +1171,10 @@ async fn handle_index(
         .filter(|s| !s.is_empty());
     if let Some(tok) = provided_query_token.or(header_token) {
         if !ct_token_eq(tok.as_bytes(), runtime.token.as_bytes()) {
-            return (StatusCode::UNAUTHORIZED, "Invalid session token").into_response();
+            return security_error_response(StatusCode::UNAUTHORIZED, "Invalid session token");
         }
+        runtime.touch_activity();
     }
-    runtime.touch_activity();
 
     let mut resp = Html(MOBILE_WEB_UI_HTML).into_response();
     let headers_mut = resp.headers_mut();
@@ -1095,6 +1188,7 @@ async fn handle_index(
             "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'none'; frame-ancestors 'none';",
         ),
     );
+    attach_security_headers(&mut resp);
     resp
 }
 
@@ -1106,15 +1200,26 @@ async fn handle_ws_upgrade(
     ws: WebSocketUpgrade,
 ) -> Response {
     if runtime.stopped.load(Ordering::SeqCst) {
-        return (StatusCode::SERVICE_UNAVAILABLE, "Connect HP session closed").into_response();
+        return security_error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Connect HP session closed",
+        );
     }
     if let Err((code, msg)) =
         verify_request_access(&runtime, addr.ip(), &headers, query.t.as_deref(), true)
     {
-        return (code, msg).into_response();
+        return security_error_response(code, msg);
+    }
+    if runtime.connected_clients.load(Ordering::Acquire) >= MAX_WS_CLIENTS {
+        return security_error_response(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Batas koneksi WebSocket aktif tercapai",
+        );
     }
     runtime.touch_activity();
-    ws.on_upgrade(move |socket| handle_ws_connection(runtime, socket))
+    ws.max_message_size(MAX_WS_MESSAGE_BYTES)
+        .max_frame_size(MAX_WS_MESSAGE_BYTES)
+        .on_upgrade(move |socket| handle_ws_connection(runtime, socket))
 }
 
 async fn handle_ws_connection(runtime: Arc<ServerRuntime>, mut socket: WebSocket) {
@@ -1123,10 +1228,18 @@ async fn handle_ws_connection(runtime: Arc<ServerRuntime>, mut socket: WebSocket
         return;
     }
 
-    let clients_now = runtime.connected_clients.fetch_add(1, Ordering::Relaxed) + 1;
-    let _ = runtime
-        .app_handle
-        .emit("casa://connect-hp-status", runtime.to_session_info(None));
+    let Ok(prev_clients) = runtime.connected_clients.try_update(
+        Ordering::SeqCst,
+        Ordering::SeqCst,
+        |cur| if cur < MAX_WS_CLIENTS { Some(cur + 1) } else { None },
+    ) else {
+        let _ = socket.close().await;
+        return;
+    };
+    let clients_now = prev_clients + 1;
+    if let Some(ref app) = runtime.app_handle {
+        let _ = app.emit("casa://connect-hp-status", runtime.to_session_info(None));
+    }
 
     // Push initial allowlist items (WITHOUT any local_path) immediately on connect
     {
@@ -1199,9 +1312,9 @@ async fn handle_ws_connection(runtime: Arc<ServerRuntime>, mut socket: WebSocket
             .and_then(|g| g.as_ref().map(|r| r.session_id == runtime.session_id))
             .unwrap_or(false);
     if still_active_current {
-        let _ = runtime
-            .app_handle
-            .emit("casa://connect-hp-status", runtime.to_session_info(None));
+        if let Some(ref app) = runtime.app_handle {
+            let _ = app.emit("casa://connect-hp-status", runtime.to_session_info(None));
+        }
     }
 }
 
@@ -1264,22 +1377,33 @@ async fn handle_post_text(
         }
     }
 
-    let _ = runtime.app_handle.emit(
-        "casa://connect-hp-item",
-        ConnectHpIncomingEventPayload {
-            kind: "text".to_string(),
-            payload: safe_text,
-            file_name: None,
-            size_bytes: None,
-            copied_to_clipboard: copied,
-            batch_id: None,
-            file_count: None,
-            batch_total: None,
-        },
-    );
+    if let Some(ref app) = runtime.app_handle {
+        let _ = app.emit(
+            "casa://connect-hp-item",
+            ConnectHpIncomingEventPayload {
+                kind: "text".to_string(),
+                payload: safe_text,
+                file_name: None,
+                size_bytes: None,
+                copied_to_clipboard: copied,
+                batch_id: None,
+                file_count: None,
+                batch_total: None,
+            },
+        );
+    }
 
     Json(serde_json::json!({ "ok": true, "copiedToClipboard": copied })).into_response()
 }
+
+#[cfg(windows)]
+fn write_mark_of_the_web(path: &Path) {
+    let ads_path = format!("{}:Zone.Identifier", path.display());
+    let _ = std::fs::write(ads_path, b"[ZoneTransfer]\r\nZoneId=3\r\n");
+}
+
+#[cfg(not(windows))]
+fn write_mark_of_the_web(_path: &Path) {}
 
 async fn handle_upload_file(
     State(runtime): State<Arc<ServerRuntime>>,
@@ -1308,9 +1432,12 @@ async fn handle_upload_file(
         .unwrap_or(1)
         .max(1);
 
-    let base_drop_dir = match resolve_casa_drop_dir(&runtime.app_handle) {
-        Ok(dir) => dir,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    let base_drop_dir = match runtime.app_handle.as_ref() {
+        Some(app) => match resolve_casa_drop_dir(app) {
+            Ok(dir) => dir,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+        },
+        None => runtime.download_dir.clone(),
     };
 
     let mut saved_results = Vec::new();
@@ -1318,40 +1445,14 @@ async fn handle_upload_file(
     while let Ok(Some(mut field)) = multipart.next_field().await {
         let raw_name = field.file_name().unwrap_or("upload-hp.bin").to_string();
         let safe_name = sanitize_transit_filename(&raw_name);
-
-        let is_batch_folder = batch_total > 5 && batch_id.is_some();
-        let (target_dir, batch_folder_name) = if is_batch_folder {
-            let b_id = batch_id.as_ref().unwrap();
-            let mut batches = runtime.batch_folders.lock().await;
-            if let Some(existing) = batches.get(b_id) {
-                (existing.dir_path.clone(), Some(existing.folder_name.clone()))
-            } else {
-                match create_unique_batch_subfolder(&base_drop_dir) {
-                    Ok((dir_path, folder_name)) => {
-                        batches.insert(
-                            b_id.clone(),
-                            BatchFolderState {
-                                dir_path: dir_path.clone(),
-                                folder_name: folder_name.clone(),
-                                received_files: 0,
-                                total_bytes: 0,
-                                batch_total,
-                            },
-                        );
-                        (dir_path, Some(folder_name))
-                    }
-                    Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
-                }
-            }
-        } else {
-            (base_drop_dir.clone(), None)
-        };
+        let wants_batch_folder = batch_total > 5 && batch_id.is_some();
 
         let millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis();
-        let part_path = target_dir.join(format!(".{}_{}.part", millis, safe_name));
+        let seq = UPLOAD_PART_SEQ.fetch_add(1, Ordering::Relaxed);
+        let part_path = base_drop_dir.join(format!(".{}_{}_{}.part", millis, seq, safe_name));
         let mut part_guard = PartFileCleanupGuard::new(part_path.clone());
 
         let file = match tokio::fs::File::create(&part_path).await {
@@ -1419,6 +1520,44 @@ async fn handle_upload_file(
             continue;
         }
 
+        // Tunda pembuatan folder batch hingga dipastikan ada payload (> 0 byte) dan patuhi batas 32 batch per sesi
+        let (target_dir, is_batch_folder, batch_folder_name) = if wants_batch_folder {
+            let b_id = batch_id.as_ref().unwrap();
+            let mut batches = runtime.batch_folders.lock().await;
+            if let Some(existing) = batches.get(b_id) {
+                (
+                    existing.dir_path.clone(),
+                    true,
+                    Some(existing.folder_name.clone()),
+                )
+            } else if batches.len() >= MAX_BATCH_FOLDERS_PER_SESSION {
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "Batas folder batch per sesi Connect HP (32) tercapai",
+                )
+                    .into_response();
+            } else {
+                match create_unique_batch_subfolder(&base_drop_dir) {
+                    Ok((dir_path, folder_name)) => {
+                        batches.insert(
+                            b_id.clone(),
+                            BatchFolderState {
+                                dir_path: dir_path.clone(),
+                                folder_name: folder_name.clone(),
+                                received_files: 0,
+                                total_bytes: 0,
+                                batch_total,
+                            },
+                        );
+                        (dir_path, true, Some(folder_name))
+                    }
+                    Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+                }
+            }
+        } else {
+            (base_drop_dir.clone(), false, None)
+        };
+
         let final_path = match reserve_unique_dest_path(&target_dir, &safe_name) {
             Ok(p) => p,
             Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
@@ -1432,6 +1571,7 @@ async fn handle_upload_file(
                 .into_response();
         }
         part_guard.disarm();
+        write_mark_of_the_web(&final_path);
 
         let final_str = final_path.to_string_lossy().to_string();
         let final_name = final_path
@@ -1453,22 +1593,24 @@ async fn handle_upload_file(
                 }
             };
 
-            let _ = runtime.app_handle.emit(
-                "casa://connect-hp-item",
-                ConnectHpIncomingEventPayload {
-                    kind: "batch_folder".to_string(),
-                    payload: target_dir.to_string_lossy().to_string(),
-                    file_name: Some(folder_name),
-                    size_bytes: Some(sum_bytes),
-                    copied_to_clipboard: false,
-                    batch_id: Some(b_id.clone()),
-                    file_count: Some(recv_count),
-                    batch_total: Some(total_expected),
-                },
-            );
-        } else {
-            allow_path_in_asset_scope(&runtime.app_handle, &final_path);
-            let _ = runtime.app_handle.emit(
+            if let Some(ref app) = runtime.app_handle {
+                let _ = app.emit(
+                    "casa://connect-hp-item",
+                    ConnectHpIncomingEventPayload {
+                        kind: "batch_folder".to_string(),
+                        payload: target_dir.to_string_lossy().to_string(),
+                        file_name: Some(folder_name),
+                        size_bytes: Some(sum_bytes),
+                        copied_to_clipboard: false,
+                        batch_id: Some(b_id.clone()),
+                        file_count: Some(recv_count),
+                        batch_total: Some(total_expected),
+                    },
+                );
+            }
+        } else if let Some(ref app) = runtime.app_handle {
+            allow_path_in_asset_scope(app, &final_path);
+            let _ = app.emit(
                 "casa://connect-hp-item",
                 ConnectHpIncomingEventPayload {
                     kind: "file".to_string(),
@@ -1783,6 +1925,25 @@ pub async fn shutdown_connect_hp_server_async() {
     }
 }
 
+fn build_connect_hp_router(runtime: Arc<ServerRuntime>) -> Router {
+    Router::new()
+        .route("/", get(handle_index))
+        .route("/ws", get(handle_ws_upgrade))
+        .route("/api/items", get(handle_get_items))
+        .route("/api/text", post(handle_post_text))
+        .route(
+            "/api/upload",
+            post(handle_upload_file).layer(DefaultBodyLimit::disable()),
+        )
+        .route("/api/file/:id", get(handle_download_file))
+        .layer(DefaultBodyLimit::max(MAX_DEFAULT_HTTP_BODY_BYTES))
+        .layer(from_fn_with_state(
+            Arc::clone(&runtime),
+            connect_hp_security_middleware,
+        ))
+        .with_state(runtime)
+}
+
 #[tauri::command]
 pub async fn start_connect_hp(
     app: tauri::AppHandle,
@@ -1858,7 +2019,7 @@ pub async fn start_connect_hp(
         shutdown_tx: Mutex::new(Some(shutdown_tx)),
         serve_task: Mutex::new(None),
         watchdog_task: Mutex::new(None),
-        app_handle: app.clone(),
+        app_handle: Some(app.clone()),
     });
 
     {
@@ -1868,15 +2029,7 @@ pub async fn start_connect_hp(
         *guard = Some(Arc::clone(&runtime));
     }
 
-    let router = Router::new()
-        .route("/", get(handle_index))
-        .route("/ws", get(handle_ws_upgrade))
-        .route("/api/items", get(handle_get_items))
-        .route("/api/text", post(handle_post_text))
-        .route("/api/upload", post(handle_upload_file))
-        .route("/api/file/:id", get(handle_download_file))
-        .layer(DefaultBodyLimit::disable())
-        .with_state(Arc::clone(&runtime));
+    let router = build_connect_hp_router(Arc::clone(&runtime));
 
     let rt_serve = Arc::clone(&runtime);
     let serve_handle = tauri::async_runtime::spawn(async move {
@@ -1937,10 +2090,12 @@ pub async fn start_connect_hp(
                         let _ = tx.send(());
                     }
                 }
-                let _ = rt_watchdog.app_handle.emit(
-                    "casa://connect-hp-status",
-                    ConnectHpSessionInfo::inactive(Some("idle_timeout".to_string())),
-                );
+                if let Some(ref app) = rt_watchdog.app_handle {
+                    let _ = app.emit(
+                        "casa://connect-hp-status",
+                        ConnectHpSessionInfo::inactive(Some("idle_timeout".to_string())),
+                    );
+                }
                 break;
             }
         }
@@ -2891,5 +3046,167 @@ mod tests {
         assert!(!json.contains("Developer"));
         assert!(!json.contains("localPath"));
         assert!(public_dto.text_payload.is_none());
+    }
+
+    #[test]
+    fn enforces_host_header_anti_dns_rebinding() {
+        let allowed = vec!["192.168.1.5".to_string(), "192.168.137.1".to_string()];
+        assert!(is_allowed_host(Some("192.168.1.5:51234"), &allowed, 51234));
+        assert!(is_allowed_host(Some("192.168.137.1:51234"), &allowed, 51234));
+        assert!(is_allowed_host(Some("127.0.0.1:51234"), &allowed, 51234));
+        assert!(is_allowed_host(Some("localhost:51234"), &allowed, 51234));
+
+        assert!(!is_allowed_host(None, &allowed, 51234));
+        assert!(!is_allowed_host(Some(""), &allowed, 51234));
+        assert!(!is_allowed_host(Some("evil.com:51234"), &allowed, 51234));
+        assert!(!is_allowed_host(Some("192.168.1.5:9999"), &allowed, 51234));
+        assert!(!is_allowed_host(Some("192.168.1.5"), &allowed, 51234));
+    }
+
+    #[tokio::test]
+    async fn middleware_blocks_bad_host_unauth_large_text_and_sets_security_headers() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "casa_mw_test_{}",
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let (ws_broadcast, _) = broadcast::channel::<String>(8);
+        let token = "0123456789abcdef0123456789abcdef".to_string();
+        let runtime = Arc::new(ServerRuntime {
+            session_id: 9999,
+            token: token.clone(),
+            port,
+            stopped: AtomicBool::new(false),
+            selected_ip: Mutex::new("127.0.0.1".to_string()),
+            candidate_interfaces: Mutex::new(vec![NetworkInterfaceOption {
+                ip: "127.0.0.1".to_string(),
+                label: "Loopback".to_string(),
+                is_hotspot: false,
+            }]),
+            network_category: Mutex::new("Private".to_string()),
+            download_dir: temp_dir.clone(),
+            auto_copy_clipboard: AtomicUsize::new(0),
+            connected_clients: AtomicUsize::new(0),
+            active_transfers: AtomicUsize::new(0),
+            last_activity_epoch: AtomicU64::new(100),
+            shared_items: RwLock::new(Vec::new()),
+            shared_by_id: RwLock::new(HashMap::new()),
+            batch_folders: tokio::sync::Mutex::new(HashMap::new()),
+            ws_broadcast,
+            shutdown_tx: Mutex::new(Some(shutdown_tx)),
+            serve_task: Mutex::new(None),
+            watchdog_task: Mutex::new(None),
+            app_handle: None,
+        });
+
+        let router = build_connect_hp_router(Arc::clone(&runtime));
+        let server_task = tokio::spawn(async move {
+            let _ = axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await;
+        });
+
+        let send_raw = |headers: String, body: Vec<u8>| async move {
+            let stream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            let (mut reader, mut writer) = stream.into_split();
+            let read_task = tokio::spawn(async move {
+                let mut buf = Vec::new();
+                let mut tmp = [0u8; 4096];
+                while let Ok(n) = reader.read(&mut tmp).await {
+                    if n == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&tmp[..n]);
+                }
+                buf
+            });
+            writer.write_all(headers.as_bytes()).await.unwrap();
+            let write_task = tokio::spawn(async move {
+                if !body.is_empty() {
+                    tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+                    for chunk in body.chunks(16 * 1024) {
+                        if writer.write_all(chunk).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                std::future::pending::<()>().await;
+            });
+            let buf = tokio::time::timeout(std::time::Duration::from_secs(5), read_task)
+                .await
+                .expect("timed out waiting for HTTP response")
+                .unwrap_or_default();
+            write_task.abort();
+            let _ = write_task.await;
+            String::from_utf8_lossy(&buf).into_owned()
+        };
+
+        // 1. Bad Host (DNS rebinding) -> 403 Forbidden + security headers
+        let res_host = send_raw(
+            format!(
+                "GET /api/items HTTP/1.1\r\nHost: attacker.evil:{port}\r\nX-Casa-Token: {token}\r\nConnection: close\r\n\r\n"
+            ),
+            Vec::new(),
+        )
+        .await;
+        assert!(res_host.starts_with("HTTP/1.1 403"), "bad Host got: {}", &res_host[..res_host.len().min(80)]);
+        assert!(res_host.to_ascii_lowercase().contains("x-frame-options: deny"));
+        assert!(res_host.to_ascii_lowercase().contains("x-content-type-options: nosniff"));
+
+        // 2. GET / without token -> 200 OK with security headers, WITHOUT touching last_activity_epoch
+        let res_idx = send_raw(
+            format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"),
+            Vec::new(),
+        )
+        .await;
+        assert!(res_idx.starts_with("HTTP/1.1 200"));
+        assert_eq!(runtime.last_activity_epoch.load(Ordering::Relaxed), 100);
+        assert!(res_idx.to_ascii_lowercase().contains("x-frame-options: deny"));
+
+        // 3. Unauthenticated POST /api/text declaring >256 KiB payload -> rejected BEFORE body (401)
+        let big_pad = "A".repeat(300 * 1024);
+        let big_json = format!("{{\"text\":\"{}\"}}", big_pad);
+        let res_unauth_big = send_raw(
+            format!(
+                "POST /api/text HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                big_json.len(),
+            ),
+            Vec::new(),
+        )
+        .await;
+        assert!(
+            res_unauth_big.starts_with("HTTP/1.1 401"),
+            "expected 401 before reading body, got: {}",
+            &res_unauth_big[..res_unauth_big.len().min(120)]
+        );
+        assert_eq!(runtime.last_activity_epoch.load(Ordering::Relaxed), 100);
+
+        // 4. Authenticated POST /api/text with >256 KiB payload -> 413 Payload Too Large (DefaultBodyLimit::max)
+        let res_auth_big = send_raw(
+            format!(
+                "POST /api/text HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nX-Casa-Token: {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                big_json.len(),
+            ),
+            big_json.into_bytes(),
+        )
+        .await;
+        assert!(
+            res_auth_big.starts_with("HTTP/1.1 413"),
+            "expected 413 on >256 KiB /api/text, got: {}",
+            &res_auth_big[..res_auth_big.len().min(120)]
+        );
+
+        let _ = runtime.shutdown_tx.lock().unwrap().take().map(|tx| tx.send(()));
+        let _ = server_task.await;
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

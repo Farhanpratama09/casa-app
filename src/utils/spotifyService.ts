@@ -7,8 +7,12 @@
 import {
   startSpotifyLogin,
   refreshSpotifyUserToken,
+  loadSpotifyUserTokens,
+  saveSpotifyUserTokens,
+  clearSpotifyUserTokens,
   isSpotifyRunning,
   launchSpotifyProcessClean,
+  type StoredSpotifyTokens,
 } from './tauriBridge';
 
 /**
@@ -46,17 +50,127 @@ export interface SpotifyPlaylistItem {
   uri: string;
 }
 
-// Credentials loaded safely from environment variables (.env)
+// Public OAuth Client ID (PKCE flow — zero client secret shipped or read in frontend)
 export const SPOTIFY_CLIENT_ID =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SPOTIFY_CLIENT_ID) ||
   '6d0512b574044ffa8833b4d0c550a4ce';
-export const SPOTIFY_CLIENT_SECRET =
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SPOTIFY_CLIENT_SECRET) ||
-  '';
 
-const STORAGE_KEY_USER_ACCESS = 'casa_spotify_user_access_token';
-const STORAGE_KEY_USER_REFRESH = 'casa_spotify_user_refresh_token';
-const STORAGE_KEY_USER_EXPIRES = 'casa_spotify_user_expires_at';
+const STORAGE_KEY_CONNECTED_FLAG = 'casa_spotify_user_connected';
+const LEGACY_SPOTIFY_TOKEN_KEYS = [
+  'casa_spotify_user_access_token',
+  'casa_spotify_user_refresh_token',
+  'casa_spotify_user_expires_at',
+  'asaverse_spotify_user_access_token',
+  'asaverse_spotify_user_refresh_token',
+  'asaverse_spotify_user_expires_at',
+  'asaverse_spotify_user_token_expires',
+] as const;
+
+let cachedUserTokens: StoredSpotifyTokens | null = null;
+let secureStoreHydrationPromise: Promise<StoredSpotifyTokens | null> | null = null;
+
+function isTauriDesktopRuntime(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+function purgeAllLegacySpotifyLocalStorage(): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  for (const key of LEGACY_SPOTIFY_TOKEN_KEYS) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {}
+  }
+}
+
+function readLegacyTokensFromLocalStorage(): StoredSpotifyTokens | null {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    const access =
+      window.localStorage.getItem('casa_spotify_user_access_token') ||
+      window.localStorage.getItem('asaverse_spotify_user_access_token') ||
+      '';
+    const refresh =
+      window.localStorage.getItem('casa_spotify_user_refresh_token') ||
+      window.localStorage.getItem('asaverse_spotify_user_refresh_token') ||
+      null;
+    const rawExp =
+      window.localStorage.getItem('casa_spotify_user_expires_at') ||
+      window.localStorage.getItem('asaverse_spotify_user_expires_at') ||
+      window.localStorage.getItem('asaverse_spotify_user_token_expires') ||
+      '0';
+    const expiresAtMs = Number.parseInt(rawExp, 10) || 0;
+
+    if (!access && !refresh) return null;
+    return {
+      accessToken: access,
+      refreshToken: refresh,
+      expiresAtMs,
+      scope: null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function setConnectedIndicator(connected: boolean): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    if (connected) {
+      window.localStorage.setItem(STORAGE_KEY_CONNECTED_FLAG, '1');
+    } else {
+      window.localStorage.removeItem(STORAGE_KEY_CONNECTED_FLAG);
+    }
+  } catch {}
+}
+
+async function ensureSecureTokensHydrated(): Promise<StoredSpotifyTokens | null> {
+  if (cachedUserTokens) {
+    return cachedUserTokens;
+  }
+
+  const legacy = readLegacyTokensFromLocalStorage();
+  if (!isTauriDesktopRuntime()) {
+    if (legacy) {
+      cachedUserTokens = legacy;
+    }
+    return cachedUserTokens;
+  }
+
+  if (secureStoreHydrationPromise) {
+    return await secureStoreHydrationPromise;
+  }
+
+  secureStoreHydrationPromise = (async () => {
+    try {
+      const fromDpapi = await loadSpotifyUserTokens();
+      if (fromDpapi) {
+        cachedUserTokens = fromDpapi;
+        setConnectedIndicator(Boolean(fromDpapi.refreshToken || fromDpapi.accessToken));
+        purgeAllLegacySpotifyLocalStorage();
+        return fromDpapi;
+      }
+
+      if (legacy && legacy.accessToken) {
+        cachedUserTokens = legacy;
+        setConnectedIndicator(Boolean(legacy.refreshToken || legacy.accessToken));
+        await saveSpotifyUserTokens(legacy);
+        purgeAllLegacySpotifyLocalStorage();
+        return legacy;
+      }
+
+      purgeAllLegacySpotifyLocalStorage();
+      return null;
+    } finally {
+      secureStoreHydrationPromise = null;
+    }
+  })();
+
+  return await secureStoreHydrationPromise;
+}
+
+if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+  void ensureSecureTokensHydrated();
+}
 
 const SPOTIFY_PREMIUM_COOLDOWN_MS = 5 * 60 * 1000;
 let spotifyPremiumRestrictedUntil = 0;
@@ -108,25 +222,7 @@ function clearSpotifyPremiumRestriction(): void {
   }
 }
 
-// Automatic migration helper: Migrates legacy asaverse_* localStorage keys to casa_* keys
-function migrateLegacyStorage() {
-  if (typeof window === 'undefined' || !window.localStorage) return;
-  const legacyMap: [string, string][] = [
-    ['asaverse_spotify_user_access_token', STORAGE_KEY_USER_ACCESS],
-    ['asaverse_spotify_user_refresh_token', STORAGE_KEY_USER_REFRESH],
-    ['asaverse_spotify_user_expires_at', STORAGE_KEY_USER_EXPIRES],
-    ['asaverse_spotify_user_token_expires', STORAGE_KEY_USER_EXPIRES],
-  ];
-  for (const [legacyKey, newKey] of legacyMap) {
-    try {
-      const val = localStorage.getItem(legacyKey);
-      if (val && !localStorage.getItem(newKey)) {
-        localStorage.setItem(newKey, val);
-      }
-    } catch {}
-  }
-}
-migrateLegacyStorage();
+// Secure DPAPI migration runs in ensureSecureTokensHydrated() inside Tauri runtime.
 
 // Client Credentials (guest) token cache
 let guestCachedToken: { accessToken: string; expiresAt: number } | null = null;
@@ -168,38 +264,45 @@ async function wakeAndAwaitActiveDevice(userToken: string): Promise<string | und
  * Check if the user has connected their Spotify personal account
  */
 export function isSpotifyUserConnected(): boolean {
-  return typeof window !== 'undefined' && !!localStorage.getItem(STORAGE_KEY_USER_REFRESH);
+  if (cachedUserTokens?.refreshToken) return true;
+  if (typeof window === 'undefined' || !window.localStorage) return false;
+  return (
+    window.localStorage.getItem(STORAGE_KEY_CONNECTED_FLAG) === '1' ||
+    Boolean(window.localStorage.getItem('casa_spotify_user_refresh_token'))
+  );
 }
 
 /**
- * Disconnect Spotify user account
+ * Disconnect Spotify user account and purge DPAPI + legacy token storage
  */
 export function disconnectSpotifyUser(): void {
   lastPremiumProbeAt = 0;
   clearSpotifyPremiumRestriction();
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem(STORAGE_KEY_USER_ACCESS);
-  localStorage.removeItem(STORAGE_KEY_USER_REFRESH);
-  localStorage.removeItem(STORAGE_KEY_USER_EXPIRES);
+  cachedUserTokens = null;
+  setConnectedIndicator(false);
+  purgeAllLegacySpotifyLocalStorage();
+  if (isTauriDesktopRuntime()) {
+    void clearSpotifyUserTokens();
+  }
 }
 
 /**
- * Trigger OAuth 2.0 Login via Rust loopback server on 127.0.0.1:8888
+ * Trigger OAuth 2.0 PKCE + state Login via Rust loopback server on 127.0.0.1:8888
  */
 export async function loginSpotifyUser(): Promise<boolean> {
   try {
-    const tokens = await startSpotifyLogin(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET);
+    const tokens = await startSpotifyLogin(SPOTIFY_CLIENT_ID);
     if (tokens.access_token) {
       lastPremiumProbeAt = 0;
       clearSpotifyPremiumRestriction();
-      localStorage.setItem(STORAGE_KEY_USER_ACCESS, tokens.access_token);
-      if (tokens.refresh_token) {
-        localStorage.setItem(STORAGE_KEY_USER_REFRESH, tokens.refresh_token);
-      }
-      localStorage.setItem(
-        STORAGE_KEY_USER_EXPIRES,
-        (Date.now() + tokens.expires_in * 1000).toString()
-      );
+      cachedUserTokens = {
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token ?? null,
+        expiresAtMs: Date.now() + tokens.expires_in * 1000,
+        scope: tokens.scope ?? null,
+      };
+      setConnectedIndicator(true);
+      purgeAllLegacySpotifyLocalStorage();
       return true;
     }
   } catch (err) {
@@ -209,38 +312,44 @@ export async function loginSpotifyUser(): Promise<boolean> {
 }
 
 /**
- * Obtains a valid User Access Token, automatically refreshing if expired
+ * Obtains a valid User Access Token, automatically refreshing via DPAPI store if expired
  */
 export async function getValidUserAccessToken(): Promise<string | null> {
   if (typeof window === 'undefined') return null;
 
-  const refreshToken = localStorage.getItem(STORAGE_KEY_USER_REFRESH);
-  if (!refreshToken) return null;
-
-  const currentAccess = localStorage.getItem(STORAGE_KEY_USER_ACCESS);
-  const expiresAt = parseInt(localStorage.getItem(STORAGE_KEY_USER_EXPIRES) || '0', 10);
+  const stored = await ensureSecureTokensHydrated();
+  const refreshToken = stored?.refreshToken || null;
+  const currentAccess = stored?.accessToken || null;
+  const expiresAt = stored?.expiresAtMs || 0;
 
   // Still valid if at least 60 seconds remain
   if (currentAccess && Date.now() < expiresAt - 60000) {
     return currentAccess;
   }
 
-  // Refresh expired user token via Rust backend
+  if (!refreshToken && !isTauriDesktopRuntime()) {
+    return null;
+  }
+
+  if (!isTauriDesktopRuntime()) {
+    return currentAccess && Date.now() < expiresAt - 60000 ? currentAccess : null;
+  }
+
+  // Refresh expired user token via Rust backend (PKCE + DPAPI persist)
   try {
     const refreshed = await refreshSpotifyUserToken(
-      refreshToken,
       SPOTIFY_CLIENT_ID,
-      SPOTIFY_CLIENT_SECRET
+      refreshToken ?? undefined
     );
     if (refreshed.access_token) {
-      localStorage.setItem(STORAGE_KEY_USER_ACCESS, refreshed.access_token);
-      if (refreshed.refresh_token) {
-        localStorage.setItem(STORAGE_KEY_USER_REFRESH, refreshed.refresh_token);
-      }
-      localStorage.setItem(
-        STORAGE_KEY_USER_EXPIRES,
-        (Date.now() + refreshed.expires_in * 1000).toString()
-      );
+      cachedUserTokens = {
+        accessToken: refreshed.access_token,
+        refreshToken: refreshed.refresh_token ?? refreshToken,
+        expiresAtMs: Date.now() + refreshed.expires_in * 1000,
+        scope: refreshed.scope ?? stored?.scope ?? null,
+      };
+      setConnectedIndicator(true);
+      purgeAllLegacySpotifyLocalStorage();
       return refreshed.access_token;
     }
   } catch (err) {
@@ -251,37 +360,10 @@ export async function getValidUserAccessToken(): Promise<string | null> {
 }
 
 /**
- * Fallback guest Client Credentials token
+ * Client Credentials flow removed to avoid shipping/exposing SPOTIFY_CLIENT_SECRET in client bundle.
  */
 export async function getGuestClientCredentialsToken(): Promise<string | null> {
-  if (guestCachedToken && Date.now() < guestCachedToken.expiresAt - 60000) {
-    return guestCachedToken.accessToken;
-  }
-
-  try {
-    const basicAuth = btoa(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`);
-    const response = await fetch('https://accounts.spotify.com/api/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: `Basic ${basicAuth}`,
-      },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-      }),
-    });
-
-    if (!response.ok) return null;
-    const data = await response.json();
-    guestCachedToken = {
-      accessToken: data.access_token,
-      expiresAt: Date.now() + data.expires_in * 1000,
-    };
-    return guestCachedToken.accessToken;
-  } catch (err) {
-    console.error('[SpotifyService] Guest token fetch failed:', err);
-    return null;
-  }
+  return null;
 }
 
 /**

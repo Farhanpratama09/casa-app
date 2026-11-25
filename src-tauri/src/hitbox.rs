@@ -43,12 +43,41 @@ pub fn set_internal_drag_out(active: bool) {
     IS_INTERNAL_DRAG_OUT.store(active, Ordering::Relaxed);
 }
 
+fn normalize_hit_rect(r: HitRect) -> HitRect {
+    let center_offset_x = if r.center_offset_x.is_finite() {
+        r.center_offset_x.clamp(-1100.0, 1100.0)
+    } else {
+        0.0
+    };
+    let top_offset = if r.top_offset.is_finite() {
+        r.top_offset.clamp(0.0, 340.0)
+    } else {
+        0.0
+    };
+    let width = if r.width.is_finite() {
+        r.width.clamp(10.0, 1100.0)
+    } else {
+        310.0
+    };
+    let height = if r.height.is_finite() {
+        r.height.clamp(4.0, 340.0)
+    } else {
+        42.0
+    };
+    HitRect {
+        center_offset_x,
+        top_offset,
+        width,
+        height,
+    }
+}
+
 pub fn set_hitbox(width: f64, height: f64) {
     set_hitboxes(vec![HitRect {
         center_offset_x: 0.0,
         top_offset: 0.0,
-        width: width.max(10.0),
-        height: height.max(4.0),
+        width,
+        height,
     }]);
 }
 
@@ -61,16 +90,7 @@ pub fn set_hitboxes(rects: Vec<HitRect>) {
             height: 42.0,
         }]
     } else {
-        rects
-            .into_iter()
-            .take(6)
-            .map(|r| HitRect {
-                center_offset_x: r.center_offset_x,
-                top_offset: r.top_offset.max(0.0),
-                width: r.width.max(10.0),
-                height: r.height.max(4.0),
-            })
-            .collect()
+        rects.into_iter().take(6).map(normalize_hit_rect).collect()
     };
 
     if let Ok(mut hbs) = ACTIVE_HITBOXES.lock() {
@@ -309,3 +329,22 @@ pub fn start_hitbox_poller(window: tauri::WebviewWindow) {
 
 #[cfg(not(windows))]
 pub fn start_hitbox_poller(_window: tauri::WebviewWindow) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamps_non_finite_and_out_of_bounds_hitboxes() {
+        let clamped = normalize_hit_rect(HitRect {
+            center_offset_x: f64::NAN,
+            top_offset: f64::INFINITY,
+            width: 99_999.0,
+            height: -50.0,
+        });
+        assert_eq!(clamped.center_offset_x, 0.0);
+        assert_eq!(clamped.top_offset, 0.0);
+        assert_eq!(clamped.width, 1100.0);
+        assert_eq!(clamped.height, 4.0);
+    }
+}

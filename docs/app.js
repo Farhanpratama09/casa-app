@@ -105,7 +105,7 @@
       id: 'text-snippet',
       kind: 'text',
       name: 'Ephemeral transit note',
-      snippet: 'Checklist v2.3.1: Drag-In Folder, Ctrl+V & Connect HP.',
+      snippet: 'Checklist v2.3.2: Drag-In Folder, Ctrl+V & Connect HP.',
       ext: 'TXT',
       meta: 'TXT · 54 chars',
     },
@@ -416,6 +416,7 @@
     downloadSizeNote: $('download-size-note'),
     downloadSizeText: $('download-size-text'),
     downloadCountText: $('download-count-text'),
+    downloadSmartScreenGuide: $('download-smartscreen-guide'),
     copyShaBtn: $('copy-sha-btn'),
     shaValueExe: $('sha-value-exe'),
 
@@ -2651,7 +2652,7 @@
           ? exeVersion.trim().startsWith('v')
             ? exeVersion.trim()
             : `v${exeVersion.trim()}`
-          : 'v2.3.1';
+          : 'v2.3.2';
       el.downloadSizeText.textContent = `${versionTag} · NSIS Setup (.exe) · ${exeSize}`;
     }
     if (el.downloadCountText) {
@@ -2665,33 +2666,51 @@
     }
   }
 
+  function revealSmartScreenGuide() {
+    const guide = el.downloadSmartScreenGuide || $('download-smartscreen-guide');
+    if (!guide) return;
+    guide.hidden = false;
+    guide.classList.add('is-visible');
+  }
+
   function initDownloadButtonCooldown() {
     const btn = el.primaryDownloadBtn;
-    if (!btn) return;
     let isCooldown = false;
     let timerId = null;
 
-    btn.addEventListener('click', (ev) => {
-      if (isCooldown) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        return;
-      }
-      isCooldown = true;
-      const labelNode = el.primaryDownloadLabel || btn.querySelector('span') || btn;
-      const originalText = labelNode.textContent || 'Download CASA for Windows';
-      btn.setAttribute('aria-disabled', 'true');
-      btn.classList.add('is-cooldown');
-      labelNode.textContent = 'Memulai unduhan...';
+    if (btn) {
+      btn.addEventListener('click', (ev) => {
+        revealSmartScreenGuide();
+        if (isCooldown) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          return;
+        }
+        isCooldown = true;
+        const labelNode = el.primaryDownloadLabel || btn.querySelector('span') || btn;
+        const originalText = labelNode.textContent || 'Download CASA for Windows';
+        btn.setAttribute('aria-disabled', 'true');
+        btn.classList.add('is-cooldown');
+        labelNode.textContent = 'Memulai unduhan...';
 
-      if (timerId) window.clearTimeout(timerId);
-      timerId = window.setTimeout(() => {
-        isCooldown = false;
-        timerId = null;
-        btn.removeAttribute('aria-disabled');
-        btn.classList.remove('is-cooldown');
-        labelNode.textContent = originalText;
-      }, DL_COOLDOWN_MS);
+        if (timerId) window.clearTimeout(timerId);
+        timerId = window.setTimeout(() => {
+          isCooldown = false;
+          timerId = null;
+          btn.removeAttribute('aria-disabled');
+          btn.classList.remove('is-cooldown');
+          labelNode.textContent = originalText;
+        }, DL_COOLDOWN_MS);
+      });
+    }
+
+    document.addEventListener('click', (ev) => {
+      const target = ev.target instanceof Element ? ev.target.closest('a[href]') : null;
+      if (!target) return;
+      const href = target.getAttribute('href') || '';
+      if (/\.(exe|msi)(\?.*)?$/i.test(href)) {
+        revealSmartScreenGuide();
+      }
     });
   }
 
@@ -2753,13 +2772,13 @@
       let exeSize = null;
       let exeVersion = null;
       if (v2Release && Array.isArray(v2Release.assets)) {
-        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.3.1';
+        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.3.2';
         const exeAsset = v2Release.assets.find(
           (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
         );
         if (exeAsset && isSafeGitHubUrl(exeAsset.browser_download_url)) {
           exeUrl = exeAsset.browser_download_url;
-          exeSize = formatMegabytes(exeAsset.size) || '4.66 MB';
+          exeSize = formatMegabytes(exeAsset.size) || '4.67 MB';
         }
       }
 
@@ -2778,7 +2797,7 @@
         );
       } catch (_err) {}
     } catch (_err) {
-      // Keep static v2.3.1 fallback link & hide download count gracefully when offline/rate-limited
+      // Keep static v2.3.2 fallback link & hide download count gracefully when offline/rate-limited
     }
   }
 

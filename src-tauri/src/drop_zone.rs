@@ -1,6 +1,5 @@
 use base64::Engine;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::Manager;
 
@@ -14,6 +13,52 @@ fn ephemeral_transit_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .join("drop_zone_transit"))
 }
 
+pub fn is_windows_reserved_device_name(name: &str) -> bool {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let stem = trimmed
+        .split('.')
+        .next()
+        .unwrap_or(trimmed)
+        .trim_end_matches(|c: char| c == ' ' || c == '.');
+    let upper = stem.to_ascii_uppercase();
+    matches!(
+        upper.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM0"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT0"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+            | "COM\u{00B9}"
+            | "COM\u{00B2}"
+            | "COM\u{00B3}"
+            | "LPT\u{00B9}"
+            | "LPT\u{00B2}"
+            | "LPT\u{00B3}"
+    )
+}
+
 pub fn sanitize_transit_filename(raw: &str) -> String {
     let segment = raw
         .split(['/', '\\'])
@@ -24,6 +69,7 @@ pub fn sanitize_transit_filename(raw: &str) -> String {
     if segment.is_empty() || segment == "." || segment == ".." {
         return "dropped-file.bin".to_string();
     }
+    let reserved_raw = is_windows_reserved_device_name(segment);
 
     let mut clean: String = segment
         .chars()
@@ -46,6 +92,9 @@ pub fn sanitize_transit_filename(raw: &str) -> String {
     }
 
     let mut result = trimmed.to_string();
+    if reserved_raw || is_windows_reserved_device_name(&result) {
+        result = format!("_{}", result);
+    }
     if result.len() > 96 {
         if let Some(dot_idx) = result.rfind('.') {
             let ext = &result[dot_idx..];
@@ -73,6 +122,7 @@ pub fn sanitize_directory_name(raw: &str) -> String {
     if segment.is_empty() || segment == "." || segment == ".." {
         return "Dropped Folder".to_string();
     }
+    let reserved_raw = is_windows_reserved_device_name(segment);
 
     let mut clean: String = segment
         .chars()
@@ -95,6 +145,9 @@ pub fn sanitize_directory_name(raw: &str) -> String {
     }
 
     let mut result = trimmed.to_string();
+    if reserved_raw || is_windows_reserved_device_name(&result) {
+        result = format!("_{}", result);
+    }
     if result.len() > 80 {
         result.truncate(80);
     }
@@ -304,12 +357,101 @@ pub struct FileMetadata {
     pub file_count: Option<u32>,
 }
 
-pub(crate) fn allow_path_in_asset_scope(app: &tauri::AppHandle, path: &Path) {
-    if path.is_file() {
-        let _ = app.asset_protocol_scope().allow_file(path);
-    } else if path.is_dir() {
-        let _ = app.asset_protocol_scope().allow_directory(path, true);
+fn normalize_path_for_policy_check(path: &Path) -> String {
+    let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let s = resolved.to_string_lossy().replace('/', "\\");
+    let stripped = if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{}", rest)
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        s
+    };
+    stripped.trim_end_matches('\\').to_ascii_lowercase()
+}
+
+pub fn is_blocked_asset_scope_path(path: &Path) -> bool {
+    let norm = normalize_path_for_policy_check(path);
+    if norm.is_empty() || norm.starts_with(r"\\") {
+        return true;
     }
+
+    // Reject drive roots (e.g. "c:" or "/")
+    let check_path = Path::new(&norm);
+    if check_path.parent().is_none() || (norm.len() == 2 && norm.ends_with(':')) {
+        return true;
+    }
+
+    for env_key in ["USERPROFILE", "APPDATA", "LOCALAPPDATA"] {
+        if let Some(val) = std::env::var_os(env_key) {
+            let env_norm = normalize_path_for_policy_check(Path::new(&val));
+            if !env_norm.is_empty() && norm == env_norm {
+                return true;
+            }
+        }
+    }
+
+    for dir_env in ["SystemRoot", "ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(val) = std::env::var_os(dir_env) {
+            let env_norm = normalize_path_for_policy_check(Path::new(&val));
+            if !env_norm.is_empty()
+                && (norm == env_norm || norm.starts_with(&format!("{}\\", env_norm)))
+            {
+                return true;
+            }
+        }
+    }
+
+    for segment in norm.split('\\') {
+        if matches!(
+            segment,
+            ".ssh" | ".gnupg" | ".aws" | ".kube" | ".git-credentials" | "ntuser.dat"
+        ) {
+            return true;
+        }
+    }
+
+    false
+}
+
+pub fn is_previewable_asset_file(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    matches!(
+        ext.as_str(),
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "webp"
+            | "bmp"
+            | "svg"
+            | "ico"
+            | "avif"
+            | "mp3"
+            | "wav"
+            | "flac"
+            | "ogg"
+            | "m4a"
+            | "aac"
+            | "opus"
+            | "mp4"
+            | "webm"
+            | "mov"
+    )
+}
+
+pub(crate) fn allow_path_in_asset_scope(app: &tauri::AppHandle, path: &Path) {
+    if is_blocked_asset_scope_path(path) || !is_previewable_asset_file(path) {
+        return;
+    }
+    let _ = app.asset_protocol_scope().allow_file(path);
 }
 
 pub fn count_directory_files(dir: &Path, limit: u32) -> u32 {
@@ -1599,8 +1741,64 @@ pub async fn pick_drop_zone_folder(app: tauri::AppHandle) -> Result<Vec<String>,
     }
 }
 
-/// Meluncurkan / membuka berkas langsung dengan ShellExecuteW tanpa melalui cmd.exe
-/// Mencegah dialog peringatan Windows Photos ("Is this file from a trusted source?")
+fn resolve_verified_local_path(raw: &str) -> Result<(PathBuf, String), String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("Jalur berkas kosong".to_string());
+    }
+    let canon = std::fs::canonicalize(Path::new(trimmed))
+        .map_err(|_| "Berkas atau folder tidak ditemukan di disk".to_string())?;
+    let s = canon.to_string_lossy().to_string();
+    if s.starts_with(r"\\?\UNC\") || s.starts_with(r"\\") && !s.starts_with(r"\\?\") {
+        return Err("Membuka jalur jaringan UNC diblokir demi keamanan".to_string());
+    }
+    let clean = if let Some(rest) = s.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        s
+    };
+    Ok((canon, clean))
+}
+
+pub fn is_dangerous_executable_extension(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    matches!(
+        ext.as_str(),
+        "exe"
+            | "msi"
+            | "msp"
+            | "bat"
+            | "cmd"
+            | "ps1"
+            | "psm1"
+            | "vbs"
+            | "vbe"
+            | "js"
+            | "jse"
+            | "wsf"
+            | "wsh"
+            | "hta"
+            | "lnk"
+            | "url"
+            | "scr"
+            | "com"
+            | "pif"
+            | "reg"
+            | "msc"
+            | "cpl"
+            | "jar"
+            | "inf"
+            | "scf"
+            | "sh"
+    )
+}
+
+/// Membuka berkas lokal yang aman melalui ShellExecuteW tanpa CMD/conhost.
+/// Berkas eksekusi/skrip berbahaya dialihkan ke Reveal in Explorer (tidak dieksekusi langsung).
 #[tauri::command]
 pub fn launch_file_item(path: String) -> Result<(), String> {
     #[cfg(windows)]
@@ -1610,8 +1808,19 @@ pub fn launch_file_item(path: String) -> Result<(), String> {
         use windows_sys::Win32::UI::Shell::ShellExecuteW;
         use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-        let wide_path: Vec<u16> = OsStr::new(&path).encode_wide().chain(std::iter::once(0)).collect();
-        let wide_open: Vec<u16> = OsStr::new("open").encode_wide().chain(std::iter::once(0)).collect();
+        let (canon, clean_path) = resolve_verified_local_path(&path)?;
+        if is_dangerous_executable_extension(&canon) {
+            return reveal_in_folder(clean_path);
+        }
+
+        let wide_path: Vec<u16> = OsStr::new(&clean_path)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let wide_open: Vec<u16> = OsStr::new("open")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
 
         unsafe {
             let res = ShellExecuteW(
@@ -1635,19 +1844,40 @@ pub fn launch_file_item(path: String) -> Result<(), String> {
     }
 }
 
-/// Membuka folder dan menyorot berkas di Windows Explorer (/select,"...")
+/// Membuka folder dan menyorot berkas di Windows Explorer secara in-process lewat Win32 Shell API
+/// (`ILCreateFromPathW` + `SHOpenFolderAndSelectItems`), bebas injeksi argumen CLI.
 #[tauri::command]
 pub fn reveal_in_folder(path: String) -> Result<(), String> {
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
+        use windows::Win32::UI::Shell::{ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems};
 
-        Command::new("explorer")
-            .raw_arg(format!("/select,\"{}\"", path))
-            .spawn()
-            .map_err(|e| format!("Gagal membuka folder: {}", e))?;
+        let (_, clean_path) = resolve_verified_local_path(&path)?;
+        let handle = std::thread::spawn(move || -> Result<(), String> {
+            let _com = crate::security_utils::ComGuard::init_sta()?;
+            let wide_path: Vec<u16> = OsStr::new(&clean_path)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
 
-        Ok(())
+            unsafe {
+                let pidl = ILCreateFromPathW(PCWSTR(wide_path.as_ptr()));
+                if pidl.is_null() {
+                    return Err("Gagal membuat PIDL Windows Shell untuk path tersebut".to_string());
+                }
+                let res = SHOpenFolderAndSelectItems(pidl, None, 0);
+                ILFree(Some(pidl));
+                res.map_err(|e| format!("Gagal membuka Windows Explorer: {}", e))?;
+            }
+            Ok(())
+        });
+
+        handle
+            .join()
+            .map_err(|_| "Thread Windows Explorer berhenti tak terduga".to_string())?
     }
     #[cfg(not(windows))]
     {
@@ -1665,15 +1895,40 @@ pub fn open_file_item(path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn open_url_item(url: String) -> Result<(), String> {
     let trimmed = url.trim();
-    if !trimmed.starts_with("https://") && !trimmed.starts_with("http://") {
-        return Err("Only http:// or https:// URLs are allowed.".to_string());
+    if (!trimmed.starts_with("https://") && !trimmed.starts_with("http://"))
+        || trimmed.chars().any(|c| c.is_control() || c.is_whitespace())
+    {
+        return Err("Only clean http:// or https:// URLs are allowed.".to_string());
     }
     #[cfg(windows)]
     {
-        Command::new("rundll32")
-            .args(["url.dll,FileProtocolHandler", trimmed])
-            .spawn()
-            .map_err(|e| format!("Failed to open URL: {e}"))?;
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+        let wide_url: Vec<u16> = OsStr::new(trimmed)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let wide_open: Vec<u16> = OsStr::new("open")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        unsafe {
+            let res = ShellExecuteW(
+                std::ptr::null_mut(),
+                wide_open.as_ptr(),
+                wide_url.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                SW_SHOWNORMAL as i32,
+            );
+            if (res as usize) <= 32 {
+                return Err(format!("Failed to open URL (code={})", res as usize));
+            }
+        }
         Ok(())
     }
     #[cfg(not(windows))]
@@ -2114,5 +2369,30 @@ mod tests {
         assert_eq!(res.len(), 1);
         assert_eq!(res[0], raw);
         assert!(!res[0].ends_with('\\'));
+    }
+
+    #[test]
+    fn blocks_windows_reserved_device_names_dangerous_execs_and_sensitive_asset_scopes() {
+        assert_eq!(sanitize_transit_filename("CON"), "_CON");
+        assert_eq!(sanitize_transit_filename("con.txt"), "_con.txt");
+        assert_eq!(sanitize_transit_filename("NUL.pdf"), "_NUL.pdf");
+        assert_eq!(sanitize_transit_filename("COM1.bin"), "_COM1.bin");
+        assert_eq!(sanitize_transit_filename("lpt9.jpg"), "_lpt9.jpg");
+        assert_eq!(sanitize_directory_name("AUX"), "_AUX");
+        assert_eq!(sanitize_directory_name("COM3"), "_COM3");
+
+        assert!(is_dangerous_executable_extension(Path::new("installer.exe")));
+        assert!(is_dangerous_executable_extension(Path::new("script.ps1")));
+        assert!(is_dangerous_executable_extension(Path::new("shortcut.lnk")));
+        assert!(!is_dangerous_executable_extension(Path::new("photo.png")));
+        assert!(!is_dangerous_executable_extension(Path::new("report.pdf")));
+
+        assert!(is_blocked_asset_scope_path(Path::new(r"C:\")));
+        assert!(is_blocked_asset_scope_path(Path::new(
+            r"C:\Users\Developer\.ssh\id_rsa"
+        )));
+        assert!(is_blocked_asset_scope_path(Path::new(
+            r"\\evil-server\share\test.png"
+        )));
     }
 }
