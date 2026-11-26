@@ -38,7 +38,7 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 | `v2.3.0` | *Connect HP — Zero-App Local Web Drop* | Server `axum` HTTP+WebSocket sementara, QR token CSPRNG, transfer 2 arah Wi-Fi/Hotspot (`192.168.137.1`), Drag-In & Drag-Out Folder, `+ File`/`+ Folder` native, antrean upload mobile persisten, batch >5 auto-folder, streaming ZIP `STORE`, & auto-shutdown 10m | `[DONE]` |
 | `v2.3.1` | *Hotfix Android & Polish UI* | Persistensi token multi-scan & `sessionStorage` + auto-reconnect, restart sesi bersih, `Content-Length` eksak ZIP `STORE`, warna ring baterai `#22c55e`/petir `#facc15`, & strip peringatan Dropzone >25 MB non-truncate | `[DONE]` |
 | `v2.3.2` | *Security Hardening & SmartScreen Guide* | Middleware Axum auth/body-limit/MOTW Connect HP, pinned SHA-256 `yt-dlp`, OAuth PKCE + DPAPI, Shell/COM hardening, capability split, `SECURITY_BASELINE.md`, & kartu panduan inline SmartScreen web showcase | `[DONE]` |
-| `v2.4.0` | *Quick Calculator & Instant Converter* | Kalkulator ekspresi inline aman di pil, salin hasil 1 klik, serta konversi satuan/kurs ringkas | `[PLANNED]` |
+| `v2.4.0` | *Quick Calculator, Instant Converter, Hybrid 6-Tab Nav & Adaptive Wi-Fi* | Kalkulator 2-kolom keypad aman (`0 eval()`), konverter satuan & kurs real-time 163 negara (`localhost` cache 30m), navigasi 6-tab Hybrid Morphing pil kaca gelap + ikon menyala (`Kontrol` paling kanan), toggle cepat modul, ikon stopwatch Focus, mata Dropzone `◈ ♥`, & Wi-Fi Adaptive Auth/Rollback/802.1X/Captive Portal | `[DONE]` |
 | `v2.5.0` | *Calendar & Smart Reminders* | Jadwal harian lokal, countdown `H-15m`/`T-0` di pil, tombol *snooze* 5 menit | `[PLANNED]` |
 
 ---
@@ -128,17 +128,20 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 
 ---
 
-### `v2.4.0` — Quick Calculator & Instant Converter `[PLANNED]`
-**Tujuan:** Menyediakan kalkulator cepat dan konverter instan langsung di dalam pil CASA tanpa membuka aplikasi terpisah.
+### `v2.4.0` — Quick Calculator, Instant Converter, Hybrid 6-Tab Nav & Adaptive Wi-Fi `[DONE]`
+**Tujuan:** Menyediakan kalkulator cepat & konverter kurs dunia langsung di kapsul `540×186`, memadatkan navigasi 6-tab dengan pil kaca gelap, serta menyempurnakan Wi-Fi Adaptif & sinyal visual companion.
 
-1. **Kalkulator Ekspresi Matematika Inline (`src/features/`, `IdlePillView.tsx` / `CasaIsland.tsx`):**
-   - Evaluator ekspresi matematika murni TypeScript (parser *Shunting-yard* / rekursif **tanpa `eval` / `new Function`** agar bebas celah injeksi & mematuhi `script-src 'self'`).
-   - Dukung operasi aritmetika standar, tanda kurung, pangkat, persen (`+`, `-`, `*`, `/`, `%`, `^`), serta **salin hasil 1 klik** ke clipboard dengan feedback visual adaptif `CASA_THEME_PALETTES`.
+1. **Kalkulator Split 2-Kolom & Konverter Kurs Real-Time 163 Negara (`src/features/calculator/`, `drop_zone.rs`, `system_hardware.rs`):**
+   - Parser matematika rekursif murni TypeScript ([calcParser.ts](../src/features/calculator/calcParser.ts), **tanpa `eval` / `new Function`**) mendukung `+`, `-`, `*` (`×`/`x`/`X`), `/` (`÷`), `^`, tanda kurung, perkalian implisit `2(3+4)`, persentase kontekstual (`100000 + 10% = 110000`), batas panjang/eksponen anti-freeze, tata letak 2-kolom dengan keypad 5×4 (`CalculatorExpandedView.tsx`), serta salin 1-klik lewat Win32 IPC `copy_text_to_clipboard`.
+   - Konverter satuan offline (`unitConverter.ts`: Panjang, Massa, Suhu `°C/°F/K`, Data `B–GiB`, Zona Waktu `WIB/WITA/WIT/UTC`) dan **163 mata uang dunia** (`WORLD_CURRENCY_CATALOG`) lengkap dengan pemilih pencarian instan per kode/negara, cache lokal 30 menit, serta proxy Rust `fetch_exchange_rates` (`danger_accept_invalid_certs(false)`, timeout 8s).
 
-2. **Konversi Satuan & Kurs Ringkas:**
-   - Konversi satuan instan umum (panjang, massa, suhu `°C/°F/K`, ukuran data `KB/MB/GB/MiB`, zona waktu `WIB/WITA/WIT/UTC`) sepenuhnya offline (`0` ketergantungan jaringan).
-   - Dukungan konversi kurs mata uang ringkas dengan preset offline / pembaruan ringan *on-demand* (opsional melalui proxy Rust `reqwest` agar CSP WebView tetap terkunci).
-   - Sinkronisasi simulasi kalkulator & konverter 1:1 ke `docs/`.
+2. **Wi-Fi Adaptive Auth, Auto-Rollback & Captive Portal (`system_hardware.rs`, `Mode6ControlCenterView.tsx`):**
+   - Pemetaan `<WLANProfile>` in-memory untuk `Open`, `WPA`, `WPA2`, `WPA3`, serta pengalihan `802.1X Enterprise` ke `ms-availablenetworks:` (`open_available_wifi_networks`); validasi XML control char & PSK, zero-fill buffer memori pasca-`WlanSetProfile`, serta **auto-rollback `WlanDeleteProfile`** jika koneksi awal gagal (~6s).
+   - Deteksi *on-demand* `ConstrainedInternetAccess` disertai banner `Perlu Login` & tombol `Buka Portal` (`open_captive_portal_browser`).
+
+3. **Hybrid 6-Tab Dark Glass Nav, Focus Timer Icon & Drop Zone `◈ ♥` (`Mode6TopNav.tsx`, `ProductivitySplitView.tsx`, `CasaCompanionAvatar.tsx`, `CasaCompanionEyes.tsx`, `docs/`):**
+   - Urutan tab terkunci dengan `Kontrol` paling kanan (`Musik → Focus → Drop → (Ibadah) → (Calc) → Kontrol`), pil aktif kaca gelap (`rgba(255,255,255,0.08)` + border `0.14`) dengan ikon menyala semantik per modul (`#FFFFFF` penuh di tema `monochrome`), chip toggle cepat `Ibadah` / `Calc` di Control Center, ikon stopwatch `<Timer>` di Focus Timer, serta mata kiri `◈` (`◈ ♥`) pada avatar/resting pill saat Dropzone terisi.
+   - Paritas 1:1 Web Showcase `docs/` (termasuk keypad 2-kolom, pencarian kurs, mata `◈ ♥`, dan portal Wi-Fi) terverifikasi penuh lewat [verify-calculator-v240.mjs](../scripts/verify-calculator-v240.mjs), [verify-docs-showcase.mjs](../scripts/verify-docs-showcase.mjs), dan [verify-reviews-security.mjs](../scripts/verify-reviews-security.mjs). *(Pemaketan installer & kenaikan nomor versi rilis digabungkan pada rilis akhir bersama `v2.5.0`.)*
 
 ---
 

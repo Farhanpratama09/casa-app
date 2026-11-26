@@ -423,6 +423,7 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
       ? prayerStore.activeAlert
       : null;
   const isPrayerAlertVisible = activePrayerAlert !== null;
+  const parkedFileCount = useDropZoneStore((s) => s.items.length);
 
   const companionExpression: CompanionExpression = resolveCompanionExpression({
     isPrayerAlert: isPrayerAlertVisible,
@@ -430,6 +431,7 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
     isTimerRunning: isTimerActive && !isTimerPaused,
     isPlaying,
     keepAwake: isKeepAwake,
+    hasDropItems: parkedFileCount > 0,
     hasBattery: hasLaptopBattery,
     batteryLevel: laptopBatteryPct,
     isCharging: laptopBatteryCharging,
@@ -516,7 +518,6 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
 
   const timerText = formatDurationClock(timerRemaining);
   const showLyricFocus = Boolean(isIdleLyricsEnabled && activeLyricText);
-  const parkedFileCount = useDropZoneStore((s) => s.items.length);
   const dropZoneIdleBadge =
     parkedFileCount > 0 ? (
       <>
@@ -1036,7 +1037,8 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
               </>
             ) : (
               <Timer
-                className="w-3.5 h-3.5 shrink-0"
+                data-focus-timer-icon="true"
+                className={`w-3.5 h-3.5 shrink-0 ${isTimerPaused ? 'opacity-65' : 'animate-pulse'}`}
                 style={{
                   color:
                     timerState?.mode === 'rest'
@@ -1189,7 +1191,8 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
               </>
             ) : (
               <Timer
-                className="w-3.5 h-3.5 shrink-0"
+                data-focus-timer-icon="true"
+                className={`w-3.5 h-3.5 shrink-0 ${isTimerPaused ? 'opacity-65' : 'animate-pulse'}`}
                 style={{
                   color:
                     timerState?.mode === 'rest'

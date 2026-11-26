@@ -12,6 +12,12 @@ import {
   ArrowBigUpDash,
   Bluetooth,
   Headphones,
+  Music2,
+  Timer,
+  SlidersHorizontal,
+  FolderDown,
+  MoonStar,
+  Calculator,
 } from 'lucide-react';
 import { IslandMode } from '../../types/island';
 import { playChimeCue } from '../../utils/tauriBridge';
@@ -36,21 +42,67 @@ export interface Mode6TopNavProps {
   isPeekPreview?: boolean;
 }
 
-const BASE_NAV_TABS: Array<{ id: IslandMode; label: string; matchModes: IslandMode[] }> = [
-  { id: 'expanded_music', label: 'Musik', matchModes: ['expanded_music'] },
+interface NavTabSpec {
+  id: IslandMode;
+  label: string;
+  shortLabel: string;
+  matchModes: IslandMode[];
+  icon: React.ComponentType<{ className?: string }>;
+  activeIconColor: string;
+}
+
+const CORE_LEFT_TABS: NavTabSpec[] = [
+  {
+    id: 'expanded_music',
+    label: 'Musik',
+    shortLabel: 'Musik',
+    matchModes: ['expanded_music'],
+    icon: Music2,
+    activeIconColor: '#FFFFFF',
+  },
   {
     id: 'expanded_timer',
     label: 'Focus & Tasks',
+    shortLabel: 'Focus',
     matchModes: ['expanded_timer', 'expanded_todo'],
+    icon: Timer,
+    activeIconColor: '#FACC15',
   },
-  { id: 'expanded_control', label: 'Control Center', matchModes: ['expanded_control'] },
-  { id: 'drop_zone', label: 'Drop Zone', matchModes: ['drop_zone'] },
+  {
+    id: 'drop_zone',
+    label: 'Drop Zone',
+    shortLabel: 'Drop',
+    matchModes: ['drop_zone'],
+    icon: FolderDown,
+    activeIconColor: '#38BDF8',
+  },
 ];
 
-const IBADAH_NAV_TAB: { id: IslandMode; label: string; matchModes: IslandMode[] } = {
+const IBADAH_NAV_TAB: NavTabSpec = {
   id: 'expanded_ibadah',
   label: 'Ibadah',
+  shortLabel: 'Ibadah',
   matchModes: ['expanded_ibadah'],
+  icon: MoonStar,
+  activeIconColor: '#10B981',
+};
+
+const CALCULATOR_NAV_TAB: NavTabSpec = {
+  id: 'expanded_calculator',
+  label: 'Kalkulator & Konverter',
+  shortLabel: 'Calc',
+  matchModes: ['expanded_calculator'],
+  icon: Calculator,
+  activeIconColor: '#FB923C',
+};
+
+const CONTROL_NAV_TAB: NavTabSpec = {
+  id: 'expanded_control',
+  label: 'Control Center',
+  shortLabel: 'Kontrol',
+  matchModes: ['expanded_control'],
+  icon: SlidersHorizontal,
+  activeIconColor: '#A78BFA',
 };
 
 const renderHudIcon = (alert: SystemHudAlert) => {
@@ -135,10 +187,14 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
       ? null
       : rawHudAlert;
 
-  const navTabs = settings.ibadah.enabled
-    ? [...BASE_NAV_TABS, IBADAH_NAV_TAB]
-    : BASE_NAV_TABS;
-  const isCompactFiveTab = navTabs.length >= 5;
+  const isMonochrome = settings.theme === 'monochrome';
+
+  const navTabs: NavTabSpec[] = [
+    ...CORE_LEFT_TABS,
+    ...(settings.ibadah.enabled ? [IBADAH_NAV_TAB] : []),
+    ...(settings.calculatorEnabled ? [CALCULATOR_NAV_TAB] : []),
+    CONTROL_NAV_TAB,
+  ];
 
   return (
     <header
@@ -173,7 +229,7 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
         </button>
       </div>
 
-      {/* Tengah: Bar Navigasi Kapsul Gelap atau Transient System HUD Badge */}
+      {/* Tengah: Bar Navigasi Kapsul Gelap (Hybrid Morphing: Aktif [Ikon + Nama], Nonaktif [Ikon + Tooltip]) */}
       <div className="relative flex-1 flex items-center justify-center min-w-0">
         <AnimatePresence mode="wait" initial={false}>
           {hudAlert ? (
@@ -210,42 +266,69 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
               exit={{ opacity: 0 }}
               transition={{ duration: 0.12 }}
               aria-label="Navigasi Modul Mode 6"
+              data-hybrid-nav="true"
               className="flex items-center gap-0.5 p-[2.5px] rounded-full bg-[#0b0b0d] border border-white/[0.08] max-w-full"
             >
               {navTabs.map((tab) => {
                 const isActive = tab.matchModes.includes(currentMode);
+                const TabIcon = tab.icon;
+                const activeIconColor = isMonochrome ? '#FFFFFF' : tab.activeIconColor;
                 return (
                   <button
                     key={tab.id}
                     type="button"
+                    data-nav-tab={tab.id}
+                    data-active={isActive ? 'true' : 'false'}
+                    title={tab.label}
+                    aria-label={tab.label}
                     onClick={(e) => {
                       e.stopPropagation();
                       playChimeCue('tap');
                       onSelectMode(tab.id);
                     }}
-                    className={`relative rounded-full leading-none tracking-tight transition-colors duration-150 cursor-pointer whitespace-nowrap ${
-                      isCompactFiveTab ? 'px-1.5 py-[3px] text-[9.5px]' : 'px-2 py-[3px] text-[10px]'
-                    } ${
+                    style={isActive ? { color: '#F4F4F5' } : undefined}
+                    className={`relative rounded-full leading-none tracking-tight transition-all duration-150 cursor-pointer whitespace-nowrap flex items-center justify-center ${
                       isActive
-                        ? 'text-white font-semibold'
-                        : 'text-white/50 hover:text-white/85 font-medium'
+                        ? 'px-2.5 py-[4px] text-[10px] font-semibold'
+                        : 'px-[7px] py-[4px] text-[10px] text-white/50 hover:text-white/90 font-medium'
                     }`}
                   >
                     {isActive && (
                       <motion.span
                         layoutId="mode6-nav-active-pill"
                         transition={{ type: 'spring', stiffness: 440, damping: 32, mass: 0.7 }}
-                        className="absolute inset-0 rounded-full bg-white/[0.15] border border-white/[0.12] pointer-events-none"
+                        style={{
+                          backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                          borderColor: 'rgba(255, 255, 255, 0.14)',
+                        }}
+                        className="absolute inset-0 rounded-full border pointer-events-none"
                       />
                     )}
                     <span className="relative z-10 inline-flex items-center gap-1">
-                      <span>{tab.label}</span>
+                      <span
+                        className="inline-flex items-center justify-center shrink-0"
+                        style={
+                          isActive
+                            ? {
+                                color: activeIconColor,
+                                filter: `drop-shadow(0 0 5px ${activeIconColor}88)`,
+                              }
+                            : undefined
+                        }
+                      >
+                        <TabIcon className="w-3 h-3 shrink-0" />
+                      </span>
+                      {isActive ? (
+                        <span>{tab.shortLabel}</span>
+                      ) : null}
+                      {/* Keep full accessible label in DOM for screen readers & E2E text matching without taking layout width */}
+                      <span className="sr-only">{tab.label}</span>
                       {tab.id === 'drop_zone' && dropZoneCount > 0 && (
                         <span
-                          className={`px-1.5 py-[1px] rounded-full text-[8.5px] font-mono leading-none tabular-nums ${
+                          className={`px-1 py-[1px] rounded-full text-[8px] font-mono leading-none tabular-nums ${
                             isActive
-                              ? 'bg-white text-black font-bold'
-                              : 'bg-white/[0.14] text-white/80'
+                              ? 'bg-white/[0.20] text-[#F4F4F5] font-bold'
+                              : 'bg-white/[0.18] text-white/90'
                           }`}
                         >
                           {dropZoneCount}

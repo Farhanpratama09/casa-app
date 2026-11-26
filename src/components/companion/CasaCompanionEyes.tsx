@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import type { CompanionMood } from '../../hooks/useCompanionMood';
 import { useSkillStore } from '../../skills/store';
 import { useQueueStore } from '../../stores/useQueueStore';
+import { useDropZoneStore } from '../../stores/useDropZoneStore';
 
 export interface CasaCompanionEyesProps {
   size?: 'sm' | 'md';
@@ -40,8 +41,19 @@ export const CasaCompanionEyes: React.FC<CasaCompanionEyesProps> = memo(({
       ''
   );
   const queueStoreTrackId = useQueueStore((s) => s.currentTrack?.id || s.currentTrack?.title || '');
+  const dropZoneCount = useDropZoneStore((s) => s.items.length);
+  const hasDropItems = dropZoneCount > 0;
+  const prevDropCountRef = useRef(dropZoneCount);
+  const [dropPopTick, setDropPopTick] = useState(0);
   const effectiveTrackKey = `${blinkTrigger ?? ''}|${mediaSkillTrackTitle}|${queueStoreTrackId}`;
   const prevTrackKeyRef = useRef<string>(effectiveTrackKey);
+
+  useEffect(() => {
+    if (dropZoneCount > prevDropCountRef.current) {
+      setDropPopTick((t) => t + 1);
+    }
+    prevDropCountRef.current = dropZoneCount;
+  }, [dropZoneCount]);
 
   // Detect transition from 'sleep' / 'drowsy' -> 'awake' for wakeup spring micro-bounce
   useEffect(() => {
@@ -142,21 +154,50 @@ export const CasaCompanionEyes: React.FC<CasaCompanionEyesProps> = memo(({
         }
         className={`flex items-center justify-center ${gapClass}`}
       >
-        {/* Mata Kiri: Crisp Pure White × */}
-        <svg viewBox="0 0 18 18" className={`${svgSizeClass} overflow-visible`} aria-hidden="true">
+        {/* Mata Kiri: Crisp Pure White × (or ◈ when Drop Zone has items) */}
+        <svg
+          viewBox="0 0 18 18"
+          data-drop-eye={hasDropItems ? 'true' : 'false'}
+          className={`${svgSizeClass} overflow-visible`}
+          aria-hidden="true"
+        >
           <motion.g
-            initial={false}
-            animate={{ scaleY: targetScaleY }}
-            transition={scaleTransition}
+            key={hasDropItems ? `compact-drop-${dropPopTick}` : 'compact-idle'}
+            initial={hasDropItems ? { scale: 0.6, scaleY: targetScaleY } : false}
+            animate={{ scale: 1, scaleY: targetScaleY }}
+            transition={
+              hasDropItems
+                ? {
+                    scale: { type: 'spring', stiffness: 520, damping: 18 },
+                    scaleY: scaleTransition,
+                  }
+                : scaleTransition
+            }
             style={{ originX: '9px', originY: '9px' }}
           >
-            <path
-              d="M 3.5,3.5 L 14.5,14.5 M 14.5,3.5 L 3.5,14.5"
-              fill="none"
-              stroke="#ffffff"
-              strokeWidth="2.4"
-              strokeLinecap="round"
-            />
+            {hasDropItems ? (
+              <>
+                <path
+                  d="M 9,2.2 L 15.8,9 L 9,15.8 L 2.2,9 Z"
+                  fill="none"
+                  stroke="#ffffff"
+                  strokeWidth="2.0"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M 9,6.0 L 12.0,9 L 9,12.0 L 6.0,9 Z"
+                  fill="#ffffff"
+                />
+              </>
+            ) : (
+              <path
+                d="M 3.5,3.5 L 14.5,14.5 M 14.5,3.5 L 3.5,14.5"
+                fill="none"
+                stroke="#ffffff"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+              />
+            )}
           </motion.g>
         </svg>
 

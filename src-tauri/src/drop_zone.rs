@@ -658,6 +658,15 @@ pub fn write_clipboard_text(text: &str) -> Result<(), String> {
     }
 }
 
+/// IPC command untuk menyalin teks singkat (mis. hasil kalkulator) ke clipboard Windows via `write_clipboard_text`.
+#[tauri::command]
+pub fn copy_text_to_clipboard(text: String) -> Result<(), String> {
+    if text.is_empty() || text.len() > 64 * 1024 {
+        return Err("Teks clipboard tidak valid atau terlalu panjang.".to_string());
+    }
+    write_clipboard_text(&text)
+}
+
 /// Membaca daftar path berkas (CF_HDROP) jika pengguna menyalin file via Ctrl+C di File Explorer.
 #[tauri::command]
 pub fn read_clipboard_files() -> Result<Vec<String>, String> {

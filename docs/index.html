@@ -216,7 +216,7 @@
                     <div class="vm-idle-layer" id="vm-idle-layer">
                       <!-- Compact × ♥ Capsule (Intro finish + Resting & Wake sleep/awake without flattening!) -->
                       <div class="casa-compact-eyes-pill" id="casa-resting-pill" data-sleep="false">
-                        <svg viewBox="0 0 18 18" class="casa-compact-eye" aria-hidden="true">
+                        <svg id="vm-resting-left-eye" viewBox="0 0 18 18" class="casa-compact-eye" aria-hidden="true">
                           <path
                             d="M 3.5,3.5 L 14.5,14.5 M 14.5,3.5 L 3.5,14.5"
                             fill="none"
@@ -353,15 +353,32 @@
                           </button>
                         </div>
 
-                        <nav class="casa-m6-nav" aria-label="Mode 6 Navigation">
-                          <button type="button" class="casa-m6-tab" data-m6-tab="music" aria-selected="false">Musik</button>
-                          <button type="button" class="casa-m6-tab" data-m6-tab="todo" aria-selected="false">Focus &amp; Tasks</button>
-                          <button type="button" class="casa-m6-tab" data-m6-tab="hud" aria-selected="false">Control Center</button>
-                          <button type="button" class="casa-m6-tab" data-m6-tab="dropzone" aria-selected="false">
-                            <span>Drop Zone</span>
+                        <nav class="casa-m6-nav" data-hybrid-nav="true" aria-label="Mode 6 Navigation">
+                          <button type="button" class="casa-m6-tab" data-m6-tab="music" aria-selected="false" title="Musik">
+                            <svg class="casa-m6-tab-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                            <span class="casa-m6-tab-label">Musik</span>
+                          </button>
+                          <button type="button" class="casa-m6-tab" data-m6-tab="todo" aria-selected="false" title="Focus &amp; Tasks">
+                            <svg class="casa-m6-tab-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" y1="2" x2="14" y2="2"/><line x1="12" y1="14" x2="15" y2="11"/><circle cx="12" cy="14" r="8"/></svg>
+                            <span class="casa-m6-tab-label">Focus</span>
+                          </button>
+                          <button type="button" class="casa-m6-tab" data-m6-tab="dropzone" aria-selected="false" title="Drop Zone">
+                            <svg class="casa-m6-tab-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+                            <span class="casa-m6-tab-label">Drop</span>
                             <span class="casa-m6-drop-badge tabular" id="vm-m6-drop-badge" hidden>0</span>
                           </button>
-                          <button type="button" class="casa-m6-tab" id="vm-m6-ibadah-tab" data-m6-tab="ibadah" aria-selected="false" hidden>Ibadah</button>
+                          <button type="button" class="casa-m6-tab" id="vm-m6-ibadah-tab" data-m6-tab="ibadah" aria-selected="false" title="Ibadah" hidden>
+                            <svg class="casa-m6-tab-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+                            <span class="casa-m6-tab-label">Ibadah</span>
+                          </button>
+                          <button type="button" class="casa-m6-tab" id="vm-m6-calc-tab" data-m6-tab="calc" aria-selected="false" title="Kalkulator &amp; Konverter">
+                            <svg class="casa-m6-tab-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="11" x2="8.01" y2="11"/><line x1="12" y1="11" x2="12.01" y2="11"/><line x1="16" y1="11" x2="16.01" y2="11"/><line x1="8" y1="15" x2="8.01" y2="15"/><line x1="12" y1="15" x2="12.01" y2="15"/><line x1="16" y1="15" x2="16.01" y2="15"/></svg>
+                            <span class="casa-m6-tab-label">Calc</span>
+                          </button>
+                          <button type="button" class="casa-m6-tab" data-m6-tab="hud" aria-selected="false" title="Control Center">
+                            <svg class="casa-m6-tab-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="21" y1="4" x2="14" y2="4"/><line x1="10" y1="4" x2="3" y2="4"/><line x1="21" y1="12" x2="12" y2="12"/><line x1="8" y1="12" x2="3" y2="12"/><line x1="21" y1="20" x2="16" y2="20"/><line x1="12" y1="20" x2="3" y2="20"/></svg>
+                            <span class="casa-m6-tab-label">Kontrol</span>
+                          </button>
                         </nav>
 
                         <div class="casa-m6-head-right">
@@ -541,7 +558,14 @@
                         <div class="casa-m6-panel casa-m6-focus" id="vm-exp-focus" hidden>
                           <div class="casa-prod-left">
                             <div class="casa-prod-head">
-                              <span class="casa-prod-title" id="vm-exp-focus-task-head">Focus Timer</span>
+                              <span class="casa-prod-title-wrap">
+                                <svg id="vm-focus-timer-ico" class="casa-focus-timer-ico running" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                  <line x1="10" y1="2" x2="14" y2="2" />
+                                  <line x1="12" y1="14" x2="15" y2="11" />
+                                  <circle cx="12" cy="14" r="8" />
+                                </svg>
+                                <span class="casa-prod-title" id="vm-exp-focus-task-head">Focus Timer</span>
+                              </span>
                               <span class="casa-prod-pct tabular" id="vm-exp-focus-ends">25% · 18:45</span>
                             </div>
                             <div class="casa-prod-body">
@@ -589,13 +613,21 @@
                           </div>
                         </div>
 
-                        <!-- Panel C: Control Center (Tiles + CPU/RAM + Interactive Volume & Brightness Sliders) -->
+                        <!-- Panel C: Control Center (Quick Module Toggles + Wi-Fi Adaptive Drawer + CPU/RAM + Sliders) -->
                         <div class="casa-m6-panel casa-m6-control" id="vm-exp-control" hidden>
-                          <div class="casa-cc-tiles">
-                            <div class="casa-cc-tile">
-                              <span class="casa-cc-label">Wi-Fi</span>
-                              <span class="casa-cc-sub">Studio_5G</span>
+                          <div class="casa-cc-head-bar">
+                            <span class="casa-cc-head-title">Control</span>
+                            <div class="casa-cc-module-chips">
+                              <button type="button" id="vm-cc-toggle-ibadah" class="casa-cc-chip" aria-pressed="false" title="Toggle tab modul Ibadah">Ibadah</button>
+                              <button type="button" id="vm-cc-toggle-calc" class="casa-cc-chip active" aria-pressed="true" title="Toggle tab modul Calc">Calc</button>
                             </div>
+                          </div>
+
+                          <div class="casa-cc-tiles">
+                            <button type="button" id="vm-cc-wifi-btn" class="casa-cc-tile active" title="Buka daftar Wi-Fi adaptif (Password / Enterprise / Portal)">
+                              <span class="casa-cc-label">Wi-Fi</span>
+                              <span class="casa-cc-sub" id="vm-cc-wifi-sub">Studio_5G</span>
+                            </button>
                             <button type="button" id="vm-cc-bt-btn" class="casa-cc-tile active">
                               <span class="casa-cc-label">BT</span>
                               <span class="casa-cc-sub" id="vm-cc-bt-sub">Earphone · 85%</span>
@@ -608,6 +640,40 @@
                               <span class="casa-cc-label">Sleep</span>
                               <span class="casa-cc-sub">Mode Resting</span>
                             </button>
+                          </div>
+
+                          <!-- Inline Wi-Fi Adaptive Simulator Drawer (Password / 802.1X Enterprise / Captive Portal) -->
+                          <div class="casa-cc-wifi-drawer" id="vm-cc-wifi-drawer" hidden>
+                            <div class="casa-cc-wifi-head">
+                              <span>Wi-Fi Networks (Adaptive WPA2/WPA3/802.1X)</span>
+                              <div class="casa-cc-wifi-head-actions">
+                                <button type="button" id="vm-cc-portal-sim-btn" class="casa-cc-mini-btn">Sim Portal</button>
+                                <button type="button" id="vm-cc-wifi-close-btn" class="casa-cc-mini-btn" aria-label="Tutup Wi-Fi">×</button>
+                              </div>
+                            </div>
+                            <div class="casa-cc-portal-bar" id="vm-cc-portal-bar" hidden>
+                              <span>Perlu Login (ConstrainedInternetAccess)</span>
+                              <button type="button" id="vm-cc-portal-open-btn" class="casa-cc-mini-btn primary">Buka Portal</button>
+                            </div>
+                            <div class="casa-cc-wifi-list" id="vm-cc-wifi-list">
+                              <div class="casa-cc-wifi-row">
+                                <span>Studio_5G <em class="casa-cc-auth-tag">WPA3</em></span>
+                                <span class="casa-cc-wifi-status" id="vm-wifi-status-studio">Active</span>
+                              </div>
+                              <div class="casa-cc-wifi-row">
+                                <span>CoffeeShop_Guest <em class="casa-cc-auth-tag">WPA2</em></span>
+                                <button type="button" id="vm-wifi-pwd-toggle" class="casa-cc-mini-btn primary">Connect</button>
+                              </div>
+                              <form class="casa-cc-wifi-pwd-form" id="vm-wifi-pwd-form" hidden>
+                                <input type="password" id="vm-wifi-pwd-input" minlength="8" maxlength="64" placeholder="Password (8-63 char)..." aria-label="Password Wi-Fi simulasi" />
+                                <button type="submit" class="casa-cc-mini-btn primary">Join</button>
+                              </form>
+                              <div class="casa-cc-wifi-row">
+                                <span>Campus_Eduroam <em class="casa-cc-auth-tag">Enterprise</em></span>
+                                <button type="button" id="vm-wifi-ent-btn" class="casa-cc-mini-btn">802.1X ↗</button>
+                              </div>
+                            </div>
+                            <div class="casa-cc-wifi-note" id="vm-cc-wifi-note" hidden></div>
                           </div>
 
                           <div class="casa-cc-telemetry">
@@ -849,6 +915,95 @@
                               <span class="casa-ibadah-name">Isya</span>
                               <span class="casa-ibadah-time tabular">18:52</span>
                             </button>
+                          </div>
+                        </div>
+
+                        <!-- Panel F: Quick Calculator Split 2-Col + Searchable Currency Converter (v2.4.0, Zero eval) -->
+                        <div class="casa-m6-panel casa-m6-calc" id="vm-exp-calc" hidden>
+                          <div class="casa-calc-top">
+                            <div class="casa-calc-switch">
+                              <button type="button" class="casa-calc-sub-btn active" data-calc-sub="calc" aria-pressed="true">Kalkulator</button>
+                              <button type="button" class="casa-calc-sub-btn" data-calc-sub="convert" aria-pressed="false">Konverter</button>
+                            </div>
+                            <span class="casa-calc-badge">x → × · Enter salin</span>
+                          </div>
+
+                          <div id="vm-calc-pane" class="casa-calc-split" data-calc-layout="split-2col">
+                            <div class="casa-calc-split-left">
+                              <input
+                                type="text"
+                                id="vm-calc-input"
+                                class="casa-calc-input tabular"
+                                value="100000 + 10%"
+                                maxlength="128"
+                                placeholder="100000 + 10% atau (25 * 4)^2"
+                                aria-label="Ekspresi kalkulator virtual"
+                              />
+                              <div class="casa-calc-result-row">
+                                <div class="casa-calc-result-val tabular" id="vm-calc-result">= 110,000</div>
+                              </div>
+                              <div class="casa-calc-actions-row">
+                                <button type="button" id="vm-calc-clear-btn" class="casa-cc-mini-btn" title="Bersihkan">C</button>
+                                <button type="button" id="vm-calc-copy-btn" class="casa-cc-mini-btn primary casa-calc-copy-wide">Salin</button>
+                              </div>
+                            </div>
+
+                            <div class="casa-calc-keypad" id="vm-calc-keypad" data-calc-keypad="true" role="group" aria-label="Keypad kalkulator">
+                              <button type="button" class="casa-keypad-btn" data-calc-key="7">7</button>
+                              <button type="button" class="casa-keypad-btn" data-calc-key="8">8</button>
+                              <button type="button" class="casa-keypad-btn" data-calc-key="9">9</button>
+                              <button type="button" class="casa-keypad-btn is-op" data-calc-key="/">÷</button>
+                              <button type="button" class="casa-keypad-btn is-op" data-calc-key="backspace" aria-label="Hapus mundur">⌫</button>
+
+                              <button type="button" class="casa-keypad-btn" data-calc-key="4">4</button>
+                              <button type="button" class="casa-keypad-btn" data-calc-key="5">5</button>
+                              <button type="button" class="casa-keypad-btn" data-calc-key="6">6</button>
+                              <button type="button" class="casa-keypad-btn is-op" data-calc-key="*">×</button>
+                              <button type="button" class="casa-keypad-btn is-op" data-calc-key="(">(</button>
+
+                              <button type="button" class="casa-keypad-btn" data-calc-key="1">1</button>
+                              <button type="button" class="casa-keypad-btn" data-calc-key="2">2</button>
+                              <button type="button" class="casa-keypad-btn" data-calc-key="3">3</button>
+                              <button type="button" class="casa-keypad-btn is-op" data-calc-key="-">−</button>
+                              <button type="button" class="casa-keypad-btn is-op" data-calc-key=")">)</button>
+
+                              <button type="button" class="casa-keypad-btn" data-calc-key="0">0</button>
+                              <button type="button" class="casa-keypad-btn" data-calc-key=".">.</button>
+                              <button type="button" class="casa-keypad-btn is-op" data-calc-key="%">%</button>
+                              <button type="button" class="casa-keypad-btn is-op" data-calc-key="+">+</button>
+                              <button type="button" class="casa-keypad-btn is-op" data-calc-key="^">^</button>
+                            </div>
+                          </div>
+
+                          <div id="vm-conv-pane" class="casa-calc-body" hidden>
+                            <div class="casa-conv-search-row" id="vm-conv-search-row">
+                              <input
+                                type="search"
+                                id="vm-conv-currency-search"
+                                class="casa-conv-search-input"
+                                placeholder="Cari mata uang / negara (USD, IDR, Arab Saudi, Korea...)"
+                                aria-label="Cari mata uang atau negara"
+                              />
+                              <span class="casa-conv-fx-badge tabular" id="vm-conv-fx-status">Offline Cache</span>
+                            </div>
+                            <div class="casa-conv-row">
+                              <select id="vm-conv-cat" class="casa-conv-select" aria-label="Kategori konverter">
+                                <option value="currency">Kurs</option>
+                                <option value="length">Panjang</option>
+                                <option value="mass">Massa</option>
+                                <option value="temperature">Suhu</option>
+                                <option value="data">Data</option>
+                                <option value="timezone">Waktu</option>
+                              </select>
+                              <input type="text" id="vm-conv-input" class="casa-conv-input tabular" value="10" maxlength="24" aria-label="Nilai konversi virtual" />
+                              <select id="vm-conv-from" class="casa-conv-select" aria-label="Satuan asal"></select>
+                              <button type="button" id="vm-conv-swap-btn" class="casa-cc-mini-btn" title="Tukar satuan">⇄</button>
+                              <select id="vm-conv-to" class="casa-conv-select" aria-label="Satuan tujuan"></select>
+                            </div>
+                            <div class="casa-calc-result-row">
+                              <div class="casa-calc-result-val tabular" id="vm-conv-result">162,500 IDR</div>
+                              <button type="button" id="vm-conv-copy-btn" class="casa-cc-mini-btn primary">Salin</button>
+                            </div>
                           </div>
                         </div>
                       </div>

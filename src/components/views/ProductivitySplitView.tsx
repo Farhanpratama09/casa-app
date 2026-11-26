@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { Play, Pause, RotateCcw, Check, Plus, X, Pin, Clock, BellRing } from 'lucide-react';
+import { Play, Pause, RotateCcw, Check, Plus, X, Pin, Clock, BellRing, Timer } from 'lucide-react';
 import { TimerState, TodoItem } from '../../types/island';
 import { playChimeCue, focusIslandWindow } from '../../utils/tauriBridge';
 import { unlockAlarmAudio } from '../../utils/alarmChime';
@@ -218,20 +218,26 @@ export const ProductivitySplitView: React.FC<ProductivitySplitViewProps> = ({
         {/* Top Row: Pure Timer vs Explicitly Focused Task + Finish Time */}
         <div className="flex items-center justify-between gap-2 h-4 shrink-0">
           <div className="flex items-center gap-1.5 min-w-0">
-            <span
+            <Timer
+              data-focus-timer-icon="true"
+              data-timer-state={isRunning ? 'running' : timer.isPaused ? 'paused' : 'idle'}
               style={{
-                backgroundColor:
+                color:
                   timer.mode === 'rest'
                     ? 'var(--casa-rest, #10B981)'
                     : 'var(--casa-timer, #F59E0B)',
-                boxShadow: isRunning
-                  ? '0 0 6px var(--casa-timer-glow, rgba(245,158,11,0.65))'
+                filter: isRunning
+                  ? 'drop-shadow(0 0 4px var(--casa-timer-glow, rgba(245,158,11,0.55)))'
                   : undefined,
-                opacity: isRunning ? 1 : timer.isActive ? 0.85 : 0.7,
               }}
-              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                isRunning ? 'animate-pulse' : ''
+              className={`w-3 h-3 shrink-0 transition-opacity duration-200 ${
+                isRunning
+                  ? 'opacity-100 animate-pulse'
+                  : timer.isPaused
+                  ? 'opacity-45'
+                  : 'opacity-65'
               }`}
+              aria-hidden="true"
             />
             <span className="text-[10px] font-medium text-white/65 truncate">
               {activeFocusTask

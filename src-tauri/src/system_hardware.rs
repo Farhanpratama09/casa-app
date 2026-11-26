@@ -865,6 +865,19 @@ pub struct WifiNetworkItem {
     pub is_secured: bool,
     pub is_connected: bool,
     pub has_profile: bool,
+    pub auth_label: String,
+    pub cipher_label: String,
+    pub is_enterprise: bool,
+    pub is_captive_portal: bool,
+    pub internet_connectivity: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExchangeRatesResponse {
+    pub base: String,
+    pub rates: std::collections::HashMap<String, f64>,
+    pub updated_at: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -897,8 +910,11 @@ fn wide_buf_to_string(buf: &[u16]) -> String {
     String::from_utf16_lossy(&buf[..end]).trim().to_string()
 }
 
-#[cfg(windows)]
-fn xml_escape(input: &str) -> String {
+pub fn has_forbidden_xml_control_chars(input: &str) -> bool {
+    input.chars().any(|c| c == '\0' || c.is_control())
+}
+
+pub fn xml_escape(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for ch in input.chars() {
         match ch {
@@ -907,10 +923,131 @@ fn xml_escape(input: &str) -> String {
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
             '\'' => out.push_str("&apos;"),
+            c if c == '\0' || c.is_control() => {}
             _ => out.push(ch),
         }
     }
     out
+}
+
+pub fn classify_dot11_auth(raw_algo: i32, security_enabled: bool) -> (&'static str, bool) {
+    if !security_enabled {
+        return ("Open", false);
+    }
+    match raw_algo {
+        1 | 11 => ("Open", false),                 // OPEN | OWE
+        2 => ("WEP", false),                       // SHARED_KEY
+        3 | 6 | 8 | 10 => ("Enterprise", true),    // WPA | RSNA | WPA3_ENT_192 | WPA3_ENT
+        4 => ("WPA", false),                       // WPA_PSK
+        7 => ("WPA2", false),                      // RSNA_PSK
+        9 => ("WPA3", false),                      // WPA3_SAE
+        _ => ("WPA2", false),
+    }
+}
+
+pub fn classify_dot11_cipher(raw_cipher: i32, security_enabled: bool) -> &'static str {
+    if !security_enabled {
+        return "None";
+    }
+    match raw_cipher {
+        0x00 => "None",
+        0x02 => "TKIP",
+        0x04 => "AES",
+        0x08 | 0x09 => "GCMP",
+        0x01 | 0x05 | 0x101 => "WEP",
+        _ => "AES",
+    }
+}
+
+pub fn validate_wifi_ssid(ssid: &str) -> Result<String, String> {
+    let clean = ssid.trim();
+    if clean.is_empty() {
+        return Err("SSID Wi-Fi tidak boleh kosong.".to_string());
+    }
+    if clean.len() > 32 {
+        return Err("SSID Wi-Fi melebihi batas maksimum 32 byte.".to_string());
+    }
+    if has_forbidden_xml_control_chars(clean) {
+        return Err("SSID Wi-Fi mengandung karakter kontrol yang tidak diizinkan.".to_string());
+    }
+    Ok(clean.to_string())
+}
+
+pub fn validate_wifi_passphrase(passphrase: &str) -> Result<bool, String> {
+    if has_forbidden_xml_control_chars(passphrase) {
+        return Err("Password Wi-Fi mengandung karakter kontrol yang tidak valid.".to_string());
+    }
+    let len = passphrase.len();
+    if len == 64 && passphrase.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Ok(true); // 64-char hex raw networkKey
+    }
+    if !(8..=63).contains(&len) {
+        return Err("Password Wi-Fi harus 8–63 karakter (atau 64 karakter hex).".to_string());
+    }
+    if !passphrase.bytes().all(|b| (0x20..=0x7E).contains(&b)) {
+        return Err("Password Wi-Fi harus menggunakan karakter ASCII standar.".to_string());
+    }
+    Ok(false)
+}
+
+pub fn build_wlan_profile_xml(
+    ssid: &str,
+    auth_label: &str,
+    cipher_label: &str,
+    passphrase: Option<&str>,
+) -> Result<String, String> {
+    let clean_ssid = validate_wifi_ssid(ssid)?;
+    if auth_label == "Enterprise" {
+        return Err("Jaringan Enterprise (802.1X) memerlukan dialog login Windows.".to_string());
+    }
+    let escaped_ssid = xml_escape(&clean_ssid);
+
+    if auth_label == "Open" {
+        return Ok(format!(
+            "<?xml version=\"1.0\"?>\
+<WLANProfile xmlns=\"http://www.microsoft.com/networking/WLAN/profile/v1\">\
+<name>{escaped_ssid}</name>\
+<SSIDConfig><SSID><name>{escaped_ssid}</name></SSID></SSIDConfig>\
+<connectionType>ESS</connectionType>\
+<connectionMode>manual</connectionMode>\
+<MSM><security><authEncryption><authentication>open</authentication><encryption>none</encryption><useOneX>false</useOneX></authEncryption></security></MSM></WLANProfile>"
+        ));
+    }
+
+    let pwd = passphrase
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "Password Wi-Fi diperlukan untuk jaringan terenkripsi.".to_string())?;
+    let is_raw_hex_key = validate_wifi_passphrase(pwd)?;
+    let key_type = if is_raw_hex_key {
+        "networkKey"
+    } else {
+        "passPhrase"
+    };
+    let escaped_pwd = xml_escape(pwd);
+
+    let (xml_auth, xml_enc) = match auth_label {
+        "WPA3" => ("WPA3SAE", "AES"),
+        "WPA" => (
+            "WPAPSK",
+            if cipher_label == "AES" { "AES" } else { "TKIP" },
+        ),
+        _ => (
+            "WPA2PSK",
+            if cipher_label == "TKIP" { "TKIP" } else { "AES" },
+        ),
+    };
+
+    Ok(format!(
+        "<?xml version=\"1.0\"?>\
+<WLANProfile xmlns=\"http://www.microsoft.com/networking/WLAN/profile/v1\">\
+<name>{escaped_ssid}</name>\
+<SSIDConfig><SSID><name>{escaped_ssid}</name></SSID></SSIDConfig>\
+<connectionType>ESS</connectionType>\
+<connectionMode>auto</connectionMode>\
+<MSM><security><authEncryption><authentication>{xml_auth}</authentication><encryption>{xml_enc}</encryption><useOneX>false</useOneX></authEncryption>\
+<sharedKey><keyType>{key_type}</keyType><protected>false</protected><keyMaterial>{escaped_pwd}</keyMaterial></sharedKey>\
+</security></MSM></WLANProfile>"
+    ))
 }
 
 #[cfg(windows)]
@@ -2204,8 +2341,28 @@ pub fn set_default_audio_endpoint(app: AppHandle, device_id: String) -> Result<(
 }
 
 // =========================================================================
-// 7. Native Wi-Fi Scanner & Connector (Win32 WLAN API)
+// 7. Native Wi-Fi Scanner, Captive Portal & Adaptive Connector (Win32 WLAN API)
 // =========================================================================
+
+#[cfg(windows)]
+pub fn read_internet_connectivity_native() -> (String, bool) {
+    use windows::Networking::Connectivity::{NetworkConnectivityLevel, NetworkInformation};
+
+    let _com = crate::security_utils::ComGuard::init_mta();
+    let Ok(profile) = NetworkInformation::GetInternetConnectionProfile() else {
+        return ("None".to_string(), false);
+    };
+    match profile.GetNetworkConnectivityLevel() {
+        Ok(NetworkConnectivityLevel::InternetAccess) => ("InternetAccess".to_string(), false),
+        Ok(NetworkConnectivityLevel::ConstrainedInternetAccess) => {
+            ("ConstrainedInternetAccess".to_string(), true)
+        }
+        Ok(NetworkConnectivityLevel::LocalAccess) => ("LocalAccess".to_string(), false),
+        Ok(NetworkConnectivityLevel::None) => ("None".to_string(), false),
+        _ => ("Unknown".to_string(), false),
+    }
+}
+
 #[cfg(windows)]
 pub fn scan_wifi_networks_native() -> Result<Vec<WifiNetworkItem>, String> {
     use std::collections::HashMap;
@@ -2214,11 +2371,12 @@ pub fn scan_wifi_networks_native() -> Result<Vec<WifiNetworkItem>, String> {
     use windows::Win32::NetworkManagement::WiFi::{
         wlan_interface_state_connected, wlan_intf_opcode_current_connection, WlanCloseHandle,
         WlanEnumInterfaces, WlanFreeMemory, WlanGetAvailableNetworkList, WlanGetProfileList,
-        WlanOpenHandle, WlanQueryInterface, WlanScan, DOT11_AUTH_ALGO_80211_OPEN,
-        WLAN_AVAILABLE_NETWORK_CONNECTED, WLAN_AVAILABLE_NETWORK_HAS_PROFILE,
-        WLAN_AVAILABLE_NETWORK_LIST, WLAN_CONNECTION_ATTRIBUTES, WLAN_INTERFACE_INFO_LIST,
-        WLAN_PROFILE_INFO_LIST,
+        WlanOpenHandle, WlanQueryInterface, WlanScan, WLAN_AVAILABLE_NETWORK_CONNECTED,
+        WLAN_AVAILABLE_NETWORK_HAS_PROFILE, WLAN_AVAILABLE_NETWORK_LIST,
+        WLAN_CONNECTION_ATTRIBUTES, WLAN_INTERFACE_INFO_LIST, WLAN_PROFILE_INFO_LIST,
     };
+
+    let (internet_connectivity, is_captive_portal) = read_internet_connectivity_native();
 
     unsafe {
         let mut negotiated_version = 0u32;
@@ -2311,8 +2469,12 @@ pub fn scan_wifi_networks_native() -> Result<Vec<WifiNetworkItem>, String> {
                     || stored_profiles.contains(&ssid);
                 let is_connected = (net.dwFlags & WLAN_AVAILABLE_NETWORK_CONNECTED) != 0
                     || connected_ssid.as_deref() == Some(ssid.as_str());
-                let is_secured = net.bSecurityEnabled.as_bool()
-                    && net.dot11DefaultAuthAlgorithm != DOT11_AUTH_ALGO_80211_OPEN;
+                let sec_enabled = net.bSecurityEnabled.as_bool();
+                let (auth_str, is_enterprise) =
+                    classify_dot11_auth(net.dot11DefaultAuthAlgorithm.0, sec_enabled);
+                let cipher_str =
+                    classify_dot11_cipher(net.dot11DefaultCipherAlgorithm.0, sec_enabled);
+                let is_secured = auth_str != "Open";
                 let signal_quality = (net.wlanSignalQuality as u8).min(100);
 
                 map.entry(ssid.clone())
@@ -2323,6 +2485,18 @@ pub fn scan_wifi_networks_native() -> Result<Vec<WifiNetworkItem>, String> {
                         existing.has_profile = existing.has_profile || has_profile;
                         existing.is_connected = existing.is_connected || is_connected;
                         existing.is_secured = existing.is_secured || is_secured;
+                        existing.is_enterprise = existing.is_enterprise || is_enterprise;
+                        if existing.auth_label == "Open" && auth_str != "Open" {
+                            existing.auth_label = auth_str.to_string();
+                            existing.cipher_label = cipher_str.to_string();
+                        } else if existing.auth_label == "WPA2" && auth_str == "WPA3" {
+                            existing.auth_label = "WPA3".to_string();
+                            existing.cipher_label = cipher_str.to_string();
+                        }
+                        if existing.is_connected {
+                            existing.is_captive_portal = is_captive_portal;
+                            existing.internet_connectivity = internet_connectivity.clone();
+                        }
                     })
                     .or_insert(WifiNetworkItem {
                         ssid,
@@ -2330,6 +2504,15 @@ pub fn scan_wifi_networks_native() -> Result<Vec<WifiNetworkItem>, String> {
                         is_secured,
                         is_connected,
                         has_profile,
+                        auth_label: auth_str.to_string(),
+                        cipher_label: cipher_str.to_string(),
+                        is_enterprise,
+                        is_captive_portal: if is_connected { is_captive_portal } else { false },
+                        internet_connectivity: if is_connected {
+                            internet_connectivity.clone()
+                        } else {
+                            "None".to_string()
+                        },
                     });
             }
             WlanFreeMemory(net_list_ptr as *const c_void);
@@ -2346,6 +2529,15 @@ pub fn scan_wifi_networks_native() -> Result<Vec<WifiNetworkItem>, String> {
                         is_secured: true,
                         is_connected,
                         has_profile: true,
+                        auth_label: "WPA2".to_string(),
+                        cipher_label: "AES".to_string(),
+                        is_enterprise: false,
+                        is_captive_portal: if is_connected { is_captive_portal } else { false },
+                        internet_connectivity: if is_connected {
+                            internet_connectivity.clone()
+                        } else {
+                            "None".to_string()
+                        },
                     },
                 );
             }
@@ -2356,6 +2548,11 @@ pub fn scan_wifi_networks_native() -> Result<Vec<WifiNetworkItem>, String> {
                     is_secured: true,
                     is_connected: true,
                     has_profile: true,
+                    auth_label: "WPA2".to_string(),
+                    cipher_label: "AES".to_string(),
+                    is_enterprise: false,
+                    is_captive_portal,
+                    internet_connectivity: internet_connectivity.clone(),
                 });
             }
         }
@@ -2381,17 +2578,18 @@ pub fn connect_wifi_network_native(ssid: &str, password: Option<&str>) -> Result
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::NetworkManagement::WiFi::{
-        dot11_BSS_type_infrastructure, wlan_connection_mode_profile, WlanCloseHandle, WlanConnect,
-        WlanEnumInterfaces, WlanFreeMemory, WlanGetAvailableNetworkList, WlanGetProfileList,
-        WlanOpenHandle, WlanSetProfile, DOT11_AUTH_ALGO_80211_OPEN, DOT11_SSID,
-        WLAN_AVAILABLE_NETWORK_LIST, WLAN_CONNECTION_PARAMETERS, WLAN_INTERFACE_INFO_LIST,
-        WLAN_PROFILE_INFO_LIST, WLAN_PROFILE_USER,
+        dot11_BSS_type_infrastructure, wlan_connection_mode_profile,
+        wlan_interface_state_associating, wlan_interface_state_authenticating,
+        wlan_interface_state_connected, wlan_interface_state_disconnected,
+        wlan_interface_state_discovering, wlan_intf_opcode_current_connection, WlanCloseHandle,
+        WlanConnect, WlanDeleteProfile, WlanEnumInterfaces, WlanFreeMemory,
+        WlanGetAvailableNetworkList, WlanGetProfileList, WlanOpenHandle, WlanQueryInterface,
+        WlanSetProfile, DOT11_SSID, WLAN_AVAILABLE_NETWORK_LIST, WLAN_CONNECTION_ATTRIBUTES,
+        WLAN_CONNECTION_PARAMETERS, WLAN_INTERFACE_INFO_LIST, WLAN_PROFILE_INFO_LIST,
+        WLAN_PROFILE_USER,
     };
 
-    let clean_ssid = ssid.trim();
-    if clean_ssid.is_empty() {
-        return Err("SSID Wi-Fi tidak boleh kosong.".to_string());
-    }
+    let clean_ssid = validate_wifi_ssid(ssid)?;
 
     unsafe {
         let mut negotiated_version = 0u32;
@@ -2420,9 +2618,11 @@ pub fn connect_wifi_network_native(ssid: &str, password: Option<&str>) -> Result
         let iface_guid = ifaces[0].InterfaceGuid;
         WlanFreeMemory(iface_list_ptr as *const c_void);
 
-        // Inspect available networks + saved Windows profiles to resolve exact profile name or open security
+        // Inspect available networks + saved Windows profiles to resolve exact auth/cipher/profile
         let mut matched_net_profile: Option<String> = None;
-        let mut is_open_network = false;
+        let mut detected_auth = "WPA2";
+        let mut detected_cipher = "AES";
+        let mut is_enterprise = false;
         let mut net_list_ptr: *mut WLAN_AVAILABLE_NETWORK_LIST = std::ptr::null_mut();
         if WlanGetAvailableNetworkList(client_handle, &iface_guid, 0, None, &mut net_list_ptr) == 0
             && !net_list_ptr.is_null()
@@ -2430,20 +2630,30 @@ pub fn connect_wifi_network_native(ssid: &str, password: Option<&str>) -> Result
             let ncount = (*net_list_ptr).dwNumberOfItems as usize;
             let nets = std::slice::from_raw_parts((*net_list_ptr).Network.as_ptr(), ncount);
             for net in nets {
-                if decode_dot11_ssid(&net.dot11Ssid).as_deref() == Some(clean_ssid) {
+                if decode_dot11_ssid(&net.dot11Ssid).as_deref() == Some(clean_ssid.as_str()) {
                     let pname = wide_buf_to_string(&net.strProfileName);
                     if !pname.is_empty() {
                         matched_net_profile = Some(pname);
                     }
-                    if !net.bSecurityEnabled.as_bool()
-                        || net.dot11DefaultAuthAlgorithm == DOT11_AUTH_ALGO_80211_OPEN
-                    {
-                        is_open_network = true;
-                    }
+                    let sec_enabled = net.bSecurityEnabled.as_bool();
+                    let (auth_str, ent) =
+                        classify_dot11_auth(net.dot11DefaultAuthAlgorithm.0, sec_enabled);
+                    detected_auth = auth_str;
+                    detected_cipher =
+                        classify_dot11_cipher(net.dot11DefaultCipherAlgorithm.0, sec_enabled);
+                    is_enterprise = ent;
                     break;
                 }
             }
             WlanFreeMemory(net_list_ptr as *const c_void);
+        }
+
+        if is_enterprise && matched_net_profile.is_none() {
+            let _ = WlanCloseHandle(client_handle, None);
+            return Err(
+                "Jaringan Enterprise (802.1X) harus dihubungkan lewat dialog jaringan Windows."
+                    .to_string(),
+            );
         }
 
         let mut stored_profile_match: Option<String> = None;
@@ -2460,15 +2670,17 @@ pub fn connect_wifi_network_native(ssid: &str, password: Option<&str>) -> Result
                     stored_profile_match = Some(pname);
                     break;
                 }
-                if stored_profile_match.is_none() && pname.eq_ignore_ascii_case(clean_ssid) {
+                if stored_profile_match.is_none() && pname.eq_ignore_ascii_case(&clean_ssid) {
                     stored_profile_match = Some(pname);
                 }
             }
             WlanFreeMemory(prof_list_ptr as *const c_void);
         }
 
-        let save_wlan_profile = |profile_xml: &str| -> Result<(), String> {
-            let xml_wide: Vec<u16> = profile_xml
+        let had_existing_profile = matched_net_profile.is_some() || stored_profile_match.is_some();
+
+        let save_wlan_profile = |mut profile_xml: String| -> Result<(), String> {
+            let mut xml_wide: Vec<u16> = profile_xml
                 .encode_utf16()
                 .chain(std::iter::once(0))
                 .collect();
@@ -2483,7 +2695,7 @@ pub fn connect_wifi_network_native(ssid: &str, password: Option<&str>) -> Result
                 None,
                 &mut reason_code,
             );
-            if set_err != 0 {
+            let res = if set_err != 0 {
                 let set_err_global = WlanSetProfile(
                     client_handle,
                     &iface_guid,
@@ -2495,56 +2707,69 @@ pub fn connect_wifi_network_native(ssid: &str, password: Option<&str>) -> Result
                     &mut reason_code,
                 );
                 if set_err_global != 0 {
-                    return Err(format!(
+                    Err(format!(
                         "Gagal menyimpan profil Wi-Fi (code={set_err_global}, reason={reason_code})"
-                    ));
+                    ))
+                } else {
+                    Ok(())
                 }
-            }
-            Ok(())
+            } else {
+                Ok(())
+            };
+            // Zero-fill secret XML buffers immediately before drop
+            xml_wide.fill(0);
+            profile_xml.as_bytes_mut().fill(0);
+            res
         };
 
         let resolved_profile_name: String;
-        let supplied_pwd = password.map(|s| s.trim()).filter(|s| !s.is_empty());
+        let supplied_pwd = password.filter(|s| !s.is_empty());
+        let mut created_new_profile = false;
 
         if let Some(pwd) = supplied_pwd {
-            let escaped_ssid = xml_escape(clean_ssid);
-            let escaped_pwd = xml_escape(pwd);
-            let profile_xml = format!(
-                "<?xml version=\"1.0\"?>\
-<WLANProfile xmlns=\"http://www.microsoft.com/networking/WLAN/profile/v1\">\
-<name>{escaped_ssid}</name>\
-<SSIDConfig><SSID><name>{escaped_ssid}</name></SSID></SSIDConfig>\
-<connectionType>ESS</connectionType>\
-<connectionMode>auto</connectionMode>\
-<MSM><security><authEncryption><authentication>WPA2PSK</authentication><encryption>AES</encryption><useOneX>false</useOneX></authEncryption>\
-<sharedKey><keyType>passPhrase</keyType><protected>false</protected><keyMaterial>{escaped_pwd}</keyMaterial></sharedKey>\
-</security></MSM></WLANProfile>"
-            );
-            if let Err(err) = save_wlan_profile(&profile_xml) {
+            let mut pwd_buf = pwd.to_string();
+            let primary_xml =
+                build_wlan_profile_xml(&clean_ssid, detected_auth, detected_cipher, Some(&pwd_buf));
+            let save_res = match primary_xml {
+                Ok(xml) => match save_wlan_profile(xml) {
+                    Ok(()) => Ok(()),
+                    Err(first_err) if detected_auth == "WPA3" => {
+                        // Fallback for WPA2/WPA3 transition APs or older Windows WLAN schemas
+                        match build_wlan_profile_xml(&clean_ssid, "WPA2", "AES", Some(&pwd_buf)) {
+                            Ok(fallback_xml) => save_wlan_profile(fallback_xml),
+                            Err(_) => Err(first_err),
+                        }
+                    }
+                    Err(err) => Err(err),
+                },
+                Err(err) => Err(err),
+            };
+            pwd_buf.as_bytes_mut().fill(0);
+            if let Err(err) = save_res {
                 let _ = WlanCloseHandle(client_handle, None);
                 return Err(err);
             }
-            resolved_profile_name = clean_ssid.to_string();
+            created_new_profile = !had_existing_profile;
+            resolved_profile_name = clean_ssid.clone();
         } else if let Some(existing) = matched_net_profile.or(stored_profile_match) {
             resolved_profile_name = existing;
-        } else if is_open_network {
-            let escaped_ssid = xml_escape(clean_ssid);
-            let open_xml = format!(
-                "<?xml version=\"1.0\"?>\
-<WLANProfile xmlns=\"http://www.microsoft.com/networking/WLAN/profile/v1\">\
-<name>{escaped_ssid}</name>\
-<SSIDConfig><SSID><name>{escaped_ssid}</name></SSID></SSIDConfig>\
-<connectionType>ESS</connectionType>\
-<connectionMode>manual</connectionMode>\
-<MSM><security><authEncryption><authentication>open</authentication><encryption>none</encryption><useOneX>false</useOneX></authEncryption></security></MSM></WLANProfile>"
-            );
-            if let Err(err) = save_wlan_profile(&open_xml) {
+        } else if detected_auth == "Open" {
+            let open_xml = match build_wlan_profile_xml(&clean_ssid, "Open", "None", None) {
+                Ok(xml) => xml,
+                Err(err) => {
+                    let _ = WlanCloseHandle(client_handle, None);
+                    return Err(err);
+                }
+            };
+            if let Err(err) = save_wlan_profile(open_xml) {
                 let _ = WlanCloseHandle(client_handle, None);
                 return Err(err);
             }
-            resolved_profile_name = clean_ssid.to_string();
+            created_new_profile = true;
+            resolved_profile_name = clean_ssid.clone();
         } else {
-            resolved_profile_name = clean_ssid.to_string();
+            let _ = WlanCloseHandle(client_handle, None);
+            return Err("Masukkan password Wi-Fi untuk menyambung ke jaringan ini.".to_string());
         }
 
         let profile_wide: Vec<u16> = resolved_profile_name
@@ -2569,14 +2794,85 @@ pub fn connect_wifi_network_native(ssid: &str, password: Option<&str>) -> Result
         };
 
         let conn_err = WlanConnect(client_handle, &iface_guid, &params, None);
-        let _ = WlanCloseHandle(client_handle, None);
-
         if conn_err != 0 {
+            if created_new_profile {
+                let _ = WlanDeleteProfile(
+                    client_handle,
+                    &iface_guid,
+                    PCWSTR(profile_wide.as_ptr()),
+                    None,
+                );
+            }
+            let _ = WlanCloseHandle(client_handle, None);
             return Err(format!(
-                "WlanConnect gagal (code={conn_err}). Pastikan profil tersimpan atau masukkan password."
+                "WlanConnect gagal (code={conn_err}). Pastikan profil tersimpan atau periksa password."
             ));
         }
 
+        // For newly submitted passwords, wait up to ~6s to confirm real WLAN association/auth.
+        // If authentication fails (wrong password), automatically delete the failed profile.
+        if supplied_pwd.is_some() {
+            let mut connected_ok = false;
+            let mut saw_in_progress = false;
+            for step in 0..20 {
+                std::thread::sleep(Duration::from_millis(300));
+                let mut q_size = 0u32;
+                let mut q_ptr: *mut c_void = std::ptr::null_mut();
+                if WlanQueryInterface(
+                    client_handle,
+                    &iface_guid,
+                    wlan_intf_opcode_current_connection,
+                    None,
+                    &mut q_size,
+                    &mut q_ptr,
+                    None,
+                ) == 0
+                    && !q_ptr.is_null()
+                {
+                    let attrs = &*(q_ptr as *const WLAN_CONNECTION_ATTRIBUTES);
+                    let state = attrs.isState;
+                    let cur_ssid = decode_dot11_ssid(&attrs.wlanAssociationAttributes.dot11Ssid);
+                    WlanFreeMemory(q_ptr);
+
+                    if state == wlan_interface_state_connected
+                        && cur_ssid.as_deref() == Some(clean_ssid.as_str())
+                    {
+                        connected_ok = true;
+                        break;
+                    }
+                    if state == wlan_interface_state_associating
+                        || state == wlan_interface_state_authenticating
+                        || state == wlan_interface_state_discovering
+                    {
+                        saw_in_progress = true;
+                    } else if state == wlan_interface_state_disconnected
+                        && (saw_in_progress || step >= 6)
+                    {
+                        break;
+                    }
+                } else if saw_in_progress || step >= 8 {
+                    break;
+                }
+            }
+
+            if !connected_ok {
+                if created_new_profile {
+                    let _ = WlanDeleteProfile(
+                        client_handle,
+                        &iface_guid,
+                        PCWSTR(profile_wide.as_ptr()),
+                        None,
+                    );
+                }
+                let _ = WlanCloseHandle(client_handle, None);
+                return Err(
+                    "Autentikasi Wi-Fi gagal atau password salah. Profil gagal dibersihkan; silakan coba lagi."
+                        .to_string(),
+                );
+            }
+        }
+
+        let _ = WlanCloseHandle(client_handle, None);
         Ok(())
     }
 }
@@ -2993,6 +3289,193 @@ pub async fn connect_wifi_network(
     }
 }
 
+#[cfg(windows)]
+fn shell_open_pinned_target(target: &str) -> Result<(), String> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let wide_open: Vec<u16> = OsStr::new("open")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let wide_target: Vec<u16> = OsStr::new(target)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    unsafe {
+        let res = ShellExecuteW(
+            std::ptr::null_mut(),
+            wide_open.as_ptr(),
+            wide_target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL as i32,
+        );
+        if (res as usize) <= 32 {
+            return Err(format!("ShellExecuteW gagal membuka target (code={})", res as usize));
+        }
+    }
+    Ok(())
+}
+
+/// Membuka halaman login Captive Portal lewat konstanta URL resmi Microsoft via `ShellExecuteW` in-process.
+#[tauri::command]
+pub fn open_captive_portal_browser() -> Result<(), String> {
+    const CAPTIVE_PORTAL_REDIRECT_URL: &str = "http://www.msftconnecttest.com/redirect";
+    #[cfg(windows)]
+    {
+        shell_open_pinned_target(CAPTIVE_PORTAL_REDIRECT_URL)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = CAPTIVE_PORTAL_REDIRECT_URL;
+        Ok(())
+    }
+}
+
+/// Membuka flyout daftar jaringan Windows (`ms-availablenetworks:`) untuk jaringan Enterprise 802.1X.
+#[tauri::command]
+pub fn open_available_wifi_networks() -> Result<(), String> {
+    const AVAILABLE_NETWORKS_URI: &str = "ms-availablenetworks:";
+    #[cfg(windows)]
+    {
+        shell_open_pinned_target(AVAILABLE_NETWORKS_URI)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = AVAILABLE_NETWORKS_URI;
+        Ok(())
+    }
+}
+
+const CORE_FX_CURRENCIES: [&str; 6] = ["USD", "IDR", "SGD", "JPY", "KRW", "EUR"];
+const MAX_FX_RESPONSE_BYTES: usize = 256 * 1024;
+const MAX_FX_CURRENCIES: usize = 250;
+
+pub fn sanitize_exchange_rate_map(
+    raw_rates: &serde_json::Map<String, serde_json::Value>,
+) -> Result<std::collections::HashMap<String, f64>, String> {
+    let mut clean = std::collections::HashMap::new();
+    clean.insert("USD".to_string(), 1.0);
+    for code in CORE_FX_CURRENCIES {
+        if code == "USD" {
+            continue;
+        }
+        let val = raw_rates
+            .get(code)
+            .and_then(|v| v.as_f64())
+            .filter(|v| v.is_finite() && *v > 0.0 && *v < 1_000_000_000.0)
+            .ok_or_else(|| format!("Kurs mata uang {code} tidak valid atau hilang."))?;
+        clean.insert(code.to_string(), val);
+    }
+
+    for (code, raw_val) in raw_rates {
+        if clean.len() >= MAX_FX_CURRENCIES {
+            break;
+        }
+        if code == "USD"
+            || code.len() != 3
+            || !code.bytes().all(|b| b.is_ascii_uppercase())
+        {
+            continue;
+        }
+        if let Some(val) = raw_val
+            .as_f64()
+            .filter(|v| v.is_finite() && *v > 0.0 && *v < 1_000_000_000.0)
+        {
+            clean.entry(code.clone()).or_insert(val);
+        }
+    }
+
+    Ok(clean)
+}
+
+/// Proxy Rust on-demand untuk menyegarkan kurs mata uang (USD base, 150+ mata uang dunia) tanpa melonggarkan CSP WebView.
+#[tauri::command]
+pub async fn fetch_exchange_rates() -> Result<ExchangeRatesResponse, String> {
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(false)
+        .connect_timeout(Duration::from_secs(4))
+        .timeout(Duration::from_secs(8))
+        .user_agent("CASA-Desktop/2.3.2")
+        .build()
+        .map_err(|e| format!("Gagal membuat HTTP client kurs: {e}"))?;
+
+    let endpoints = [
+        ("https://open.er-api.com/v6/latest/USD", "open.er-api.com"),
+        (
+            "https://api.exchangerate-api.com/v4/latest/USD",
+            "api.exchangerate-api.com",
+        ),
+        (
+            "https://api.frankfurter.app/latest?from=USD",
+            "api.frankfurter.app",
+        ),
+    ];
+
+    let mut last_err = "Gagal mengambil kurs mata uang.".to_string();
+    for (url, source_label) in endpoints {
+        let resp = match client.get(url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = format!("Koneksi ke {source_label} gagal: {e}");
+                continue;
+            }
+        };
+        if !resp.status().is_success() {
+            last_err = format!("{source_label} mengembalikan HTTP {}", resp.status());
+            continue;
+        }
+        if let Some(cl) = resp.content_length() {
+            if cl > MAX_FX_RESPONSE_BYTES as u64 {
+                last_err = format!("Respons {source_label} melebihi batas ukuran.");
+                continue;
+            }
+        }
+        let bytes = match resp.bytes().await {
+            Ok(b) if b.len() <= MAX_FX_RESPONSE_BYTES => b,
+            Ok(_) => {
+                last_err = format!("Respons {source_label} melebihi 256 KiB.");
+                continue;
+            }
+            Err(e) => {
+                last_err = format!("Gagal membaca respons {source_label}: {e}");
+                continue;
+            }
+        };
+        let parsed: serde_json::Value = match serde_json::from_slice(&bytes) {
+            Ok(v) => v,
+            Err(e) => {
+                last_err = format!("JSON {source_label} tidak valid: {e}");
+                continue;
+            }
+        };
+        let Some(rates_obj) = parsed.get("rates").and_then(|v| v.as_object()) else {
+            last_err = format!("Field rates tidak ditemukan di {source_label}.");
+            continue;
+        };
+        match sanitize_exchange_rate_map(rates_obj) {
+            Ok(rates) => {
+                let updated_at = chrono::Utc::now().to_rfc3339();
+                return Ok(ExchangeRatesResponse {
+                    base: "USD".to_string(),
+                    rates,
+                    updated_at,
+                    source: source_label.to_string(),
+                });
+            }
+            Err(e) => {
+                last_err = e;
+            }
+        }
+    }
+
+    Err(last_err)
+}
+
 #[tauri::command]
 pub async fn list_paired_bluetooth() -> Result<Vec<BluetoothDeviceItem>, String> {
     #[cfg(windows)]
@@ -3129,5 +3612,89 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn validates_wifi_ssid_passphrase_xml_and_auth_mapping() {
+        assert_eq!(classify_dot11_auth(1, true), ("Open", false));
+        assert_eq!(classify_dot11_auth(11, true), ("Open", false));
+        assert_eq!(classify_dot11_auth(7, true), ("WPA2", false));
+        assert_eq!(classify_dot11_auth(9, true), ("WPA3", false));
+        assert_eq!(classify_dot11_auth(4, true), ("WPA", false));
+        assert_eq!(classify_dot11_auth(6, true), ("Enterprise", true));
+        assert_eq!(classify_dot11_auth(10, true), ("Enterprise", true));
+        assert_eq!(classify_dot11_cipher(0x04, true), "AES");
+        assert_eq!(classify_dot11_cipher(0x02, true), "TKIP");
+        assert_eq!(classify_dot11_cipher(0x08, true), "GCMP");
+        assert_eq!(classify_dot11_cipher(0x04, false), "None");
+
+        assert!(validate_wifi_ssid("Office_5G").is_ok());
+        assert!(validate_wifi_ssid("").is_err());
+        assert!(validate_wifi_ssid(&"a".repeat(33)).is_err());
+        assert!(validate_wifi_ssid("Bad\nSSID").is_err());
+        assert!(validate_wifi_ssid("Bad\0SSID").is_err());
+
+        assert_eq!(validate_wifi_passphrase("correct-horse-123"), Ok(false));
+        assert_eq!(validate_wifi_passphrase(&"a".repeat(64)), Ok(true));
+        assert!(validate_wifi_passphrase("short77").is_err());
+        assert!(validate_wifi_passphrase(&"x".repeat(64)).is_err());
+        assert!(validate_wifi_passphrase("bad\npassphrase").is_err());
+
+        // XML injection escape on SSID & passphrase
+        let xml = build_wlan_profile_xml(
+            "Cafe<A&B>",
+            "WPA3",
+            "AES",
+            Some("P@ss<1>&\"2'3"),
+        )
+        .expect("valid WPA3 XML");
+        assert!(xml.contains("<name>Cafe&lt;A&amp;B&gt;</name>"));
+        assert!(xml.contains("<authentication>WPA3SAE</authentication>"));
+        assert!(xml.contains("<encryption>AES</encryption>"));
+        assert!(xml.contains("<keyMaterial>P@ss&lt;1&gt;&amp;&quot;2&apos;3</keyMaterial>"));
+        assert!(!xml.contains("Cafe<A&B>"));
+
+        // Enterprise must be rejected from single-passphrase XML builder
+        assert!(build_wlan_profile_xml("CorpNet", "Enterprise", "AES", Some("12345678")).is_err());
+
+        // Open profile XML
+        let open_xml = build_wlan_profile_xml("PublicWiFi", "Open", "None", None).unwrap();
+        assert!(open_xml.contains("<authentication>open</authentication>"));
+        assert!(open_xml.contains("<encryption>none</encryption>"));
+
+        // FX rate sanitization preserves valid 150+ world currencies, rejects non-finite / negative core currencies & invalid keys
+        let good_json: serde_json::Value = serde_json::json!({
+            "IDR": 16250.5,
+            "SGD": 1.34,
+            "JPY": 154.2,
+            "KRW": 1390.0,
+            "EUR": 0.92,
+            "SAR": 3.75,
+            "MYR": 4.45,
+            "GBP": 0.79,
+            "bad": 1.23,
+            "123": 4.56,
+            "<script>": 9.9,
+            "ZZZ": -1.0
+        });
+        let sanitized = sanitize_exchange_rate_map(good_json.as_object().unwrap()).unwrap();
+        assert_eq!(sanitized.get("USD"), Some(&1.0));
+        assert_eq!(sanitized.get("IDR"), Some(&16250.5));
+        assert_eq!(sanitized.get("SAR"), Some(&3.75));
+        assert_eq!(sanitized.get("MYR"), Some(&4.45));
+        assert_eq!(sanitized.get("GBP"), Some(&0.79));
+        assert!(!sanitized.contains_key("bad"));
+        assert!(!sanitized.contains_key("123"));
+        assert!(!sanitized.contains_key("<script>"));
+        assert!(!sanitized.contains_key("ZZZ"));
+
+        let bad_json: serde_json::Value = serde_json::json!({
+            "IDR": -100.0,
+            "SGD": 1.34,
+            "JPY": 154.2,
+            "KRW": 1390.0,
+            "EUR": 0.92
+        });
+        assert!(sanitize_exchange_rate_map(bad_json.as_object().unwrap()).is_err());
     }
 }

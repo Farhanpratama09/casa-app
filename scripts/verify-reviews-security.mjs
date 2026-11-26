@@ -266,6 +266,23 @@ async function run() {
     'LOW-01..LOW-06: Executables/DOS names blocked, GSMTC & hitbox bounded, Spotify URI/exe verified, COM cleaned & zero orphan CDN links'
   );
 
+  // v2.4.0 Security Guardrails: Wi-Fi XML control-char/PSK guard + zero-fill + WlanDeleteProfile rollback + dedicated ShellExecuteW + zero-eval Calc + Rust FX proxy
+  const calcParserTs = readRepo('src/features/calculator/calcParser.ts');
+  check(
+    systemHardwareRs.includes('has_forbidden_xml_control_chars') &&
+      systemHardwareRs.includes('validate_wifi_passphrase') &&
+      systemHardwareRs.includes('xml_wide.fill(0)') &&
+      systemHardwareRs.includes('WlanDeleteProfile') &&
+      systemHardwareRs.includes('open_captive_portal_browser') &&
+      systemHardwareRs.includes('open_available_wifi_networks') &&
+      systemHardwareRs.includes('fetch_exchange_rates') &&
+      systemHardwareRs.includes('danger_accept_invalid_certs(false)') &&
+      !systemHardwareRs.includes('danger_accept_invalid_certs(true)') &&
+      !/\beval\s*\(/.test(calcParserTs) &&
+      !/new\s+Function\s*\(/.test(calcParserTs),
+    'v2.4.0 Guardrails: Wi-Fi XML/PSK zero-fill & rollback, pinned ShellExecuteW portal/802.1X, Rust FX proxy & zero-eval calcParser'
+  );
+
   console.log(`\n  REVIEWS SECURITY & HARDENING TESTS: ${passed} passed, 0 failed\n`);
 }
 

@@ -1189,6 +1189,17 @@ export const DesktopSettingsWindow: React.FC = () => {
                 </SettingFlatRow>
 
                 <SettingFlatRow
+                  title="Modul Kalkulator & Konverter (Calc)"
+                  description="Tampilkan tab Calc untuk kalkulator ekspresi cepat dan konverter satuan/kurs."
+                >
+                  <PillToggleSwitch
+                    label="Modul Kalkulator & Konverter"
+                    checked={settings.calculatorEnabled}
+                    onChange={(next) => updateSettings({ calculatorEnabled: next })}
+                  />
+                </SettingFlatRow>
+
+                <SettingFlatRow
                   title="Perilaku Fullscreen"
                   description="Atur reaksi CASA saat game atau video fullscreen aktif."
                 >

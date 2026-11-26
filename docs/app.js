@@ -181,11 +181,17 @@
 
   const state = {
     mode: 'resting', // 'resting' | 'lyrics' | 'todo' | 'hud' | 'dropzone' | 'ibadah'
-    expandedTab: 'control', // 'music' | 'todo' | 'control' | 'dropzone' | 'ibadah'
+    expandedTab: 'control', // 'music' | 'todo' | 'control' | 'dropzone' | 'ibadah' | 'calc'
     capsuleState: 'idle', // 'idle' | 'expanded'
     isRestingSleep: false,
     expression: 'idle', // 'idle' | 'music' | 'focus' | 'dual_active' | 'prayer'
     ibadahEnabled: false,
+    calcEnabled: true,
+    calcSubMode: 'calc', // 'calc' | 'convert'
+    convCategory: 'currency',
+    wifiDrawerOpen: false,
+    wifiPortalActive: false,
+    wifiConnectedSsid: 'Studio_5G',
     ibadahPreviewKey: 'dzuhur', // 'subuh' | 'dzuhur' | 'ashar' | 'maghrib' | 'isya'
     prayerAlertActive: false,
     prayerCountdownSeconds: (15 * 60 + 14 - (12 * 60 + 15)) * 60,
@@ -213,6 +219,7 @@
     droppedIds: [],
     lastReturnedDropId: null,
     dropzoneUndoTimerId: null,
+    dropEyePopUntil: 0,
     connectHpOpen: false,
     connectHpIface: 'wifi',
     connectHpConnected: false,
@@ -237,6 +244,7 @@
 
     idleLayer: $('vm-idle-layer'),
     restingPill: $('casa-resting-pill'),
+    restingLeftEye: $('vm-resting-left-eye'),
     hudPill: $('casa-hud-pill'),
     hudIcon: $('casa-hud-icon'),
     hudLabel: $('casa-hud-label'),
@@ -273,6 +281,7 @@
     m6EyesBtn: $('vm-m6-eyes-btn'),
     m6TabButtons: Array.from(document.querySelectorAll('[data-m6-tab]')),
     m6IbadahTab: $('vm-m6-ibadah-tab'),
+    m6CalcTab: $('vm-m6-calc-tab'),
     m6DropBadge: $('vm-m6-drop-badge'),
     collapseBtn: $('vm-notch-collapse-btn'),
     expandedPrayerBanner: $('vm-expanded-prayer-banner'),
@@ -286,6 +295,40 @@
     expControl: $('vm-exp-control'),
     expDropzone: $('vm-exp-dropzone'),
     expIbadah: $('vm-exp-ibadah'),
+    expCalc: $('vm-exp-calc'),
+    ccToggleIbadah: $('vm-cc-toggle-ibadah'),
+    ccToggleCalc: $('vm-cc-toggle-calc'),
+    ccWifiBtn: $('vm-cc-wifi-btn'),
+    ccWifiSub: $('vm-cc-wifi-sub'),
+    ccWifiDrawer: $('vm-cc-wifi-drawer'),
+    ccWifiCloseBtn: $('vm-cc-wifi-close-btn'),
+    ccPortalSimBtn: $('vm-cc-portal-sim-btn'),
+    ccPortalBar: $('vm-cc-portal-bar'),
+    ccPortalOpenBtn: $('vm-cc-portal-open-btn'),
+    wifiStatusStudio: $('vm-wifi-status-studio'),
+    wifiPwdToggle: $('vm-wifi-pwd-toggle'),
+    wifiPwdForm: $('vm-wifi-pwd-form'),
+    wifiPwdInput: $('vm-wifi-pwd-input'),
+    wifiEntBtn: $('vm-wifi-ent-btn'),
+    ccWifiNote: $('vm-cc-wifi-note'),
+    calcSubButtons: Array.from(document.querySelectorAll('[data-calc-sub]')),
+    calcPane: $('vm-calc-pane'),
+    convPane: $('vm-conv-pane'),
+    calcInput: $('vm-calc-input'),
+    calcResult: $('vm-calc-result'),
+    calcCopyBtn: $('vm-calc-copy-btn'),
+    calcClearBtn: $('vm-calc-clear-btn'),
+    calcKeypadButtons: Array.from(document.querySelectorAll('#vm-calc-keypad [data-calc-key]')),
+    convSearchRow: $('vm-conv-search-row'),
+    convCurrencySearch: $('vm-conv-currency-search'),
+    convFxStatus: $('vm-conv-fx-status'),
+    convCatSelect: $('vm-conv-cat'),
+    convInput: $('vm-conv-input'),
+    convFromSelect: $('vm-conv-from'),
+    convToSelect: $('vm-conv-to'),
+    convSwapBtn: $('vm-conv-swap-btn'),
+    convResult: $('vm-conv-result'),
+    convCopyBtn: $('vm-conv-copy-btn'),
     ibadahNextHeading: $('vm-ibadah-next-heading'),
     ibadahCountdown: $('vm-ibadah-countdown'),
     ibadahPreviewPill: $('vm-ibadah-preview-pill'),
@@ -338,6 +381,7 @@
     idleLyricBtn: $('vm-idle-lyric-btn'),
 
     expFocusTaskHead: $('vm-exp-focus-task-head'),
+    focusTimerIco: $('vm-focus-timer-ico'),
     expFocusEnds: $('vm-exp-focus-ends'),
     expRingArc: $('vm-exp-ring-arc'),
     expRingPct: $('vm-exp-ring-pct'),
@@ -484,6 +528,7 @@
   function renderCompanionAvatar(svgEl, expr) {
     if (!svgEl) return;
     clearNode(svgEl);
+    svgEl.setAttribute('data-companion-expression', expr || 'idle');
 
     const heartPath =
       'M 25,13.5 L 24.3,12.8 C 21.1,10.0 19.6,8.3 19.6,6.1 C 19.6,4.4 20.9,3.1 22.5,3.1 C 23.6,3.1 24.5,3.7 25,4.6 C 25.5,3.7 26.4,3.1 27.5,3.1 C 29.1,3.1 30.4,4.4 30.4,6.1 C 30.4,8.3 28.9,10.0 25.7,12.8 Z';
@@ -545,6 +590,23 @@
           fill: '#ffffff',
         })
       );
+    } else if (expr === 'drop_zone') {
+      // ◈ crisp geometric diamond package (distinct from ✦ prayer sparkle)
+      svgEl.appendChild(
+        createSvgNode('path', {
+          d: 'M 8,2.2 L 13.8,8 L 8,13.8 L 2.2,8 Z',
+          fill: 'none',
+          stroke: '#ffffff',
+          'stroke-width': 1.7,
+          'stroke-linejoin': 'round',
+        })
+      );
+      svgEl.appendChild(
+        createSvgNode('path', {
+          d: 'M 8,5.4 L 10.6,8 L 8,10.6 L 5.4,8 Z',
+          fill: '#ffffff',
+        })
+      );
     } else {
       // ×
       svgEl.appendChild(
@@ -558,7 +620,7 @@
       );
     }
 
-    // Right eye
+    // Right eye (♥ kept intact unless dual_active)
     if (expr === 'dual_active') {
       svgEl.appendChild(
         createSvgNode('path', {
@@ -582,6 +644,39 @@
       );
     } else {
       svgEl.appendChild(createSvgNode('path', { d: heartPath, fill: '#ffffff' }));
+    }
+  }
+
+  function renderCompactRestingLeftEye(svgEl, hasDropItems) {
+    if (!svgEl) return;
+    clearNode(svgEl);
+    svgEl.setAttribute('data-drop-eye', hasDropItems ? 'true' : 'false');
+    if (hasDropItems) {
+      svgEl.appendChild(
+        createSvgNode('path', {
+          d: 'M 9,2.2 L 15.8,9 L 9,15.8 L 2.2,9 Z',
+          fill: 'none',
+          stroke: '#ffffff',
+          'stroke-width': 2.0,
+          'stroke-linejoin': 'round',
+        })
+      );
+      svgEl.appendChild(
+        createSvgNode('path', {
+          d: 'M 9,6.0 L 12.0,9 L 9,12.0 L 6.0,9 Z',
+          fill: '#ffffff',
+        })
+      );
+    } else {
+      svgEl.appendChild(
+        createSvgNode('path', {
+          d: 'M 3.5,3.5 L 14.5,14.5 M 14.5,3.5 L 3.5,14.5',
+          fill: 'none',
+          stroke: '#ffffff',
+          'stroke-width': 2.4,
+          'stroke-linecap': 'round',
+        })
+      );
     }
   }
 
@@ -1453,6 +1548,7 @@
     if (!fileId) return;
     if (!state.droppedIds.includes(fileId)) {
       state.droppedIds.push(fileId);
+      state.dropEyePopUntil = Date.now() + 340;
     }
     state.mode = 'dropzone';
     state.expandedTab = 'dropzone';
@@ -1482,12 +1578,16 @@
     if (state.prayerAlertActive) return 'prayer';
     if (state.mode === 'lyrics') return 'music';
     if (state.mode === 'todo') return state.dualIdleActive ? 'dual_active' : 'focus';
+    if (state.droppedIds.length > 0) return 'drop_zone';
     return 'idle';
   }
 
   function resolveMode6Variant() {
     if (state.expandedTab === 'ibadah') {
       return state.ibadahEnabled ? 'ibadah' : 'control';
+    }
+    if (state.expandedTab === 'calc') {
+      return state.calcEnabled ? 'calc' : 'control';
     }
     if (
       state.expandedTab === 'music' ||
@@ -1516,8 +1616,14 @@
 
     renderCompanionAvatar(el.eyes, activeExpr);
     renderCompanionAvatar(el.m6Eyes, activeExpr);
+    renderCompactRestingLeftEye(el.restingLeftEye, state.droppedIds.length > 0);
     renderCompanionAvatar(el.prayerEyes, 'prayer');
     renderCompanionAvatar(el.expandedPrayerEyes, 'prayer');
+
+    const popDropEye = state.droppedIds.length > 0 && Date.now() < state.dropEyePopUntil;
+    [el.restingLeftEye, el.eyes, el.m6Eyes].forEach((node) => {
+      if (node) node.classList.toggle('casa-eye-pop', popDropEye);
+    });
 
     if (el.monitor) {
       el.monitor.setAttribute('data-capsule-open', isExpanded ? 'true' : 'false');
@@ -1538,6 +1644,28 @@
 
     if (el.m6IbadahTab) {
       el.m6IbadahTab.hidden = !state.ibadahEnabled;
+    }
+    if (el.m6CalcTab) {
+      el.m6CalcTab.hidden = !state.calcEnabled;
+    }
+    if (el.ccToggleIbadah) {
+      el.ccToggleIbadah.classList.toggle('active', state.ibadahEnabled);
+      el.ccToggleIbadah.setAttribute('aria-pressed', state.ibadahEnabled ? 'true' : 'false');
+    }
+    if (el.ccToggleCalc) {
+      el.ccToggleCalc.classList.toggle('active', state.calcEnabled);
+      el.ccToggleCalc.setAttribute('aria-pressed', state.calcEnabled ? 'true' : 'false');
+    }
+    if (el.ccWifiDrawer) {
+      el.ccWifiDrawer.hidden = !state.wifiDrawerOpen || variant !== 'control';
+    }
+    if (el.ccPortalBar) {
+      el.ccPortalBar.hidden = !state.wifiPortalActive;
+    }
+    if (el.ccWifiSub) {
+      el.ccWifiSub.textContent = state.wifiPortalActive
+        ? `${state.wifiConnectedSsid} · Login`
+        : state.wifiConnectedSsid;
     }
     if (el.expandedPrayerBanner) {
       el.expandedPrayerBanner.hidden = !showExpandedPrayerBanner;
@@ -1654,6 +1782,7 @@
         (tab === 'todo' && variant === 'todo') ||
         (tab === 'hud' && variant === 'control') ||
         (tab === 'ibadah' && variant === 'ibadah') ||
+        (tab === 'calc' && variant === 'calc') ||
         (tab === 'dropzone' && variant === 'dropzone');
       btn.setAttribute('aria-selected', isMatch ? 'true' : 'false');
     });
@@ -1664,6 +1793,7 @@
     if (el.expControl) el.expControl.hidden = variant !== 'control';
     if (el.expDropzone) el.expDropzone.hidden = variant !== 'dropzone';
     if (el.expIbadah) el.expIbadah.hidden = variant !== 'ibadah';
+    if (el.expCalc) el.expCalc.hidden = variant !== 'calc';
 
     if (el.ibadahCountdown) {
       const sec = Math.max(0, state.prayerCountdownSeconds);
@@ -1723,6 +1853,10 @@
     // Mode 6 Focus & Control Center values
     if (el.expTimerDigits) el.expTimerDigits.textContent = formatMMSS(state.focusSeconds);
     if (el.expFocusEnds) el.expFocusEnds.textContent = `ends ${timeText}`;
+    if (el.focusTimerIco) {
+      el.focusTimerIco.classList.toggle('running', state.focusTimerRunning);
+      el.focusTimerIco.classList.toggle('paused', !state.focusTimerRunning);
+    }
     if (el.expTimerBtn) {
       el.expTimerBtn.textContent = state.focusTimerRunning ? 'Pause' : 'Start';
     }
@@ -2022,6 +2156,583 @@
     );
   }
 
+  // Safe zero-eval recursive-descent math parser for Web Showcase Quick Calculator (v2.4.0)
+  function evalShowcaseMath(raw) {
+    const src = String(raw || '')
+      .replace(/[×✕]/g, '*')
+      .replace(/[÷]/g, '/')
+      .replace(/[−–—]/g, '-')
+      .replace(/,/g, '')
+      .trim();
+    if (!src) return { ok: false, error: 'Masukkan ekspresi' };
+    if (src.length > 128) return { ok: false, error: 'Ekspresi terlalu panjang' };
+    const tokens = [];
+    let i = 0;
+    while (i < src.length) {
+      const c = src[i];
+      if (c === ' ' || c === '\t') {
+        i++;
+        continue;
+      }
+      if ((c >= '0' && c <= '9') || c === '.') {
+        const start = i;
+        let dots = 0;
+        while (i < src.length && ((src[i] >= '0' && src[i] <= '9') || src[i] === '.')) {
+          if (src[i] === '.') dots++;
+          i++;
+        }
+        if (dots > 1 || src.slice(start, i) === '.') return { ok: false, error: 'Angka tidak valid' };
+        tokens.push({ kind: 'num', val: Number(src.slice(start, i)) });
+        continue;
+      }
+      const map = { '+': 'plus', '-': 'minus', '*': 'mul', x: 'mul', X: 'mul', '/': 'div', '^': 'pow', '%': 'pct', '(': 'lp', ')': 'rp' };
+      if (!map[c]) return { ok: false, error: `Token tidak valid: ${c}` };
+      if (c === '(' && tokens.length) {
+        const prev = tokens[tokens.length - 1].kind;
+        if (prev === 'num' || prev === 'rp' || prev === 'pct') tokens.push({ kind: 'mul' });
+      }
+      tokens.push({ kind: map[c] });
+      i++;
+    }
+    let pos = 0;
+    const peek = () => tokens[pos];
+    const next = () => tokens[pos++];
+    function parseAdd(depth) {
+      if (depth > 32) throw new Error('Terlalu dalam');
+      let left = parseMul(depth).val;
+      while (peek() && (peek().kind === 'plus' || peek().kind === 'minus')) {
+        const op = next().kind;
+        const r = parseMul(depth);
+        const rhs = r.isBarePct ? (left * r.pctBase) / 100 : r.val;
+        left = op === 'plus' ? left + rhs : left - rhs;
+      }
+      return left;
+    }
+    function parseMul(depth) {
+      const first = parseUnary(depth);
+      let val = first.val;
+      let comb = false;
+      while (peek() && (peek().kind === 'mul' || peek().kind === 'div')) {
+        comb = true;
+        const op = next().kind;
+        const r = parseUnary(depth);
+        if (op === 'mul') val *= r.val;
+        else {
+          if (r.val === 0) throw new Error('Pembagian dengan nol');
+          val /= r.val;
+        }
+      }
+      return comb ? { val, isBarePct: false } : first;
+    }
+    function parseUnary(depth) {
+      if (depth > 32) throw new Error('Terlalu dalam');
+      if (peek() && (peek().kind === 'plus' || peek().kind === 'minus')) {
+        const op = next().kind;
+        const inner = parseUnary(depth + 1);
+        return {
+          val: op === 'minus' ? -inner.val : inner.val,
+          isBarePct: inner.isBarePct,
+          pctBase: typeof inner.pctBase === 'number' ? (op === 'minus' ? -inner.pctBase : inner.pctBase) : undefined,
+        };
+      }
+      return parsePow(depth);
+    }
+    function parsePow(depth) {
+      const base = parsePost(depth);
+      if (peek() && peek().kind === 'pow') {
+        next();
+        const exp = parseUnary(depth + 1);
+        if (Math.abs(exp.val) > 300) throw new Error('Eksponen melebihi batas');
+        const out = Math.pow(base.val, exp.val);
+        if (!Number.isFinite(out)) throw new Error('Overflow');
+        return { val: out, isBarePct: false };
+      }
+      return base;
+    }
+    function parsePost(depth) {
+      const base = parsePrim(depth);
+      let val = base;
+      let pctCount = 0;
+      while (peek() && peek().kind === 'pct') {
+        next();
+        pctCount++;
+        val /= 100;
+      }
+      return { val, isBarePct: pctCount === 1, pctBase: pctCount === 1 ? base : undefined };
+    }
+    function parsePrim(depth) {
+      const t = peek();
+      if (!t) throw new Error('Ekspresi tidak lengkap');
+      if (t.kind === 'num') {
+        next();
+        return t.val;
+      }
+      if (t.kind === 'lp') {
+        next();
+        const v = parseAdd(depth + 1);
+        if (!peek() || peek().kind !== 'rp') throw new Error('Kurung tidak cocok');
+        next();
+        return v;
+      }
+      throw new Error('Sintaks tidak valid');
+    }
+    try {
+      const rawVal = parseAdd(0);
+      if (pos < tokens.length || !Number.isFinite(rawVal)) return { ok: false, error: 'Sintaks tidak valid' };
+      const clean = Math.abs(rawVal) < 1e-12 ? 0 : Number(rawVal.toPrecision(12));
+      return {
+        ok: true,
+        formatted: clean.toLocaleString('en-US', { maximumFractionDigits: 8 }),
+        copyText: String(clean),
+      };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Error' };
+    }
+  }
+
+  const VM_CURRENCY_CATALOG = [
+    { code: 'IDR', label: 'IDR · Indonesia', kw: 'indonesia jakarta rupiah idr' },
+    { code: 'USD', label: 'USD · Amerika Serikat', kw: 'amerika serikat united states usa dollar usd' },
+    { code: 'SAR', label: 'SAR · Arab Saudi', kw: 'arab saudi saudi arabia riyal mekah madinah umroh sar' },
+    { code: 'KRW', label: 'KRW · Korea Selatan', kw: 'korea selatan south korea seoul won krw' },
+    { code: 'JPY', label: 'JPY · Jepang', kw: 'jepang japan tokyo yen jpy' },
+    { code: 'SGD', label: 'SGD · Singapura', kw: 'singapura singapore dollar sgd' },
+    { code: 'MYR', label: 'MYR · Malaysia', kw: 'malaysia kuala lumpur ringgit myr' },
+    { code: 'EUR', label: 'EUR · Uni Eropa', kw: 'eropa europe euro jerman prancis belanda eur' },
+    { code: 'GBP', label: 'GBP · Inggris', kw: 'inggris uk britania british pound gbp' },
+    { code: 'AUD', label: 'AUD · Australia', kw: 'australia dollar aud' },
+    { code: 'CNY', label: 'CNY · Tiongkok', kw: 'tiongkok china cina yuan renminbi cny' },
+    { code: 'THB', label: 'THB · Thailand', kw: 'thailand bangkok baht thb' },
+    { code: 'PHP', label: 'PHP · Filipina', kw: 'filipina philippines manila peso php' },
+    { code: 'VND', label: 'VND · Vietnam', kw: 'vietnam dong vnd' },
+    { code: 'AED', label: 'AED · Uni Emirat Arab', kw: 'uni emirat arab uae dubai dirham aed' },
+    { code: 'QAR', label: 'QAR · Qatar', kw: 'qatar doha riyal qar' },
+    { code: 'KWD', label: 'KWD · Kuwait', kw: 'kuwait dinar kwd' },
+    { code: 'TRY', label: 'TRY · Turki', kw: 'turki turkey istanbul lira try' },
+    { code: 'INR', label: 'INR · India', kw: 'india rupee inr' },
+    { code: 'CHF', label: 'CHF · Swiss', kw: 'swiss switzerland franc chf' },
+    { code: 'CAD', label: 'CAD · Kanada', kw: 'kanada canada dollar cad' },
+    { code: 'HKD', label: 'HKD · Hong Kong', kw: 'hong kong dollar hkd' },
+    { code: 'TWD', label: 'TWD · Taiwan', kw: 'taiwan dollar twd' },
+    { code: 'NZD', label: 'NZD · Selandia Baru', kw: 'selandia baru new zealand dollar nzd' },
+    { code: 'BRL', label: 'BRL · Brasil', kw: 'brasil brazil real brl' },
+    { code: 'MXN', label: 'MXN · Meksiko', kw: 'meksiko mexico peso mxn' },
+    { code: 'ZAR', label: 'ZAR · Afrika Selatan', kw: 'afrika selatan south africa rand zar' },
+    { code: 'EGP', label: 'EGP · Mesir', kw: 'mesir egypt kairo pound egp' },
+    { code: 'BND', label: 'BND · Brunei Darussalam', kw: 'brunei dollar bnd' },
+    { code: 'PKR', label: 'PKR · Pakistan', kw: 'pakistan rupee pkr' },
+    { code: 'BDT', label: 'BDT · Bangladesh', kw: 'bangladesh taka bdt' },
+    { code: 'OMR', label: 'OMR · Oman', kw: 'oman rial omr' },
+    { code: 'BHD', label: 'BHD · Bahrain', kw: 'bahrain dinar bhd' },
+    { code: 'JOD', label: 'JOD · Yordania', kw: 'yordania jordan dinar jod' },
+  ];
+
+  const VM_CONV_META = {
+    currency: {
+      units: VM_CURRENCY_CATALOG.map((c) => c.code),
+      defFrom: 'USD',
+      defTo: 'IDR',
+      rates: {
+        USD: 1,
+        IDR: 16250,
+        SAR: 3.75,
+        KRW: 1390,
+        JPY: 154,
+        SGD: 1.34,
+        MYR: 4.45,
+        EUR: 0.92,
+        GBP: 0.79,
+        AUD: 1.53,
+        CNY: 7.24,
+        THB: 34.6,
+        PHP: 58.6,
+        VND: 25400,
+        AED: 3.6725,
+        QAR: 3.64,
+        KWD: 0.307,
+        TRY: 34.4,
+        INR: 84.4,
+        CHF: 0.88,
+        CAD: 1.4,
+        HKD: 7.78,
+        TWD: 32.5,
+        NZD: 1.69,
+        BRL: 5.79,
+        MXN: 20.3,
+        ZAR: 18.1,
+        EGP: 49.4,
+        BND: 1.34,
+        PKR: 277.8,
+        BDT: 119.5,
+        OMR: 0.385,
+        BHD: 0.376,
+        JOD: 0.709,
+      },
+    },
+    length: { units: ['mm', 'cm', 'm', 'km', 'in', 'ft', 'mi'], defFrom: 'm', defTo: 'cm', factors: { mm: 0.001, cm: 0.01, m: 1, km: 1000, in: 0.0254, ft: 0.3048, mi: 1609.344 } },
+    mass: { units: ['mg', 'g', 'kg', 'oz', 'lb'], defFrom: 'kg', defTo: 'g', factors: { mg: 0.001, g: 1, kg: 1000, oz: 28.349523125, lb: 453.59237 } },
+    temperature: { units: ['C', 'F', 'K'], defFrom: 'C', defTo: 'F' },
+    data: { units: ['B', 'KB', 'MB', 'GB', 'KiB', 'MiB', 'GiB'], defFrom: 'GB', defTo: 'MB', factors: { B: 1, KB: 1e3, MB: 1e6, GB: 1e9, KiB: 1024, MiB: 1048576, GiB: 1073741824 } },
+    timezone: { units: ['WIB', 'WITA', 'WIT', 'UTC'], defFrom: 'WIB', defTo: 'UTC', offsets: { WIB: 7, WITA: 8, WIT: 9, UTC: 0 } },
+  };
+
+  function getFilteredShowcaseCurrencies(query) {
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return VM_CURRENCY_CATALOG;
+    return VM_CURRENCY_CATALOG.filter(
+      (c) =>
+        c.code.toLowerCase().includes(q) ||
+        c.label.toLowerCase().includes(q) ||
+        c.kw.includes(q)
+    );
+  }
+
+  function populateSelectOptions(selectEl, list, selectedVal) {
+    if (!selectEl) return;
+    clearNode(selectEl);
+    list.forEach((entry) => {
+      const value = typeof entry === 'string' ? entry : entry.code;
+      const text =
+        typeof entry === 'string'
+          ? entry === 'C'
+            ? '°C'
+            : entry === 'F'
+            ? '°F'
+            : entry
+          : entry.label;
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = text;
+      if (value === selectedVal) opt.selected = true;
+      selectEl.appendChild(opt);
+    });
+  }
+
+  function computeShowcaseConversion() {
+    if (!el.convResult || !el.convInput || !el.convFromSelect || !el.convToSelect) return '';
+    const cat = state.convCategory;
+    const from = el.convFromSelect.value;
+    const to = el.convToSelect.value;
+    const raw = (el.convInput.value || '').trim();
+    if (cat === 'timezone') {
+      const m = /^(\d{1,2})[:.](\d{2})$/.exec(raw);
+      const h = m ? Number(m[1]) : Number(raw);
+      const min = m ? Number(m[2]) : 0;
+      if (!Number.isFinite(h) || h < 0 || h > 23 || min < 0 || min > 59) {
+        el.convResult.textContent = '—';
+        return '';
+      }
+      const offs = VM_CONV_META.timezone.offsets;
+      let total = h * 60 + min + (offs[to] - offs[from]) * 60;
+      while (total < 0) total += 1440;
+      while (total >= 1440) total -= 1440;
+      const out = `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')} ${to}`;
+      el.convResult.textContent = out;
+      return out;
+    }
+    const num = Number(raw.replace(/,/g, ''));
+    if (!raw || !Number.isFinite(num)) {
+      el.convResult.textContent = '—';
+      return '';
+    }
+    let outVal = 0;
+    if (cat === 'currency') {
+      const r = VM_CONV_META.currency.rates;
+      outVal = (num / r[from]) * r[to];
+      const dec = to === 'IDR' || to === 'JPY' || to === 'KRW' || to === 'VND' ? 0 : 2;
+      const text = `${Number(outVal.toPrecision(12)).toLocaleString('en-US', { maximumFractionDigits: dec })} ${to}`;
+      el.convResult.textContent = text;
+      return Number(outVal.toFixed(dec)).toString();
+    }
+    if (cat === 'temperature') {
+      const c = from === 'C' ? num : from === 'F' ? ((num - 32) * 5) / 9 : num - 273.15;
+      outVal = to === 'C' ? c : to === 'F' ? (c * 9) / 5 + 32 : c + 273.15;
+    } else {
+      const f = VM_CONV_META[cat].factors;
+      outVal = (num * f[from]) / f[to];
+    }
+    const clean = Math.abs(outVal) < 1e-12 ? 0 : Number(outVal.toPrecision(10));
+    const unitLabel = to === 'C' ? '°C' : to === 'F' ? '°F' : to;
+    el.convResult.textContent = `${clean.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${unitLabel}`;
+    return String(clean);
+  }
+
+  function initV240ShowcaseFeatures() {
+    // Quick Module Toggle Chips inside Control Center
+    if (el.ccToggleIbadah) {
+      el.ccToggleIbadah.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.ibadahEnabled = !state.ibadahEnabled;
+        if (!state.ibadahEnabled && state.expandedTab === 'ibadah') {
+          state.expandedTab = 'control';
+        }
+        syncUI();
+      });
+    }
+    if (el.ccToggleCalc) {
+      el.ccToggleCalc.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.calcEnabled = !state.calcEnabled;
+        if (!state.calcEnabled && state.expandedTab === 'calc') {
+          state.expandedTab = 'control';
+        }
+        syncUI();
+      });
+    }
+
+    // Wi-Fi Adaptive Simulator Drawer (Password / 802.1X Enterprise / Captive Portal)
+    if (el.ccWifiBtn) {
+      el.ccWifiBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.wifiDrawerOpen = !state.wifiDrawerOpen;
+        syncCapsuleUI();
+      });
+    }
+    if (el.ccWifiCloseBtn) {
+      el.ccWifiCloseBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.wifiDrawerOpen = false;
+        syncCapsuleUI();
+      });
+    }
+    if (el.ccPortalSimBtn) {
+      el.ccPortalSimBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.wifiPortalActive = !state.wifiPortalActive;
+        syncCapsuleUI();
+      });
+    }
+    if (el.ccPortalOpenBtn) {
+      el.ccPortalOpenBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (el.ccWifiNote) {
+          el.ccWifiNote.textContent = 'Membuka http://www.msftconnecttest.com/redirect via ShellExecuteW.';
+          el.ccWifiNote.hidden = false;
+        }
+      });
+    }
+    if (el.wifiPwdToggle && el.wifiPwdForm) {
+      el.wifiPwdToggle.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        el.wifiPwdForm.hidden = !el.wifiPwdForm.hidden;
+        if (!el.wifiPwdForm.hidden && el.wifiPwdInput) el.wifiPwdInput.focus();
+      });
+    }
+    if (el.wifiPwdForm && el.wifiPwdInput) {
+      el.wifiPwdForm.addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const pwd = el.wifiPwdInput.value || '';
+        el.wifiPwdInput.value = '';
+        if (pwd.length < 8) {
+          if (el.ccWifiNote) {
+            el.ccWifiNote.textContent = 'Password minimal 8 karakter (profil dibatalkan).';
+            el.ccWifiNote.hidden = false;
+          }
+          return;
+        }
+        state.wifiConnectedSsid = 'CoffeeShop_Guest';
+        el.wifiPwdForm.hidden = true;
+        if (el.wifiStatusStudio) el.wifiStatusStudio.textContent = 'Saved';
+        if (el.ccWifiNote) {
+          el.ccWifiNote.textContent = 'Terhubung via profil in-memory WPA2-AES (0 file disk).';
+          el.ccWifiNote.hidden = false;
+        }
+        syncCapsuleUI();
+      });
+    }
+    if (el.wifiEntBtn) {
+      el.wifiEntBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (el.ccWifiNote) {
+          el.ccWifiNote.textContent = 'Enterprise 802.1X dialihkan ke ms-availablenetworks: Windows.';
+          el.ccWifiNote.hidden = false;
+        }
+      });
+    }
+
+    // Quick Calculator Split 2-Col + Keypad & Searchable Converter (v2.4.0)
+    const syncCalcOutput = () => {
+      if (!el.calcInput || !el.calcResult) return '';
+      const res = evalShowcaseMath(el.calcInput.value);
+      el.calcResult.textContent = res.ok ? `= ${res.formatted}` : res.error;
+      return res.ok ? res.copyText : '';
+    };
+    const flashShowcaseKey = (keyId) => {
+      const target = el.calcKeypadButtons.find(
+        (btn) => btn.getAttribute('data-calc-key') === keyId
+      );
+      if (!target) return;
+      target.classList.add('is-pressed');
+      window.setTimeout(() => {
+        target.classList.remove('is-pressed');
+      }, 130);
+    };
+    const copyCalcValue = () => {
+      const copyVal = syncCalcOutput();
+      if (!copyVal) return;
+      if (navigator.clipboard?.writeText) {
+        void navigator.clipboard.writeText(copyVal).catch(() => {});
+      }
+      if (el.calcCopyBtn) {
+        el.calcCopyBtn.textContent = 'Tersalin';
+        window.setTimeout(() => {
+          if (el.calcCopyBtn) el.calcCopyBtn.textContent = 'Salin';
+        }, 1200);
+      }
+    };
+    const syncCurrencyDropdownFilter = (preserveCurrent = true) => {
+      if (state.convCategory !== 'currency') return;
+      const query = el.convCurrencySearch ? el.convCurrencySearch.value : '';
+      const matches = getFilteredShowcaseCurrencies(query);
+      const list = matches.length > 0 ? matches : VM_CURRENCY_CATALOG;
+      const curFrom = preserveCurrent && el.convFromSelect ? el.convFromSelect.value : 'USD';
+      const curTo = preserveCurrent && el.convToSelect ? el.convToSelect.value : 'IDR';
+      const nextFrom = list.some((c) => c.code === curFrom) ? curFrom : list[0].code;
+      const nextTo = list.some((c) => c.code === curTo)
+        ? curTo
+        : list.find((c) => c.code !== nextFrom)?.code || list[0].code;
+      populateSelectOptions(el.convFromSelect, list, nextFrom);
+      populateSelectOptions(el.convToSelect, list, nextTo);
+      computeShowcaseConversion();
+    };
+    const syncConvCategory = (cat) => {
+      state.convCategory = VM_CONV_META[cat] ? cat : 'currency';
+      const isCurrency = state.convCategory === 'currency';
+      if (el.convSearchRow) el.convSearchRow.hidden = !isCurrency;
+      const meta = VM_CONV_META[state.convCategory];
+      if (isCurrency) {
+        if (el.convCurrencySearch) el.convCurrencySearch.value = '';
+        populateSelectOptions(el.convFromSelect, VM_CURRENCY_CATALOG, meta.defFrom);
+        populateSelectOptions(el.convToSelect, VM_CURRENCY_CATALOG, meta.defTo);
+      } else {
+        populateSelectOptions(el.convFromSelect, meta.units, meta.defFrom);
+        populateSelectOptions(el.convToSelect, meta.units, meta.defTo);
+      }
+      if (el.convInput) {
+        el.convInput.value = state.convCategory === 'timezone' ? '14:00' : isCurrency ? '10' : '1';
+      }
+      computeShowcaseConversion();
+    };
+
+    el.calcSubButtons.forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const sub = btn.getAttribute('data-calc-sub');
+        if (!sub) return;
+        state.calcSubMode = sub;
+        el.calcSubButtons.forEach((b) => {
+          const active = b.getAttribute('data-calc-sub') === sub;
+          b.classList.toggle('active', active);
+          b.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+        if (el.calcPane) el.calcPane.hidden = sub !== 'calc';
+        if (el.convPane) el.convPane.hidden = sub !== 'convert';
+      });
+    });
+
+    if (el.calcInput) {
+      el.calcInput.addEventListener('input', () => {
+        el.calcInput.value = el.calcInput.value.replace(/[xX]/g, '*');
+        syncCalcOutput();
+      });
+      el.calcInput.addEventListener('keydown', (ev) => {
+        ev.stopPropagation();
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          copyCalcValue();
+          return;
+        }
+        if (ev.key === 'Escape') {
+          ev.preventDefault();
+          el.calcInput.value = '';
+          syncCalcOutput();
+          return;
+        }
+        const keyId =
+          ev.key === 'Backspace'
+            ? 'backspace'
+            : ev.key === 'x' || ev.key === 'X'
+            ? '*'
+            : ev.key;
+        flashShowcaseKey(keyId);
+      });
+      el.calcInput.addEventListener('click', (ev) => ev.stopPropagation());
+      syncCalcOutput();
+    }
+    el.calcKeypadButtons.forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const key = btn.getAttribute('data-calc-key');
+        if (!key || !el.calcInput) return;
+        flashShowcaseKey(key);
+        if (key === 'backspace') {
+          el.calcInput.value = el.calcInput.value.slice(0, -1);
+        } else if (el.calcInput.value.length < 128) {
+          el.calcInput.value += key;
+        }
+        syncCalcOutput();
+      });
+    });
+    if (el.calcClearBtn && el.calcInput) {
+      el.calcClearBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        el.calcInput.value = '';
+        syncCalcOutput();
+      });
+    }
+    if (el.calcCopyBtn) {
+      el.calcCopyBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        copyCalcValue();
+      });
+    }
+    if (el.convCurrencySearch) {
+      el.convCurrencySearch.addEventListener('input', (ev) => {
+        ev.stopPropagation();
+        syncCurrencyDropdownFilter(true);
+      });
+      el.convCurrencySearch.addEventListener('click', (ev) => ev.stopPropagation());
+      el.convCurrencySearch.addEventListener('keydown', (ev) => ev.stopPropagation());
+    }
+    if (el.convCatSelect) {
+      el.convCatSelect.addEventListener('change', (ev) => {
+        ev.stopPropagation();
+        syncConvCategory(el.convCatSelect.value);
+      });
+    }
+    if (el.convInput) {
+      el.convInput.addEventListener('input', computeShowcaseConversion);
+      el.convInput.addEventListener('click', (ev) => ev.stopPropagation());
+    }
+    if (el.convFromSelect) el.convFromSelect.addEventListener('change', computeShowcaseConversion);
+    if (el.convToSelect) el.convToSelect.addEventListener('change', computeShowcaseConversion);
+    if (el.convSwapBtn && el.convFromSelect && el.convToSelect) {
+      el.convSwapBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const prevFrom = el.convFromSelect.value;
+        el.convFromSelect.value = el.convToSelect.value;
+        el.convToSelect.value = prevFrom;
+        computeShowcaseConversion();
+      });
+    }
+    if (el.convCopyBtn) {
+      el.convCopyBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const copyVal = computeShowcaseConversion();
+        if (!copyVal) return;
+        if (navigator.clipboard?.writeText) {
+          void navigator.clipboard.writeText(copyVal).catch(() => {});
+        }
+        el.convCopyBtn.textContent = 'Tersalin';
+        window.setTimeout(() => {
+          if (el.convCopyBtn) el.convCopyBtn.textContent = 'Salin';
+        }, 1200);
+      });
+    }
+    syncConvCategory('currency');
+  }
+
   function initVirtualMonitorControls() {
     el.modeButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -2053,10 +2764,15 @@
           state.ibadahEnabled = true;
           state.expandedTab = 'ibadah';
           if (state.mode !== 'ibadah') state.mode = 'ibadah';
+        } else if (tab === 'calc') {
+          state.calcEnabled = true;
+          state.expandedTab = 'calc';
         }
         syncUI();
       });
     });
+
+    initV240ShowcaseFeatures();
 
     el.musicSubButtons.forEach((btn) => {
       btn.addEventListener('click', (ev) => {

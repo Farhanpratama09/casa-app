@@ -34,6 +34,8 @@ export const ISLAND_DIMENSIONS = {
   EXPANDED_CONTROL_HEIGHT: 186,
   EXPANDED_IBADAH_WIDTH: 560,
   EXPANDED_IBADAH_HEIGHT: 186,
+  EXPANDED_CALCULATOR_WIDTH: 540,
+  EXPANDED_CALCULATOR_HEIGHT: 186,
   EXPANDED_DROPZONE_WIDTH: 580,
   EXPANDED_DROPZONE_HEIGHT: 192,
   POST_FULLSCREEN_HOVER_COOLDOWN_MS: 450,
@@ -52,6 +54,7 @@ export interface IslandLayoutInput {
   isAlarmRinging: boolean;
   isPrayerAlertActive?: boolean;
   isIbadahEnabled?: boolean;
+  isCalculatorEnabled?: boolean;
   isRestingSleep: boolean;
   isLyricsOpen: boolean;
   isFocusHoverPeek: boolean;
@@ -141,6 +144,11 @@ export function resolveEffectiveIslandLayout(
         case 'expanded_ibadah':
           expandedWidth = snapEvenDimension(ISLAND_DIMENSIONS.EXPANDED_IBADAH_WIDTH);
           expandedHeight = ISLAND_DIMENSIONS.EXPANDED_IBADAH_HEIGHT;
+          expandedRadius = 22;
+          break;
+        case 'expanded_calculator':
+          expandedWidth = snapEvenDimension(ISLAND_DIMENSIONS.EXPANDED_CALCULATOR_WIDTH);
+          expandedHeight = ISLAND_DIMENSIONS.EXPANDED_CALCULATOR_HEIGHT;
           expandedRadius = 22;
           break;
         case 'expanded_timer':

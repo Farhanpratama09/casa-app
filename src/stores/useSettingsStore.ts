@@ -76,6 +76,7 @@ export interface CasaSettings {
   customAlarmMeta: CustomAlarmMetadata | null;
   launchAtStartup: boolean;
   playerRegion: CasaPlayerRegion;
+  calculatorEnabled: boolean;
   ibadah: IbadahSettings;
 }
 
@@ -184,6 +185,7 @@ export const DEFAULT_CASA_SETTINGS: CasaSettings = {
   customAlarmMeta: null,
   launchAtStartup: false,
   playerRegion: 'auto',
+  calculatorEnabled: true,
   ibadah: DEFAULT_IBADAH_SETTINGS,
 };
 
@@ -371,6 +373,10 @@ function sanitizeSettings(raw: unknown): CasaSettings {
         ? input.launchAtStartup
         : DEFAULT_CASA_SETTINGS.launchAtStartup,
     playerRegion,
+    calculatorEnabled:
+      typeof input.calculatorEnabled === 'boolean'
+        ? input.calculatorEnabled
+        : DEFAULT_CASA_SETTINGS.calculatorEnabled,
     ibadah: sanitizeIbadahSettings(input.ibadah),
   };
 }

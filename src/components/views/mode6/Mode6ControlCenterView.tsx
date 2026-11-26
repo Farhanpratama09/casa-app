@@ -17,6 +17,10 @@ import {
   Headphones,
   Loader2,
   ChevronRight,
+  ExternalLink,
+  ShieldAlert,
+  MoonStar,
+  Calculator,
 } from 'lucide-react';
 import { useSystemHardware, formatAudioOutputLabel } from '../../../hooks/useSystemHardware';
 import { useSystemTelemetry } from '../../../hooks/useSystemTelemetry';
@@ -27,6 +31,7 @@ import { CASA_THEME_PALETTES, useSettingsStore } from '../../../stores/useSettin
 export interface Mode6ControlCenterViewProps {
   onOpenMusic?: () => void;
   podHostEl?: HTMLDivElement | null;
+  capsuleWidth?: number;
   isWifiPodOpen?: boolean;
   isBtPodOpen?: boolean;
   onToggleWifiPod?: () => void;
@@ -213,6 +218,7 @@ const RadialMetricCard: React.FC<RadialMetricCardProps> = ({
 
 export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
   podHostEl,
+  capsuleWidth,
   isWifiPodOpen = false,
   isBtPodOpen = false,
   onToggleWifiPod,
@@ -221,7 +227,7 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
   onCloseBtPod,
   onInteractionLock,
 }) => {
-  const { settings } = useSettingsStore();
+  const { settings, updateSettings } = useSettingsStore();
   const themePalette = CASA_THEME_PALETTES[settings.theme] || CASA_THEME_PALETTES.default;
   const overloadColor = settings.theme === 'default' ? '#EF4444' : themePalette.danger;
   const {
@@ -229,8 +235,11 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
     wifiNetworks,
     wifiScanning,
     wifiError,
+    captivePortalSsid,
     fetchWifiNetworks,
     connectWifi,
+    openCaptivePortal,
+    openEnterpriseWifiDialog,
     bluetoothDevices,
     bluetoothScanning,
     bluetoothError,
@@ -279,6 +288,9 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
         playChimeCue('ding');
         setPasswordSsid(null);
         setWifiPassword('');
+      } else {
+        // Clear password input on failed attempt so secret never lingers in DOM state
+        setWifiPassword('');
       }
     } finally {
       setConnectingSsid(null);
@@ -297,8 +309,8 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
     }
   };
 
-  // Match exact Mode6 hitbox Pod alignment around 500px main Control Center inside 1100px host
-  const MAIN_WIDTH = 500;
+  // Match exact Mode6 hitbox Pod alignment dynamically with resolveEffectiveIslandLayout width
+  const MAIN_WIDTH = capsuleWidth ?? 500;
   const POD_WIDTH = 204;
   const leftPodX = Math.round(550 - MAIN_WIDTH / 2 - 10 - POD_WIDTH);
   const rightPodX = Math.round(550 + MAIN_WIDTH / 2 + 10);
@@ -405,6 +417,37 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
               </div>
             )}
 
+            {captivePortalSsid && (
+              <div
+                data-captive-portal-banner="true"
+                style={{
+                  color: themePalette.timer,
+                  backgroundColor: `${themePalette.timer}18`,
+                  borderColor: `${themePalette.timer}48`,
+                }}
+                className="flex items-center justify-between gap-1.5 border rounded-lg px-2 py-1 shrink-0"
+              >
+                <div className="flex items-center gap-1 min-w-0">
+                  <ShieldAlert className="w-3 h-3 shrink-0" />
+                  <span className="text-[8.5px] font-semibold truncate">
+                    Perlu Login
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    playChimeCue('tap');
+                    void openCaptivePortal();
+                  }}
+                  className="inline-flex items-center gap-0.5 px-1.5 py-[2px] rounded-full bg-white text-black hover:bg-white/90 text-[8px] font-semibold cursor-pointer active:scale-95 shrink-0"
+                >
+                  <span>Buka Portal</span>
+                  <ExternalLink className="w-2 h-2" />
+                </button>
+              </div>
+            )}
+
             {/* Available Networks List */}
             <div className="flex-1 min-h-0 overflow-y-auto pr-0.5 space-y-1 [&::-webkit-scrollbar]:w-[2px] [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full">
               {wifiScanning && wifiNetworks.length === 0 ? (
@@ -420,6 +463,7 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
                 wifiNetworks.map((net) => {
                   const isPromptingPwd = passwordSsid === net.ssid;
                   const isBusy = connectingSsid === net.ssid;
+                  const authBadge = net.auth_label || (net.is_secured ? 'WPA2' : 'Open');
                   return (
                     <div
                       key={net.ssid}
@@ -437,36 +481,72 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
                           : 'bg-white/[0.03] border-white/[0.07] hover:bg-white/[0.07]'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-1.5">
-                        <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                      <div className="flex items-center justify-between gap-1">
+                        <div className="min-w-0 flex-1 flex items-center gap-1">
                           {net.is_secured ? (
                             <Lock className="w-2.5 h-2.5 text-white/45 shrink-0" />
                           ) : (
                             <Wifi className="w-2.5 h-2.5 text-white/60 shrink-0" />
                           )}
                           <span
-                            className="text-[10px] font-medium text-white truncate"
-                            title={`${net.ssid} (${net.signal_quality}%)`}
+                            className="text-[9.5px] font-medium text-white truncate"
+                            title={`${net.ssid} · ${authBadge}${net.cipher_label && net.cipher_label !== 'None' ? `/${net.cipher_label}` : ''} (${net.signal_quality}%)`}
                           >
                             {net.ssid}
                           </span>
+                          <span className="px-1 py-[0.5px] rounded bg-white/[0.07] text-[7px] font-mono text-white/55 shrink-0">
+                            {authBadge}
+                          </span>
                         </div>
 
-                        <span className="text-[8.5px] font-mono tabular-nums text-white/40 shrink-0">
+                        <span className="text-[8px] font-mono tabular-nums text-white/40 shrink-0">
                           {net.signal_quality}%
                         </span>
 
                         {net.is_connected ? (
-                          <span
-                            style={{
-                              backgroundColor: `${themePalette.wifi}26`,
-                              color: themePalette.wifi,
+                          net.is_captive_portal ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                playChimeCue('tap');
+                                void openCaptivePortal();
+                              }}
+                              style={{
+                                backgroundColor: `${themePalette.timer}26`,
+                                color: themePalette.timer,
+                              }}
+                              className="inline-flex items-center gap-0.5 px-1.5 py-[2px] rounded-full text-[8px] font-semibold cursor-pointer shrink-0"
+                              title="Wi-Fi ini memerlukan login Captive Portal"
+                            >
+                              <span>Perlu Login</span>
+                            </button>
+                          ) : (
+                            <span
+                              style={{
+                                backgroundColor: `${themePalette.wifi}26`,
+                                color: themePalette.wifi,
+                              }}
+                              className="inline-flex items-center gap-0.5 px-1.5 py-[2px] rounded-full text-[8px] font-semibold shrink-0"
+                            >
+                              <Check className="w-2.5 h-2.5" />
+                              Active
+                            </span>
+                          )
+                        ) : net.is_enterprise && !net.has_profile ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              playChimeCue('tap');
+                              void openEnterpriseWifiDialog();
                             }}
-                            className="inline-flex items-center gap-0.5 px-1.5 py-[2px] rounded-full text-[8.5px] font-semibold shrink-0"
+                            title="Jaringan Enterprise (802.1X) — buka dialog jaringan Windows"
+                            className="inline-flex items-center gap-0.5 px-1.5 py-[2px] rounded-full bg-white/[0.12] hover:bg-white/[0.22] border border-white/15 text-white text-[8px] font-semibold cursor-pointer active:scale-95 shrink-0"
                           >
-                            <Check className="w-2.5 h-2.5" />
-                            Active
-                          </span>
+                            <span>802.1X</span>
+                            <ExternalLink className="w-2 h-2" />
+                          </button>
                         ) : (
                           <button
                             type="button"
@@ -489,7 +569,7 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
                         )}
                       </div>
 
-                      {isPromptingPwd && !net.is_connected && (
+                      {isPromptingPwd && !net.is_connected && !net.is_enterprise && (
                         <form
                           onSubmit={(e) => {
                             e.preventDefault();
@@ -501,19 +581,21 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
                           <input
                             type="password"
                             autoFocus
+                            minLength={8}
+                            maxLength={64}
                             value={wifiPassword}
                             onFocus={() => void focusIslandWindow()}
                             onChange={(e) => setWifiPassword(e.target.value)}
                             onKeyDown={(e) => e.stopPropagation()}
-                            placeholder="Password Wi-Fi..."
-                            className="flex-1 min-w-0 h-5 px-1.5 rounded bg-black/60 border border-white/20 text-[9.5px] text-white placeholder-white/35 outline-none"
+                            placeholder="Password (8-63 char)..."
+                            className="flex-1 min-w-0 h-5 px-1.5 rounded bg-black/60 border border-white/20 text-[9px] text-white placeholder-white/35 outline-none"
                           />
                           <button
                             type="submit"
-                            disabled={!wifiPassword.trim() || isBusy}
+                            disabled={wifiPassword.length < 8 || isBusy}
                             className="h-5 px-2 rounded bg-white text-black text-[9px] font-semibold cursor-pointer disabled:opacity-40 shrink-0"
                           >
-                            Join
+                            {isBusy ? '...' : 'Join'}
                           </button>
                         </form>
                       )}
@@ -713,12 +795,81 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
         data-tauri-drag-region="false"
         className="w-full h-full bg-[#000000] px-3.5 pt-[2px] pb-[5px] flex flex-col justify-between gap-[2px] select-none"
       >
-        {/* Header Bar: System Control + Active Audio Output + Connected BT Battery + BatteryPill */}
-        <div className="flex items-center justify-between gap-2 h-[15px] px-0.5 shrink-0">
-          <span className="font-sans text-[9px] font-semibold tracking-[0.08em] uppercase text-white/40 leading-none shrink-0">
-            System Control
-          </span>
-          <div className="flex items-center justify-end gap-1.5 min-w-0">
+        {/* Header Bar: System Control + Quick Module Chips (Ibadah / Calc) + Active Audio/BT/Battery */}
+        <div className="flex items-center justify-between gap-1.5 h-[16px] px-0.5 shrink-0">
+          <div className="flex items-center gap-1.5 min-w-0 shrink-0">
+            <span className="font-sans text-[8.5px] font-semibold tracking-[0.08em] uppercase text-white/40 leading-none shrink-0">
+              Control
+            </span>
+            <button
+              type="button"
+              data-quick-module-toggle="ibadah"
+              aria-pressed={settings.ibadah.enabled}
+              onClick={(e) => {
+                e.stopPropagation();
+                playChimeCue('tap');
+                updateSettings((prev) => ({
+                  ...prev,
+                  ibadah: { ...prev.ibadah, enabled: !prev.ibadah.enabled },
+                }));
+              }}
+              title={
+                settings.ibadah.enabled
+                  ? 'Nonaktifkan tab modul Ibadah'
+                  : 'Aktifkan tab modul Ibadah'
+              }
+              style={
+                settings.ibadah.enabled
+                  ? {
+                      borderColor: `${themePalette.ibadah}70`,
+                      backgroundColor: `${themePalette.ibadah}22`,
+                      color: themePalette.ibadah,
+                    }
+                  : undefined
+              }
+              className={`inline-flex items-center gap-0.5 px-1.5 h-[14px] rounded-full border text-[8px] font-semibold leading-none cursor-pointer transition-colors active:scale-95 ${
+                settings.ibadah.enabled
+                  ? ''
+                  : 'bg-[#0a0a0a] border-white/[0.10] text-white/45 hover:text-white/80 hover:border-white/[0.20]'
+              }`}
+            >
+              <MoonStar className="w-2 h-2 shrink-0" />
+              <span>Ibadah</span>
+            </button>
+            <button
+              type="button"
+              data-quick-module-toggle="calc"
+              aria-pressed={settings.calculatorEnabled}
+              onClick={(e) => {
+                e.stopPropagation();
+                playChimeCue('tap');
+                updateSettings({ calculatorEnabled: !settings.calculatorEnabled });
+              }}
+              title={
+                settings.calculatorEnabled
+                  ? 'Nonaktifkan tab modul Kalkulator (Calc)'
+                  : 'Aktifkan tab modul Kalkulator (Calc)'
+              }
+              style={
+                settings.calculatorEnabled
+                  ? {
+                      borderColor: `${themePalette.timer}70`,
+                      backgroundColor: `${themePalette.timer}20`,
+                      color: themePalette.timer,
+                    }
+                  : undefined
+              }
+              className={`inline-flex items-center gap-0.5 px-1.5 h-[14px] rounded-full border text-[8px] font-semibold leading-none cursor-pointer transition-colors active:scale-95 ${
+                settings.calculatorEnabled
+                  ? ''
+                  : 'bg-[#0a0a0a] border-white/[0.10] text-white/45 hover:text-white/80 hover:border-white/[0.20]'
+              }`}
+            >
+              <Calculator className="w-2 h-2 shrink-0" />
+              <span>Calc</span>
+            </button>
+          </div>
+          <div className="flex items-center justify-end gap-1 min-w-0">
             {telemetry.bluetooth_enabled && connectedBtDevices.length > 0 && (
               <button
                 type="button"

@@ -9,6 +9,8 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   scanWifiNetworks,
   connectWifiNetwork,
+  openCaptivePortalBrowser,
+  openAvailableWifiNetworks,
   listPairedBluetooth,
   toggleBluetoothDevice,
   type WifiNetworkItem,
@@ -677,6 +679,33 @@ export function useSystemHardware() {
     }
   }, []);
 
+  const openCaptivePortal = useCallback(async () => {
+    if (!isTauriEnv) return false;
+    try {
+      await openCaptivePortalBrowser();
+      return true;
+    } catch (err) {
+      const msg = typeof err === 'string' ? err : 'Gagal membuka halaman login portal Wi-Fi.';
+      setWifiError(msg);
+      return false;
+    }
+  }, []);
+
+  const openEnterpriseWifiDialog = useCallback(async () => {
+    if (!isTauriEnv) return false;
+    try {
+      await openAvailableWifiNetworks();
+      return true;
+    } catch (err) {
+      const msg = typeof err === 'string' ? err : 'Gagal membuka dialog jaringan Windows.';
+      setWifiError(msg);
+      return false;
+    }
+  }, []);
+
+  const captivePortalSsid =
+    wifiNetworks.find((n) => n.is_connected && n.is_captive_portal)?.ssid ?? null;
+
   return {
     telemetry,
     hudAlert,
@@ -688,8 +717,11 @@ export function useSystemHardware() {
     wifiNetworks,
     wifiScanning,
     wifiError,
+    captivePortalSsid,
     fetchWifiNetworks,
     connectWifi,
+    openCaptivePortal,
+    openEnterpriseWifiDialog,
     bluetoothDevices,
     bluetoothScanning,
     bluetoothError,

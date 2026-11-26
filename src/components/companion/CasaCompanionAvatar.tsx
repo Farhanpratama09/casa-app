@@ -1,10 +1,11 @@
-import React, { memo } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import type { CompanionMood } from '../../hooks/useCompanionMood';
 import { useSkillStore } from '../../skills/store';
 import { useSystemHardware } from '../../hooks/useSystemHardware';
 import { useSystemTelemetry } from '../../hooks/useSystemTelemetry';
 import { usePrayerStore } from '../../features/ibadah/prayerStore';
+import { useDropZoneStore } from '../../stores/useDropZoneStore';
 
 export type CompanionExpression =
   | 'prayer'      // ✦ ☾ (Waktu Ibadah tiba - Bintang & Bulan Sabit Pure Monochrome OLED)
@@ -13,6 +14,7 @@ export type CompanionExpression =
   | 'focus'       // •̀ ♥ (Focus timer berjalan)
   | 'music'       // ♪ ♥ (Musik diputar)
   | 'awake_lock'  // ✦ ♥ (Keep Awake aktif)
+  | 'drop_zone'   // ◈ ♥ (Drop Zone memiliki berkas/item transit)
   | 'low_battery' // × ♡ (Baterai laptop < 15% & tidak dicas)
   | 'idle';       // × ♥ (Default idle)
 
@@ -22,6 +24,7 @@ export interface CompanionExpressionInputs {
   isTimerRunning: boolean;
   isPlaying: boolean;
   keepAwake: boolean;
+  hasDropItems?: boolean;
   hasBattery: boolean;
   batteryLevel: number;
   isCharging: boolean;
@@ -29,14 +32,15 @@ export interface CompanionExpressionInputs {
 
 /**
  * Pure priority resolver for reactive companion eye expressions:
- * 1. prayer (• ‿ •)
+ * 1. prayer (✦ ☾)
  * 2. alarm (> <)
  * 3. dual_active (•̀ ♪)
  * 4. focus (•̀ ♥)
  * 5. music (♪ ♥)
  * 6. awake_lock (✦ ♥)
- * 7. low_battery (× ♡)
- * 8. idle (× ♥)
+ * 7. drop_zone (◈ ♥)
+ * 8. low_battery (× ♡)
+ * 9. idle (× ♥)
  */
 export function resolveCompanionExpression({
   isPrayerAlert = false,
@@ -44,6 +48,7 @@ export function resolveCompanionExpression({
   isTimerRunning,
   isPlaying,
   keepAwake,
+  hasDropItems = false,
   hasBattery,
   batteryLevel,
   isCharging,
@@ -54,6 +59,7 @@ export function resolveCompanionExpression({
   if (isTimerRunning) return 'focus';
   if (isPlaying) return 'music';
   if (keepAwake) return 'awake_lock';
+  if (hasDropItems) return 'drop_zone';
   if (hasBattery && !isCharging && batteryLevel < 15) return 'low_battery';
   return 'idle';
 }
@@ -64,6 +70,7 @@ export interface CasaCompanionAvatarProps {
   isAlarmRinging?: boolean;
   isPrayerAlert?: boolean;
   keepAwake?: boolean;
+  hasDropItems?: boolean;
   batteryLevel?: number;
   isCharging?: boolean;
   mood?: CompanionMood;
@@ -79,6 +86,7 @@ const EXPRESSION_TITLES: Record<CompanionExpression, string> = {
   focus: 'CASA (•̀ ♥ Focus Active)',
   music: 'CASA (♪ ♥ Music Playing)',
   awake_lock: 'CASA (✦ ♥ Keep Awake)',
+  drop_zone: 'CASA (◈ ♥ Drop Zone Ready)',
   low_battery: 'CASA (× ♡ Low Battery)',
   idle: 'CASA (× ♥ Standby)',
 };
@@ -91,6 +99,7 @@ const EXPRESSION_TITLES: Record<CompanionExpression, string> = {
  * - focus:       •̀ ♥
  * - music:       ♪ ♥
  * - awake_lock:  ✦ ♥
+ * - drop_zone:   ◈ ♥
  * - low_battery: × ♡
  * - idle:        × ♥
  */
@@ -100,6 +109,7 @@ export const CasaCompanionAvatar: React.FC<CasaCompanionAvatarProps> = memo(({
   isAlarmRinging: propIsAlarmRinging,
   isPrayerAlert: propIsPrayerAlert,
   keepAwake: propKeepAwake,
+  hasDropItems: propHasDropItems,
   batteryLevel: propBatteryLevel,
   isCharging: propIsCharging,
   expression,
@@ -116,6 +126,17 @@ export const CasaCompanionAvatar: React.FC<CasaCompanionAvatarProps> = memo(({
   });
   const timerState = useSkillStore((s) => s.skillStates['core.timer']);
   const prayerStore = usePrayerStore();
+  const dropZoneCount = useDropZoneStore((s) => s.items.length);
+  const prevDropCountRef = useRef(dropZoneCount);
+  const [dropPopTick, setDropPopTick] = useState(0);
+
+  useEffect(() => {
+    if (dropZoneCount > prevDropCountRef.current) {
+      setDropPopTick((t) => t + 1);
+    }
+    prevDropCountRef.current = dropZoneCount;
+  }, [dropZoneCount]);
+
   const { telemetry } = useSystemHardware();
   const { stats: systemStats, isLoaded: systemStatsLoaded } = useSystemTelemetry(false);
 
@@ -134,6 +155,7 @@ export const CasaCompanionAvatar: React.FC<CasaCompanionAvatarProps> = memo(({
       : Boolean(prayerStore.activeAlert && !prayerStore.activeAlert.suppressVisual);
   const keepAwake =
     propKeepAwake !== undefined ? propKeepAwake : Boolean(telemetry.stay_awake);
+  const hasDropItems = propHasDropItems !== undefined ? propHasDropItems : dropZoneCount > 0;
 
   const hasBattery = systemStatsLoaded
     ? systemStats.battery.has_battery
@@ -159,6 +181,7 @@ export const CasaCompanionAvatar: React.FC<CasaCompanionAvatarProps> = memo(({
       isTimerRunning,
       isPlaying,
       keepAwake,
+      hasDropItems,
       hasBattery,
       batteryLevel,
       isCharging,
@@ -235,6 +258,23 @@ export const CasaCompanionAvatar: React.FC<CasaCompanionAvatarProps> = memo(({
             d="M 8.5,1.8 Q 8.8,7.6 14.6,8 Q 8.8,8.4 8.5,14.2 Q 8.2,8.4 2.4,8 Q 8.2,7.6 8.5,1.8 Z"
             fill="#ffffff"
           />
+        );
+      case 'drop_zone':
+        // ◈ crisp geometric diamond package (distinct from ✦ prayer/awake sparkle)
+        return (
+          <>
+            <path
+              d="M 8,2.2 L 13.8,8 L 8,13.8 L 2.2,8 Z"
+              fill="none"
+              stroke="#ffffff"
+              strokeWidth="1.7"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M 8,5.4 L 10.6,8 L 8,10.6 L 5.4,8 Z"
+              fill="#ffffff"
+            />
+          </>
         );
       case 'low_battery':
       case 'idle':
@@ -359,7 +399,19 @@ export const CasaCompanionAvatar: React.FC<CasaCompanionAvatarProps> = memo(({
         className={`${svgSizeClass} shrink-0 overflow-visible`}
         aria-hidden="true"
       >
-        {renderLeftEye()}
+        <motion.g
+          key={resolvedExpression === 'drop_zone' ? `drop-eye-${dropPopTick}` : 'left-eye'}
+          initial={
+            resolvedExpression === 'drop_zone'
+              ? { scale: 0.58, opacity: 0.75 }
+              : false
+          }
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 520, damping: 18 }}
+          style={{ originX: '8px', originY: '8px' }}
+        >
+          {renderLeftEye()}
+        </motion.g>
         {renderRightEye()}
       </svg>
     </motion.div>

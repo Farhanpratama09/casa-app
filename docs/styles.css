@@ -420,6 +420,11 @@ textarea {
   height: 186px;
 }
 
+.vm-notch-capsule[data-state="expanded"][data-variant="calc"] {
+  width: min(540px, calc(100% - 8px));
+  height: 186px;
+}
+
 .vm-notch-capsule[data-state="expanded"][data-variant="dropzone"] {
   width: min(580px, calc(100% - 8px));
   height: 192px;
@@ -496,6 +501,22 @@ textarea {
   height: 15px;
   opacity: 1;
   transition: opacity 0.26s ease;
+}
+
+@keyframes vmEyePop {
+  0% {
+    transform: scale(0.62);
+  }
+  60% {
+    transform: scale(1.16);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.casa-eye-pop {
+  animation: vmEyePop 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .casa-compact-eyes-pill[data-sleep="true"] .casa-compact-eye {
@@ -1224,30 +1245,79 @@ textarea {
 }
 
 .casa-m6-tab {
-  padding: 3px 8px;
+  padding: 4px 7px;
   border-radius: 9999px;
   border: 1px solid transparent;
   background: transparent;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.52);
   font-size: 10px;
   font-weight: 500;
   line-height: 1;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 0.14s ease, background 0.14s ease, padding 0.14s ease;
+}
+
+.casa-m6-tab-ico {
+  flex-shrink: 0;
+}
+
+.casa-m6-tab[aria-selected="false"] .casa-m6-tab-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .casa-m6-tab:hover {
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .casa-m6-tab[aria-selected="true"] {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
+  padding: 4px 9px;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #f4f4f5;
   font-weight: 600;
+}
+
+.casa-m6-tab[aria-selected="true"][data-m6-tab="music"] .casa-m6-tab-ico {
+  color: #ffffff;
+  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.55));
+}
+
+.casa-m6-tab[aria-selected="true"][data-m6-tab="todo"] .casa-m6-tab-ico {
+  color: #facc15;
+  filter: drop-shadow(0 0 5px rgba(250, 204, 21, 0.55));
+}
+
+.casa-m6-tab[aria-selected="true"][data-m6-tab="dropzone"] .casa-m6-tab-ico {
+  color: #38bdf8;
+  filter: drop-shadow(0 0 5px rgba(56, 189, 248, 0.55));
+}
+
+.casa-m6-tab[aria-selected="true"][data-m6-tab="ibadah"] .casa-m6-tab-ico {
+  color: #10b981;
+  filter: drop-shadow(0 0 5px rgba(16, 185, 129, 0.55));
+}
+
+.casa-m6-tab[aria-selected="true"][data-m6-tab="calc"] .casa-m6-tab-ico {
+  color: #fb923c;
+  filter: drop-shadow(0 0 5px rgba(251, 146, 60, 0.55));
+}
+
+.casa-m6-tab[aria-selected="true"][data-m6-tab="hud"] .casa-m6-tab-ico {
+  color: #a78bfa;
+  filter: drop-shadow(0 0 5px rgba(167, 139, 250, 0.55));
 }
 
 .casa-m6-drop-badge {
@@ -1258,6 +1328,11 @@ textarea {
   font-family: var(--font-mono);
   font-size: 8.5px;
   font-weight: 700;
+}
+
+.casa-m6-tab[aria-selected="true"] .casa-m6-drop-badge {
+  background: rgba(255, 255, 255, 0.2);
+  color: #f4f4f5;
 }
 
 .casa-m6-head-right {
@@ -1752,6 +1827,37 @@ textarea {
   height: 16px;
 }
 
+.casa-prod-title-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+@keyframes vmFocusTimerPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.94);
+  }
+}
+
+.casa-focus-timer-ico {
+  color: #ffffff;
+  flex-shrink: 0;
+}
+
+.casa-focus-timer-ico.running {
+  animation: vmFocusTimerPulse 1.6s ease-in-out infinite;
+}
+
+.casa-focus-timer-ico.paused {
+  opacity: 0.42;
+}
+
 .casa-prod-title {
   font-size: 10px;
   font-weight: 600;
@@ -1916,13 +2022,400 @@ textarea {
   color: #000000;
 }
 
-/* Mode 6 Control Center (500x186 3-row exact layout) */
+/* Mode 6 Control Center (500x186 3-row exact layout + v2.4.0 Quick Chips & Wi-Fi Drawer) */
 .casa-m6-control {
-  padding: 8px 14px 10px;
+  position: relative;
+  padding: 5px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 5px;
+}
+
+.casa-cc-head-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 16px;
+}
+
+.casa-cc-head-title {
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.casa-cc-module-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.casa-cc-chip {
+  height: 15px;
+  padding: 0 7px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #0a0a0a;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.casa-cc-chip.active {
+  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+.casa-cc-wifi-drawer {
+  position: absolute;
+  inset: 4px 10px 6px;
+  z-index: 6;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #050507;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.92);
+}
+
+.casa-cc-wifi-drawer[hidden],
+.casa-cc-portal-bar[hidden],
+.casa-cc-wifi-pwd-form[hidden],
+.casa-cc-wifi-note[hidden],
+.casa-calc-body[hidden] {
+  display: none !important;
+}
+
+.casa-cc-wifi-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #ffffff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 4px;
+}
+
+.casa-cc-wifi-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.casa-cc-portal-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px 7px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 8.5px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.casa-cc-wifi-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+.casa-cc-wifi-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 9px;
+  color: #ffffff;
+}
+
+.casa-cc-auth-tag {
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 7.5px;
+  padding: 1px 4px;
+  margin-left: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.casa-cc-wifi-status {
+  font-size: 8px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.casa-cc-wifi-pwd-form {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.casa-cc-wifi-pwd-form input {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #000000;
+  color: #ffffff;
+  font-size: 9px;
+}
+
+.casa-cc-wifi-note {
+  font-size: 8px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.casa-cc-mini-btn {
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  font-size: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.casa-cc-mini-btn.primary {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: #000000;
+}
+
+/* Mode 6 Quick Calculator & Offline Converter (v2.4.0) */
+.casa-m6-calc {
+  padding: 7px 14px 10px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   gap: 7px;
+}
+
+.casa-calc-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.casa-calc-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #0a0a0a;
+}
+
+.casa-calc-sub-btn {
+  padding: 3px 9px;
+  border-radius: 9999px;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 9.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.casa-calc-sub-btn.active {
+  background: #ffffff;
+  color: #000000;
+}
+
+.casa-calc-badge {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.casa-calc-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.casa-calc-split {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.06fr) minmax(0, 0.94fr);
+  gap: 8px;
+}
+
+.casa-calc-split-left {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 5px;
+  min-width: 0;
+}
+
+.casa-calc-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.casa-calc-copy-wide {
+  flex: 1;
+}
+
+.casa-calc-keypad {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.casa-keypad-btn {
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: #0b0b0e;
+  color: #ffffff;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 2px 0;
+  transition: background 0.1s ease, color 0.1s ease, border-color 0.1s ease, transform 0.08s ease;
+}
+
+.casa-keypad-btn.is-op {
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.casa-keypad-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+.casa-keypad-btn.is-pressed,
+.casa-keypad-btn:active {
+  background: #f4f4f5;
+  border-color: #f4f4f5;
+  color: #09090b;
+  transform: scale(0.95);
+}
+
+.casa-conv-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.casa-conv-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: #0b0b0e;
+  color: #ffffff;
+  font-size: 10px;
+  outline: none;
+}
+
+.casa-conv-fx-badge {
+  padding: 2px 7px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #0a0a0a;
+  color: rgba(255, 255, 255, 0.62);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.casa-calc-input-row,
+.casa-conv-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.casa-calc-input,
+.casa-conv-input,
+.casa-conv-select {
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #0a0a0a;
+  color: #ffffff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  outline: none;
+}
+
+.casa-calc-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.casa-conv-input {
+  width: 78px;
+  min-width: 0;
+}
+
+.casa-conv-select {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-size: 10px;
+}
+
+.casa-calc-result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 11px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #0a0a0a;
+}
+
+.casa-calc-result-val {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .casa-cc-tiles {
@@ -3470,7 +3963,8 @@ textarea {
   }
 
   .casa-m6-music,
-  .casa-m6-focus {
+  .casa-m6-focus,
+  .casa-calc-split {
     grid-template-columns: 1fr;
   }
 

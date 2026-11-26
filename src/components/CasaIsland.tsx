@@ -18,6 +18,7 @@ import { MediaExpandedView } from '../features/media/MediaExpandedView';
 import { TimerExpandedView } from '../features/timer/TimerExpandedView';
 import { TodoExpandedView } from '../features/todo/TodoExpandedView';
 import { IbadahExpandedView } from '../features/ibadah/IbadahExpandedView';
+import { CalculatorExpandedView } from '../features/calculator/CalculatorExpandedView';
 import { resolvePrayerVisualTheme } from '../features/ibadah/prayerScheduleLogic';
 import {
   notifyPrayerSettingsChanged,
@@ -150,6 +151,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   const isIbadahEnabled = settings.ibadah.enabled;
   const isIbadahEnabledRef = useRef<boolean>(isIbadahEnabled);
   isIbadahEnabledRef.current = isIbadahEnabled;
+  const isCalculatorEnabled = settings.calculatorEnabled;
+  const isCalculatorEnabledRef = useRef<boolean>(isCalculatorEnabled);
+  isCalculatorEnabledRef.current = isCalculatorEnabled;
   const placementMode = settings.placementMode;
   const isFloatingMode = placementMode === 'floating';
   const horizontalAlign = settings.horizontalAlign;
@@ -1124,6 +1128,12 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       onChangeModeRef.current('expanded_music');
     }
   }, [settings.ibadah]);
+
+  useEffect(() => {
+    if (!settings.calculatorEnabled && modeRef.current === 'expanded_calculator') {
+      onChangeModeRef.current('expanded_music');
+    }
+  }, [settings.calculatorEnabled]);
 
   // Auto-Tuck Quiet Idle Scheduler (10s after quiet idle if setting enabled)
   useEffect(() => {
@@ -2529,20 +2539,14 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       if (currentState === 'idle' || currentState === 'tucked_peek') {
         useSkillStore.getState().cycleActiveSkill(dirStep);
       } else if (isExpandedView || isPeeking) {
-        const modes: IslandMode[] = isIbadahEnabledRef.current
-          ? [
-              'expanded_music',
-              'expanded_timer',
-              'expanded_control',
-              'drop_zone',
-              'expanded_ibadah',
-            ]
-          : [
-              'expanded_music',
-              'expanded_timer',
-              'expanded_control',
-              'drop_zone',
-            ];
+        const modes: IslandMode[] = [
+          'expanded_music',
+          'expanded_timer',
+          'drop_zone',
+          ...(isIbadahEnabledRef.current ? (['expanded_ibadah'] as IslandMode[]) : []),
+          ...(isCalculatorEnabledRef.current ? (['expanded_calculator'] as IslandMode[]) : []),
+          'expanded_control',
+        ];
         const normalizedMode =
           effectiveExpandedMode === 'expanded_todo' ? 'expanded_timer' : effectiveExpandedMode;
         const currentIdx = modes.indexOf(normalizedMode);
@@ -3315,6 +3319,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                             <Mode6ControlCenterView
                               onOpenMusic={() => handleSelectMode('expanded_music')}
                               podHostEl={podHostEl}
+                              capsuleWidth={width}
                               isWifiPodOpen={effectiveLeftPodOpen}
                               isBtPodOpen={effectiveRightPodOpen}
                               onToggleWifiPod={() => {
@@ -3337,6 +3342,10 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
 
                           {effectiveExpandedMode === 'expanded_ibadah' && (
                             <IbadahExpandedView />
+                          )}
+
+                          {effectiveExpandedMode === 'expanded_calculator' && (
+                            <CalculatorExpandedView />
                           )}
 
                           {effectiveExpandedMode === 'drop_zone' && (

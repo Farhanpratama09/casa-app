@@ -354,7 +354,7 @@ async function main() {
     const m6OpenCheck = await page.evaluate(() => ({
       expanded: document.getElementById('vm-notch-capsule')?.getAttribute('data-state') === 'expanded',
       variant: document.getElementById('vm-notch-capsule')?.getAttribute('data-variant'),
-      hasNavTabs: document.querySelectorAll('.casa-m6-tab:not([hidden])').length === 4,
+      hasNavTabs: document.querySelectorAll('.casa-m6-tab:not([hidden])').length === 5,
     }));
     await page.keyboard.down('AltLeft');
     await page.keyboard.press('Space');
@@ -642,7 +642,7 @@ async function main() {
     }));
 
     check(
-      ibadahPanelAudit.visibleTabs === 5 &&
+      ibadahPanelAudit.visibleTabs === 6 &&
         ibadahPanelAudit.ibadahOpen &&
         ibadahPanelAudit.hasParabolicSvg &&
         ibadahPanelAudit.hasRefreshNearCity &&
@@ -668,6 +668,138 @@ async function main() {
         afterStopOnTodoAudit.stayedExpanded,
       `Mode 6 (Pengingat Ibadah v2.1.0): 5 clickable sky-phase previews (Subuh→Isya), T-0 pill (✦ ☾ + hoverExpandLocked) & non-switching Mode 6 banner (Ibadah + Focus & Tasks) verified`,
       !allPhasePreviewsOk ? JSON.stringify(phasePreviewResults.filter((r) => !r.ok)) : ''
+    );
+
+    // Mode 6 v2.4.0: Hybrid Morphing 6-Tab Nav (Kontrol Last + High Contrast), 2-Col Keypad Calc, Searchable Converter, Focus Icon & Drop Zone ◈ ♥ Eye
+    await page.click('[data-m6-tab="calc"]');
+    await new Promise((r) => setTimeout(r, 220));
+    const v240CalcAudit = await page.evaluate(() => {
+      const capsule = document.getElementById('vm-notch-capsule');
+      const calcPanel = document.getElementById('vm-exp-calc');
+      const calcInput = document.getElementById('vm-calc-input');
+      const calcRes = document.getElementById('vm-calc-result');
+      const hybridNav = document.querySelector('.casa-m6-nav[data-hybrid-nav="true"]');
+      const visibleTabs = Array.from(document.querySelectorAll('.casa-m6-tab')).filter((b) => !b.hidden);
+      const lastTabAttr = visibleTabs[visibleTabs.length - 1]?.getAttribute('data-m6-tab');
+      const activeTabEl = visibleTabs.find((b) => b.getAttribute('aria-selected') === 'true');
+      const activeStyle = activeTabEl ? window.getComputedStyle(activeTabEl) : null;
+      const activeIconEl = activeTabEl?.querySelector('.casa-m6-tab-ico') || null;
+      const activeIconStyle = activeIconEl ? window.getComputedStyle(activeIconEl) : null;
+
+      // Test 2-col keypad buttons (C -> 9 * 6 -> = 54) + x->* mapping (250000 - 10% -> = 225,000)
+      const hasSplit2Col = Boolean(document.querySelector('#vm-calc-pane[data-calc-layout="split-2col"]'));
+      const keypadCount = document.querySelectorAll('#vm-calc-keypad .casa-keypad-btn').length;
+      document.getElementById('vm-calc-clear-btn')?.click();
+      document.querySelector('#vm-calc-keypad [data-calc-key="9"]')?.click();
+      document.querySelector('#vm-calc-keypad [data-calc-key="*"]')?.click();
+      document.querySelector('#vm-calc-keypad [data-calc-key="6"]')?.click();
+      const keypadMath = calcRes?.textContent?.trim() || '';
+
+      calcInput.value = '250000 - 10%';
+      calcInput.dispatchEvent(new Event('input', { bubbles: true }));
+      const afterMath = calcRes?.textContent?.trim() || '';
+
+      document.querySelector('[data-calc-sub="convert"]')?.click();
+      const convRes = document.getElementById('vm-conv-result')?.textContent?.trim() || '';
+      const searchInput = document.getElementById('vm-conv-currency-search');
+      if (searchInput) {
+        searchInput.value = 'Arab Saudi';
+        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      const filteredCodes = Array.from(document.getElementById('vm-conv-from')?.options || []).map((o) => o.value);
+      if (searchInput) {
+        searchInput.value = '';
+        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      return {
+        hasHybridNav: Boolean(hybridNav),
+        visibleTabCount: visibleTabs.length,
+        lastTabIsKontrol: lastTabAttr === 'hud',
+        activeBg: activeStyle?.backgroundColor || '',
+        activeColor: activeStyle?.color || '',
+        activeIconColor: activeIconStyle?.color || '',
+        activeIconFilter: activeIconStyle?.filter || '',
+        hasSplit2Col,
+        keypadCount,
+        keypadMath,
+        variant: capsule?.getAttribute('data-variant'),
+        calcVisible: Boolean(calcPanel && !calcPanel.hidden),
+        afterMath,
+        foundSarOnSaudiSearch: filteredCodes.includes('SAR'),
+        convRes,
+      };
+    });
+
+    await page.click('[data-m6-tab="todo"]');
+    await new Promise((r) => setTimeout(r, 120));
+    const focusIconAudit = await page.evaluate(() => {
+      const ico = document.getElementById('vm-focus-timer-ico');
+      const runningClass = ico?.classList.contains('running') === true;
+      document.getElementById('vm-exp-timer-btn')?.click();
+      const pausedClass = ico?.classList.contains('paused') === true;
+      document.getElementById('vm-exp-timer-btn')?.click();
+      return { runningClass, pausedClass };
+    });
+
+    await page.click('[data-m6-tab="dropzone"]');
+    await new Promise((r) => setTimeout(r, 120));
+    const dropEyeAudit = await page.evaluate(() => {
+      document.getElementById('vm-dropzone-paste-btn')?.click();
+      const exprWhenParked = document.getElementById('vm-m6-eyes')?.getAttribute('data-companion-expression');
+      const compactDropEye = document.getElementById('vm-resting-left-eye')?.getAttribute('data-drop-eye');
+      document.getElementById('vm-copy-back-btn')?.click();
+      const exprWhenEmpty = document.getElementById('vm-resting-left-eye')?.getAttribute('data-drop-eye');
+      return { exprWhenParked, compactDropEye, exprWhenEmpty };
+    });
+
+    await page.keyboard.down('AltLeft');
+    await page.keyboard.press('Space');
+    await page.keyboard.up('AltLeft');
+    await new Promise((r) => setTimeout(r, 150));
+
+    await page.click('[data-m6-tab="hud"]');
+    await new Promise((r) => setTimeout(r, 150));
+    const v240WifiAudit = await page.evaluate(() => {
+      document.getElementById('vm-cc-wifi-btn')?.click();
+      const drawerOpen = !document.getElementById('vm-cc-wifi-drawer')?.hidden;
+      document.getElementById('vm-cc-portal-sim-btn')?.click();
+      const portalVisible = !document.getElementById('vm-cc-portal-bar')?.hidden;
+      document.getElementById('vm-wifi-ent-btn')?.click();
+      const entNote = document.getElementById('vm-cc-wifi-note')?.textContent || '';
+      document.getElementById('vm-cc-wifi-close-btn')?.click();
+      return {
+        drawerOpen,
+        portalVisible,
+        hasEnterpriseNote: entNote.includes('ms-availablenetworks:'),
+      };
+    });
+
+    check(
+      v240CalcAudit.hasHybridNav &&
+        v240CalcAudit.visibleTabCount === 6 &&
+        v240CalcAudit.lastTabIsKontrol &&
+        v240CalcAudit.activeBg === 'rgba(255, 255, 255, 0.08)' &&
+        v240CalcAudit.activeColor === 'rgb(244, 244, 245)' &&
+        v240CalcAudit.activeIconColor === 'rgb(251, 146, 60)' &&
+        v240CalcAudit.activeIconFilter.includes('drop-shadow') &&
+        v240CalcAudit.hasSplit2Col &&
+        v240CalcAudit.keypadCount === 20 &&
+        v240CalcAudit.keypadMath === '= 54' &&
+        v240CalcAudit.variant === 'calc' &&
+        v240CalcAudit.calcVisible &&
+        v240CalcAudit.afterMath === '= 225,000' &&
+        v240CalcAudit.foundSarOnSaudiSearch &&
+        v240CalcAudit.convRes.includes('162,500 IDR') &&
+        focusIconAudit.runningClass &&
+        focusIconAudit.pausedClass &&
+        dropEyeAudit.exprWhenParked === 'drop_zone' &&
+        dropEyeAudit.compactDropEye === 'true' &&
+        dropEyeAudit.exprWhenEmpty === 'false' &&
+        v240WifiAudit.drawerOpen &&
+        v240WifiAudit.portalVisible &&
+        v240WifiAudit.hasEnterpriseNote,
+      `Mode 6 v2.4.0: Kontrol-last high-contrast nav, 2-col keypad (${v240CalcAudit.keypadMath}), searchable currency (SAR), Focus icon, ◈ ♥ Drop eye & Wi-Fi Portal/802.1X verified`,
+      JSON.stringify({ v240CalcAudit, focusIconAudit, dropEyeAudit, v240WifiAudit })
     );
 
     // Clean Path Routing Without `#` (/casa-app/<section>, popstate Back, Logo reset -> /casa-app/)

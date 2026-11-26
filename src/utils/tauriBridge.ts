@@ -477,6 +477,18 @@ export interface WifiNetworkItem {
   is_secured: boolean;
   is_connected: boolean;
   has_profile: boolean;
+  auth_label: string;
+  cipher_label: string;
+  is_enterprise: boolean;
+  is_captive_portal: boolean;
+  internet_connectivity: string;
+}
+
+export interface ExchangeRatesResponse {
+  base: string;
+  rates: Record<string, number>;
+  updated_at: string;
+  source: string;
 }
 
 export interface ConnectedBluetoothDevice {
@@ -529,6 +541,46 @@ export async function connectWifiNetwork(ssid: string, password?: string): Promi
   if (isTauriEnv) {
     await invoke('connect_wifi_network', { ssid, password: password ?? null });
   }
+}
+
+export async function openCaptivePortalBrowser(): Promise<void> {
+  if (isTauriEnv) {
+    await invoke('open_captive_portal_browser');
+  }
+}
+
+export async function openAvailableWifiNetworks(): Promise<void> {
+  if (isTauriEnv) {
+    await invoke('open_available_wifi_networks');
+  }
+}
+
+export async function fetchExchangeRates(): Promise<ExchangeRatesResponse> {
+  if (!isTauriEnv) {
+    throw new Error('Refresh kurs langsung hanya tersedia pada aplikasi desktop CASA.');
+  }
+  return await invoke<ExchangeRatesResponse>('fetch_exchange_rates');
+}
+
+export async function writeClipboardText(text: string): Promise<boolean> {
+  if (!text) return false;
+  if (isTauriEnv) {
+    try {
+      await invoke('copy_text_to_clipboard', { text });
+      return true;
+    } catch {
+      // Fall through to Web Clipboard API if available
+    }
+  }
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
 }
 
 export async function listPairedBluetooth(): Promise<BluetoothDeviceItem[]> {
