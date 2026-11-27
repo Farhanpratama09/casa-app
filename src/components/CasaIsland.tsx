@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { VolumeX } from 'lucide-react';
+import { CalendarDays, VolumeX } from 'lucide-react';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { listen } from '@tauri-apps/api/event';
 import { IslandMode, CompactSubtype, HardwareMetrics, IslandState } from '../types/island';
@@ -19,6 +19,7 @@ import { TimerExpandedView } from '../features/timer/TimerExpandedView';
 import { TodoExpandedView } from '../features/todo/TodoExpandedView';
 import { IbadahExpandedView } from '../features/ibadah/IbadahExpandedView';
 import { CalculatorExpandedView } from '../features/calculator/CalculatorExpandedView';
+import { CalendarExpandedView } from '../features/calendar/CalendarExpandedView';
 import { resolvePrayerVisualTheme } from '../features/ibadah/prayerScheduleLogic';
 import {
   notifyPrayerSettingsChanged,
@@ -26,6 +27,14 @@ import {
   stopPrayerAlert,
   usePrayerStore,
 } from '../features/ibadah/prayerStore';
+import {
+  dismissActiveReminder,
+  notifyCalendarSettingsChanged,
+  setCalendarRuntimeFullscreenState,
+  snoozeActiveReminder,
+  stopCalendarAlertChime,
+  useCalendarStore,
+} from '../features/calendar/calendarStore';
 import {
   setSmartIgnoreCursorEvents,
   playChimeCue,
@@ -35,6 +44,7 @@ import {
   focusIslandWindow,
   alignWindowTop,
   setWindowVisibility,
+  setBackgroundAudioDucking,
   HitRect,
 } from '../utils/tauriBridge';
 import { useSkillStore } from '../skills/store';
@@ -46,6 +56,8 @@ import {
   isSpotifyPremiumRestricted,
   subscribeSpotifyPremiumRestriction,
 } from '../utils/spotifyService';
+import { unlockAlarmAudio } from '../utils/alarmChime';
+import { unlockCalendarChimeAudio } from '../features/calendar/calendarChime';
 import {
   registerIslandTransitionHook,
   unregisterIslandTransitionHook,
@@ -53,6 +65,7 @@ import {
 } from '../utils/islandStressTester';
 import {
   computePrimaryIslandHitboxAndSensor,
+  computeReminderSatelliteBounds,
   computeSearchDrawerBounds,
   ISLAND_DIMENSIONS,
   resolveEffectiveIslandLayout,
@@ -125,7 +138,8 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   })();
   const idleTimerState = useSkillStore((s) => s.skillStates['core.timer']);
   const isTimerActive = Boolean(idleTimerState?.isActive);
-  const isAlarmRinging = Boolean(idleTimerState?.isAlarmRinging);
+  // Direct store selector so audio ducking activates even when ProductivitySplitView is unmounted (idle/tucked)
+  const isAlarmRinging = useSkillStore((s) => Boolean(s.skillStates['core.timer']?.isAlarmRinging));
   const isAlarmRingingRef = useRef<boolean>(isAlarmRinging);
   isAlarmRingingRef.current = isAlarmRinging;
   const prayerStore = usePrayerStore();
@@ -136,14 +150,75 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   const isPrayerAlertVisible = visiblePrayerAlert !== null;
   const isPrayerAlertVisibleRef = useRef<boolean>(isPrayerAlertVisible);
   isPrayerAlertVisibleRef.current = isPrayerAlertVisible;
-  const isPriorityAlert = isAlarmRinging || isPrayerAlertVisible;
-  const isPriorityAlertRef = useRef<boolean>(isPriorityAlert);
-  isPriorityAlertRef.current = isPriorityAlert;
   const { hudAlert, telemetry } = useSystemHardware();
   // Keep global update-status listener alive even while Mode 6 is collapsed
   useUpdateNotification();
   const isKeepAwake = Boolean(telemetry.stay_awake);
   const { settings } = useSettingsStore();
+  const calendarState = useCalendarStore();
+  const visibleReminderAlert =
+    settings.calendarEnabled &&
+    calendarState.activeAlert &&
+    !isPrayerAlertVisible &&
+    !isAlarmRinging
+      ? calendarState.activeAlert
+      : null;
+  const isReminderAlertVisible = visibleReminderAlert !== null;
+  const isReminderAlertVisibleRef = useRef<boolean>(isReminderAlertVisible);
+  isReminderAlertVisibleRef.current = isReminderAlertVisible;
+  const visibleUpcomingReminderBadge =
+    settings.calendarEnabled &&
+    !isPrayerAlertVisible &&
+    !isAlarmRinging &&
+    !isReminderAlertVisible &&
+    !hudAlert
+      ? calendarState.upcomingBadge
+      : null;
+  const isAdzanAudioActive = Boolean(
+    prayerStore.activeAlert && prayerStore.activeAlert.audioMode !== 'visual'
+  );
+  const isCalendarAlertActive = Boolean(
+    settings.calendarEnabled && calendarState.activeAlert
+  );
+  const shouldDuckBackgroundAudio =
+    !isAdzanAudioActive && (isAlarmRinging || isCalendarAlertActive);
+
+  useEffect(() => {
+    void setBackgroundAudioDucking(shouldDuckBackgroundAudio);
+  }, [shouldDuckBackgroundAudio]);
+
+  useEffect(() => {
+    if (isAdzanAudioActive) {
+      stopCalendarAlertChime();
+    }
+  }, [isAdzanAudioActive]);
+
+  useEffect(() => {
+    const handleUnlockOnGesture = () => {
+      unlockAlarmAudio();
+      unlockCalendarChimeAudio();
+      window.removeEventListener('pointerdown', handleUnlockOnGesture, true);
+      window.removeEventListener('keydown', handleUnlockOnGesture, true);
+    };
+    window.addEventListener('pointerdown', handleUnlockOnGesture, {
+      capture: true,
+      passive: true,
+    });
+    window.addEventListener('keydown', handleUnlockOnGesture, {
+      capture: true,
+      passive: true,
+    });
+    return () => {
+      window.removeEventListener('pointerdown', handleUnlockOnGesture, true);
+      window.removeEventListener('keydown', handleUnlockOnGesture, true);
+      void setBackgroundAudioDucking(false);
+    };
+  }, []);
+
+  const isPriorityAlert =
+    isAlarmRinging || isPrayerAlertVisible || isReminderAlertVisible;
+  const isPriorityAlertRef = useRef<boolean>(isPriorityAlert);
+  isPriorityAlertRef.current = isPriorityAlert;
   const activePrayerTheme = resolvePrayerVisualTheme(
     visiblePrayerAlert?.prayerId,
     settings.theme === 'monochrome'
@@ -154,6 +229,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
   const isCalculatorEnabled = settings.calculatorEnabled;
   const isCalculatorEnabledRef = useRef<boolean>(isCalculatorEnabled);
   isCalculatorEnabledRef.current = isCalculatorEnabled;
+  const isCalendarEnabled = settings.calendarEnabled;
+  const isCalendarEnabledRef = useRef<boolean>(isCalendarEnabled);
+  isCalendarEnabledRef.current = isCalendarEnabled;
   const placementMode = settings.placementMode;
   const isFloatingMode = placementMode === 'floating';
   const horizontalAlign = settings.horizontalAlign;
@@ -594,7 +672,10 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     hasHudAlert,
     isAlarmRinging,
     isPrayerAlertActive: isPrayerAlertVisible,
+    isReminderAlertActive: isReminderAlertVisible,
     isIbadahEnabled,
+    isCalculatorEnabled,
+    isCalendarEnabled,
     isRestingSleep,
     isLyricsOpen: false,
     isFocusHoverPeek: false,
@@ -609,12 +690,21 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       hasHudAlert: hasHudAlertRef.current,
       isAlarmRinging: isAlarmRingingRef.current,
       isPrayerAlertActive: isPrayerAlertVisibleRef.current,
+      isReminderAlertActive: isReminderAlertVisibleRef.current,
       isIbadahEnabled: isIbadahEnabledRef.current,
+      isCalculatorEnabled: isCalculatorEnabledRef.current,
+      isCalendarEnabled: isCalendarEnabledRef.current,
       isRestingSleep: isRestingSleepRef.current,
       isLyricsOpen: false,
       isFocusHoverPeek: false,
     }).width;
   }, []);
+
+  const reminderSatelliteElRef = useRef<HTMLButtonElement | null>(null);
+  const [reminderSatelliteWidth, setReminderSatelliteWidth] = useState<number>(148);
+  const reminderSatelliteWidthRef = useRef<number>(148);
+  reminderSatelliteWidthRef.current = reminderSatelliteWidth;
+  const showIdleReminderSatelliteRef = useRef<boolean>(false);
 
   const getActiveIdleHitboxHeight = useCallback(() => IDLE_WINDOW_HEIGHT, []);
 
@@ -687,6 +777,17 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           width: POD_WIDTH,
           height: podHitboxHeight,
         });
+      }
+
+      if (showIdleReminderSatelliteRef.current && !tucked && roundedH < 120) {
+        rects.push(
+          computeReminderSatelliteBounds({
+            centerOffsetX,
+            capsuleWidth: roundedW,
+            satelliteWidth: reminderSatelliteWidthRef.current,
+            isFloatingMode: isFloatingModeRef.current,
+          })
+        );
       }
 
       if (import.meta.env.DEV && devVisible) {
@@ -954,7 +1055,10 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
       hasHudAlert: hudWake,
       isAlarmRinging: isAlarmRingingRef.current,
       isPrayerAlertActive: isPrayerAlertVisibleRef.current,
+      isReminderAlertActive: isReminderAlertVisibleRef.current,
       isIbadahEnabled: isIbadahEnabledRef.current,
+      isCalculatorEnabled: isCalculatorEnabledRef.current,
+      isCalendarEnabled: isCalendarEnabledRef.current,
       isRestingSleep: isRestingSleepRef.current,
       isLyricsOpen: lyricsOpen,
       isFocusHoverPeek: focusPeek,
@@ -975,7 +1079,10 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     hasHudAlert,
     isAlarmRinging,
     isPrayerAlertActive: isPrayerAlertVisible,
+    isReminderAlertActive: isReminderAlertVisible,
     isIbadahEnabled,
+    isCalculatorEnabled,
+    isCalendarEnabled,
     isRestingSleep,
     isLyricsOpen,
     isFocusHoverPeek,
@@ -989,6 +1096,37 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     bottomCornerRadius,
     topCornerRadius,
   } = effectiveLayout;
+
+  const showIdleReminderSatellite =
+    !isExpandedView &&
+    !isPureTucked &&
+    !isPriorityAlert &&
+    !hasHudAlert &&
+    visibleUpcomingReminderBadge !== null;
+  showIdleReminderSatelliteRef.current = showIdleReminderSatellite;
+
+  useEffect(() => {
+    if (!showIdleReminderSatellite) return;
+    const satEl = reminderSatelliteElRef.current;
+    if (!satEl) return;
+    const syncWidth = () => {
+      const measured = Math.min(
+        ISLAND_DIMENSIONS.REMINDER_SATELLITE_MAX_WIDTH,
+        Math.max(72, Math.ceil(satEl.getBoundingClientRect().width / 2) * 2)
+      );
+      if (measured !== reminderSatelliteWidthRef.current) {
+        setReminderSatelliteWidth(measured);
+      }
+    };
+    syncWidth();
+    const ro = new ResizeObserver(syncWidth);
+    ro.observe(satEl);
+    return () => ro.disconnect();
+  }, [
+    showIdleReminderSatellite,
+    visibleUpcomingReminderBadge?.remainingMinutes,
+    visibleUpcomingReminderBadge?.title,
+  ]);
 
   const containerBoxRef = useRef<HTMLDivElement>(null);
   const [measuredPillBox, setMeasuredPillBox] = useState<{ width: number; height: number }>({
@@ -1112,15 +1250,18 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     effectiveLeftPodOpen,
     effectiveRightPodOpen,
     searchDrawerExtraHeight,
+    showIdleReminderSatellite,
+    reminderSatelliteWidth,
     applyWindowSize,
     getActiveIdleWindowWidth,
     getActiveIdleHitboxHeight,
   ]);
 
-  // Sync Prayer Scheduler with runtime fullscreen & same-window ibadah setting changes
+  // Sync Prayer & Calendar Schedulers with runtime fullscreen & same-window settings changes
   useEffect(() => {
     setPrayerRuntimeFullscreenState(isFullscreenActive);
-  }, [isFullscreenActive]);
+    setCalendarRuntimeFullscreenState(isFullscreenActive, fullscreenBehavior);
+  }, [isFullscreenActive, fullscreenBehavior]);
 
   useEffect(() => {
     notifyPrayerSettingsChanged();
@@ -1135,6 +1276,13 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     }
   }, [settings.calculatorEnabled]);
 
+  useEffect(() => {
+    notifyCalendarSettingsChanged();
+    if (!settings.calendarEnabled && modeRef.current === 'expanded_calendar') {
+      onChangeModeRef.current('expanded_control');
+    }
+  }, [settings.calendarEnabled, fullscreenBehavior]);
+
   // Auto-Tuck Quiet Idle Scheduler (10s after quiet idle if setting enabled)
   useEffect(() => {
     resetAutoTuckIdleTimer();
@@ -1145,6 +1293,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     isTimerActive,
     isAlarmRinging,
     isPrayerAlertVisible,
+    isReminderAlertVisible,
     isKeepAwake,
     hasHudAlert,
     isFullscreenActive,
@@ -1387,7 +1536,12 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
     hasHudAlert,
     isAlarmRinging,
     isPrayerAlertVisible,
+    isReminderAlertVisible,
+    showIdleReminderSatellite,
+    reminderSatelliteWidth,
     isIbadahEnabled,
+    isCalculatorEnabled,
+    isCalendarEnabled,
     showDevTrigger,
     measuredPillWidth,
     effectiveLeftPodOpen,
@@ -1740,7 +1894,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
 
         if (
           !isAlarmRinging &&
-          !isAlarmRingingRef.current &&
+          !isPriorityAlertRef.current &&
           !intensiveHoverTimerRef.current &&
           !isCollapsingRef.current
         ) {
@@ -1748,7 +1902,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
             if (
               !isCollapseCooldownActive() &&
               islandStateRef.current === 'idle' &&
-              !isAlarmRingingRef.current &&
+              !isPriorityAlertRef.current &&
               !hoverSuppressedRef.current &&
               !isRestingSleepRef.current
             ) {
@@ -1770,7 +1924,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                 if (
                   !isCollapseCooldownActive() &&
                   islandStateRef.current === 'idle' &&
-                  !isAlarmRingingRef.current &&
+                  !isPriorityAlertRef.current &&
                   !hoverSuppressedRef.current &&
                   !isRestingSleepRef.current
                 ) {
@@ -2545,6 +2699,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           'drop_zone',
           ...(isIbadahEnabledRef.current ? (['expanded_ibadah'] as IslandMode[]) : []),
           ...(isCalculatorEnabledRef.current ? (['expanded_calculator'] as IslandMode[]) : []),
+          ...(isCalendarEnabledRef.current ? (['expanded_calendar'] as IslandMode[]) : []),
           'expanded_control',
         ];
         const normalizedMode =
@@ -2659,7 +2814,10 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
         hasHudAlert: hasHudAlertRef.current,
         isAlarmRinging: isAlarmRingingRef.current,
         isPrayerAlertActive: isPrayerAlertVisibleRef.current,
+        isReminderAlertActive: isReminderAlertVisibleRef.current,
         isIbadahEnabled: isIbadahEnabledRef.current,
+        isCalculatorEnabled: isCalculatorEnabledRef.current,
+        isCalendarEnabled: isCalendarEnabledRef.current,
         isRestingSleep: false,
         isLyricsOpen: false,
         isFocusHoverPeek: false,
@@ -3198,6 +3356,7 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                           onCollapse={collapseToIdle}
                           onHeaderClick={handleHeaderClick}
                           isPeekPreview={islandState === 'idle_peek'}
+                          upcomingReminderBadge={visibleUpcomingReminderBadge}
                         />
 
                         {visiblePrayerAlert && effectiveExpandedMode !== 'expanded_ibadah' && (
@@ -3262,6 +3421,76 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                             </button>
                           </div>
                         )}
+
+                        {!visiblePrayerAlert &&
+                          visibleReminderAlert &&
+                          effectiveExpandedMode !== 'expanded_calendar' && (
+                            <div
+                              data-expanded-reminder-banner="true"
+                              style={{
+                                borderBottomColor:
+                                  settings.theme === 'monochrome'
+                                    ? 'rgba(255, 255, 255, 0.16)'
+                                    : 'rgba(251, 113, 133, 0.28)',
+                                backgroundImage:
+                                  settings.theme === 'monochrome'
+                                    ? 'linear-gradient(90deg, rgba(255, 255, 255, 0.08), rgba(8, 8, 10, 0.96) 65%)'
+                                    : 'linear-gradient(90deg, rgba(251, 113, 133, 0.10), rgba(8, 8, 10, 0.96) 65%)',
+                              }}
+                              className="w-full h-[28px] px-3 flex items-center justify-between gap-2 bg-[#08080a] border-b shrink-0 relative z-25 select-none"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <CasaCompanionAvatar isPlaying={false} expression="reminder_t0" />
+                                <span
+                                  style={{
+                                    color: settings.theme === 'monochrome' ? '#FFFFFF' : '#FB7185',
+                                  }}
+                                  className="text-[10.5px] font-bold tracking-tight truncate"
+                                  title={visibleReminderAlert.title}
+                                >
+                                  {visibleReminderAlert.title}
+                                </span>
+                                {visibleReminderAlert.scheduledTimeHHMM && (
+                                  <span className="font-mono text-[10px] tabular-nums text-white/45 whitespace-nowrap">
+                                    {visibleReminderAlert.scheduledTimeHHMM}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  data-reminder-action="snooze"
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    snoozeActiveReminder(5);
+                                  }}
+                                  className="h-[19px] px-2 rounded-full bg-white/[0.10] hover:bg-white/[0.18] border border-white/15 text-[9.5px] font-semibold text-white cursor-pointer active:scale-95 transition-all"
+                                >
+                                  Snooze 5m
+                                </button>
+                                <button
+                                  type="button"
+                                  data-reminder-action="dismiss"
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    dismissActiveReminder();
+                                  }}
+                                  style={{
+                                    backgroundColor:
+                                      settings.theme === 'monochrome' ? '#FFFFFF' : '#FB7185',
+                                    color: '#000000',
+                                  }}
+                                  className="h-[19px] px-2 rounded-full text-[9.5px] font-bold hover:opacity-90 active:scale-95 transition-all cursor-pointer"
+                                >
+                                  Dismiss
+                                </button>
+                              </div>
+                            </div>
+                          )}
 
                         <div
                           className="w-full flex-1 min-h-0 flex flex-col justify-center overflow-visible relative z-20"
@@ -3348,6 +3577,10 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                             <CalculatorExpandedView />
                           )}
 
+                          {effectiveExpandedMode === 'expanded_calendar' && (
+                            <CalendarExpandedView />
+                          )}
+
                           {effectiveExpandedMode === 'drop_zone' && (
                             <DropZoneView
                               isLockedExpanded={islandState === 'expanded'}
@@ -3400,6 +3633,9 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                   isTucked={isPureTucked}
                   isTuckedPeek={islandState === 'tucked_peek'}
                   remeasureKey={fullscreenExitTick}
+                  activeReminderAlert={visibleReminderAlert}
+                  onSnoozeReminder={() => snoozeActiveReminder(5)}
+                  onDismissReminder={() => dismissActiveReminder()}
                   onExpandSkill={handleExpandSkill}
                   onContentWidthChange={handleMeasuredPillWidth}
                 />
@@ -3408,6 +3644,64 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
           </motion.div>
         </div>
       </div>
+
+      {/* Detached Right Satellite Pill for <= 5m Reminder (Idle Mode, 36px height, max 168px width, 8px right of idle capsule) */}
+      {showIdleReminderSatellite && visibleUpcomingReminderBadge && (() => {
+        const satAccent = settings.theme === 'monochrome' ? '#FFFFFF' : '#FB7185';
+        const satBorder =
+          settings.theme === 'monochrome'
+            ? 'rgba(255, 255, 255, 0.36)'
+            : 'rgba(251, 113, 133, 0.42)';
+        const satLeftPx = Math.round(width / 2 + ISLAND_DIMENSIONS.REMINDER_SATELLITE_GAP);
+        const satTopPx = isFloatingMode ? ISLAND_DIMENSIONS.FLOATING_TOP_OFFSET + 1.5 : 1.5;
+
+        return (
+          <motion.button
+            ref={reminderSatelliteElRef}
+            type="button"
+            data-reminder-satellite="true"
+            initial={{ opacity: 0, scale: 0.92, x: -4 }}
+            animate={{ opacity: 1, scale: 1, x: 0 }}
+            transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              playChimeCue('tap');
+              setIsPeeking(false);
+              isPeekingRef.current = false;
+              hoverSuppressedRef.current = false;
+              modeRef.current = 'expanded_calendar';
+              onChangeModeRef.current('expanded_calendar');
+              islandStateRef.current = 'expanded';
+              setIslandState('expanded');
+              setIsLandingComplete(false);
+            }}
+            style={{
+              top: satTopPx,
+              left: `calc(50% + ${satLeftPx}px)`,
+              borderColor: satBorder,
+            }}
+            className="pointer-events-auto absolute z-40 h-[36px] max-w-[168px] px-2.5 rounded-full bg-[#000000] border flex items-center gap-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.72)] cursor-pointer hover:brightness-110 active:scale-95 transition-all select-none"
+            title={`Segera dalam ${visibleUpcomingReminderBadge.remainingMinutes} menit: ${visibleUpcomingReminderBadge.title} — Klik untuk buka Jadwal`}
+          >
+            <CalendarDays
+              className="w-3 h-3 shrink-0"
+              style={{ color: satAccent }}
+              aria-hidden="true"
+            />
+            <span
+              style={{ color: satAccent }}
+              className="font-mono text-[10.5px] font-bold tabular-nums leading-normal shrink-0"
+            >
+              {visibleUpcomingReminderBadge.remainingMinutes}m
+            </span>
+            <span className="text-[11px] font-medium text-white/90 truncate leading-normal">
+              {visibleUpcomingReminderBadge.title}
+            </span>
+          </motion.button>
+        );
+      })()}
     </div>
   );
 };

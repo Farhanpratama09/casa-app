@@ -39,7 +39,7 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 | `v2.3.1` | *Hotfix Android & Polish UI* | Persistensi token multi-scan & `sessionStorage` + auto-reconnect, restart sesi bersih, `Content-Length` eksak ZIP `STORE`, warna ring baterai `#22c55e`/petir `#facc15`, & strip peringatan Dropzone >25 MB non-truncate | `[DONE]` |
 | `v2.3.2` | *Security Hardening & SmartScreen Guide* | Middleware Axum auth/body-limit/MOTW Connect HP, pinned SHA-256 `yt-dlp`, OAuth PKCE + DPAPI, Shell/COM hardening, capability split, `SECURITY_BASELINE.md`, & kartu panduan inline SmartScreen web showcase | `[DONE]` |
 | `v2.4.0` | *Quick Calculator, Instant Converter, Hybrid 6-Tab Nav & Adaptive Wi-Fi* | Kalkulator 2-kolom keypad aman (`0 eval()`), konverter satuan & kurs real-time 163 negara (`localhost` cache 30m), navigasi 6-tab Hybrid Morphing pil kaca gelap + ikon menyala (`Kontrol` paling kanan), toggle cepat modul, ikon stopwatch Focus, mata Dropzone `◈ ♥`, & Wi-Fi Adaptive Auth/Rollback/802.1X/Captive Portal | `[DONE]` |
-| `v2.5.0` | *Calendar & Smart Reminders* | Jadwal harian lokal, countdown `H-15m`/`T-0` di pil, tombol *snooze* 5 menit | `[PLANNED]` |
+| `v2.5.0` | *Calendar, Smart Reminders & Smart Audio* | Kalender bulanan & CRUD agenda lokal (Zero-Churn), pill satelit kanan `<=5m` & chip header `Mode6TopNav`, `T-0` `◉ ♥` + *Snooze 5m*, tombol kontekstual `Hari Ini`, `Sen–Jum`, Core Audio *ducking* `12%` multi-endpoint + `PlaySoundW` `0.85` + Adzan SMTC auto-pause/resume, bypass autoplay WebView2, & paritas `docs/` | `[DONE]` |
 
 ---
 
@@ -145,17 +145,18 @@ Setiap implementasi fitur dari `v2.1.3` hingga `v2.5.0` **wajib** mematuhi lima 
 
 ---
 
-### `v2.5.0` — Calendar & Smart Reminders `[PLANNED]`
-**Tujuan:** Menyediakan ringkasan jadwal harian & pengingat waktu dekat yang terintegrasi rapi dengan prioritas kapsul pil CASA.
+### `v2.5.0` — Calendar, Smart Reminders & Smart Audio `[DONE]`
+**Tujuan:** Menyediakan kalender bulanan & pengingat agenda lokal yang hening saat idle (`Idle Zero-Churn`), tampil adaptif saat `<= 5` menit, serta mengatur arbitrasi audio sistem (*Adzan SMTC auto-pause/resume* dan *Core Audio ducking*).
 
-1. **Penyimpanan Lokal Ringan & Pengingat Harian (`src/features/`, `useSettingsStore` / modul lokal):**
-   - Penyimpanan jadwal harian berbasis file/storage lokal terstruktur (`0` layanan cloud/login wajib) dengan penggunaan memori minimal saat idle.
-   - Integrasi penjadwalan cerdas yang tidak membebani CPU (menggunakan timer terjadwal atau sinkron dengan ticker detik bersama di aplikasi).
+1. **Kalender Bulanan, CRUD Agenda & Scheduler Idle Zero-Churn (`src/features/calendar/calendarScheduleLogic.ts`, `calendarStore.ts`, `CalendarExpandedView.tsx`):**
+   - Penyimpanan agenda harian lokal (`localStorage` `casa_reminders_v1`, batas `MAX_REMINDER_ITEMS = 50`), sanitasi ketat HTML/bidi/kontrol, opsi pengulangan **`Sekali | Harian | Sen–Jum`**, serta tombol kontekstual **`Hari Ini`** (hanya tampil ketika bulan/tanggal yang dilihat bukan hari ini).
+   - Mode navigasi **7-tab** (`Mode6TopNav.tsx` dengan `Jadwal` `#FB7185` sebelum `Kontrol`; tema `monochrome` mengunci `#FFFFFF`) dan chip toggle cepat `Ibadah`/`Calc`/`Jadwal` selaras warna (`#10B981`, `#FB923C`, `#FB7185`).
+   - *Idle Zero-Churn:* `0` timer aktif bila modul nonaktif/kosong; memakai `1` `setTimeout` presisi menuju ambang berikutnya dan mengaktifkan ticker 1 detik hanya selama badge `<= 5m` atau antrean alert `T-0` aktif.
 
-2. **Countdown `H-15m` / `T-0` di Pil & Aksi Snooze 5 Menit:**
-   - Tampilkan *countdown* halus **`H-15m`** menjelang jadwal serta pil alert **`T-0`** saat agenda tiba, dengan **tombol *Snooze* 5 menit** dan *Dismiss* langsung dari pil maupun banner Mode 6.
-   - Hormati arbitrase prioritas kapsul (selaras dengan *Pengingat Ibadah T-0* & *Focus Timer Alarm* di [CasaIsland.tsx](../src/components/CasaIsland.tsx)) serta patuhi mode **Smart-Tuck Fullscreen / Gaming Mode** agar layar penuh tidak terganggu secara paksa.
-   - Sinkronisasi simulasi jadwal & pengingat ke `docs/` Web Showcase.
+2. **Heads-Up `<= 5 Menit` Satellite Pill & Smart Audio Arbitration (`CasaIsland.tsx`, `native_audio.rs`, `calendarChime.ts`, `alarmChime.ts`, `prayerStore.ts`):**
+   - Saat *Idle* dan sisa waktu `<= 5 menit`, badge tampil sebagai **pill satelit kanan terpisah** (`36 px` tinggi, maks `168 px`, celah `8 px` di `hitRects` via `computeReminderSatelliteBounds`, menjaga equalizer/lirik `IdlePillView.tsx` tetap bersih); saat *Expanded* di tab lain, tampil sebagai **chip ringkas** di header `Mode6TopNav.tsx`.
+   - Saat `T-0` tiba, kapsul menampilkan ekspresi `◉ ♥` (`reminder_t0` di bawah `alarm` dan di atas `dual_active`), tombol **`Snooze 5m`** dan **`Dismiss`**, menghormati Fullscreen `smart-tuck`/`total-hide`, serta mensintesis chime `PlaySoundW` (`0.85` peak, fallback Web Audio + bypass `--autoplay-policy=no-user-gesture-required` di `tauri.conf.json`).
+   - Core Audio *ducking* multi-endpoint (`EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)`, menangani `RPC_E_CHANGED_MODE`) menurunkan sesi eksternal ke **`12%`** dan memaksa sesi CASA ke **`100%`** selama alarm Timer / Kalender `T-0` aktif, sedangkan Adzan mengambil alih penuh (jeda/lanjut eksplisit SMTC dan melepaskan *ducking*). Paritas `docs/` terverifikasi via [verify-calendar-v250.mjs](../scripts/verify-calendar-v250.mjs) & [verify-docs-showcase.mjs](../scripts/verify-docs-showcase.mjs).
 
 ---
 

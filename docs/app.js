@@ -105,7 +105,7 @@
       id: 'text-snippet',
       kind: 'text',
       name: 'Ephemeral transit note',
-      snippet: 'Checklist v2.3.2: Drag-In Folder, Ctrl+V & Connect HP.',
+      snippet: 'Checklist v2.5.0: Drag-In Folder, Kalender, Smart Audio & Connect HP.',
       ext: 'TXT',
       meta: 'TXT · 54 chars',
     },
@@ -187,8 +187,19 @@
     expression: 'idle', // 'idle' | 'music' | 'focus' | 'dual_active' | 'prayer'
     ibadahEnabled: false,
     calcEnabled: true,
+    calendarEnabled: true,
     calcSubMode: 'calc', // 'calc' | 'convert'
     convCategory: 'currency',
+    calViewYear: new Date().getFullYear(),
+    calViewMonth: new Date().getMonth(),
+    calSelectedDateISO: '',
+    calReminders: [],
+    reminderH15Active: false,
+    reminderH15Minutes: 5,
+    reminderH15Title: 'Standup Tim',
+    reminderT0Active: false,
+    reminderAlertTitle: 'Standup Tim',
+    reminderAlertTime: '09:00',
     wifiDrawerOpen: false,
     wifiPortalActive: false,
     wifiConnectedSsid: 'Studio_5G',
@@ -256,6 +267,15 @@
     prayerAlertTitle: $('vm-prayer-alert-title'),
     prayerAlertTime: $('vm-prayer-alert-time'),
     prayerStopBtn: $('vm-prayer-stop-btn'),
+    reminderSatPill: $('vm-reminder-satellite-pill'),
+    reminderSatMins: $('vm-reminder-sat-mins'),
+    reminderSatTitle: $('vm-reminder-sat-title'),
+    reminderPill: $('casa-reminder-pill'),
+    reminderEyes: $('vm-reminder-eyes'),
+    reminderAlertTitle: $('vm-reminder-alert-title'),
+    reminderAlertTime: $('vm-reminder-alert-time'),
+    reminderSnoozeBtn: $('vm-reminder-snooze-btn'),
+    reminderDismissBtn: $('vm-reminder-dismiss-btn'),
     activePill: $('casa-active-pill'),
     eyes: $('vm-notch-eyes'),
     standbySegment: $('casa-standby-segment'),
@@ -282,6 +302,9 @@
     m6TabButtons: Array.from(document.querySelectorAll('[data-m6-tab]')),
     m6IbadahTab: $('vm-m6-ibadah-tab'),
     m6CalcTab: $('vm-m6-calc-tab'),
+    m6CalendarTab: $('vm-m6-calendar-tab'),
+    m6ReminderChip: $('vm-m6-reminder-chip'),
+    m6ReminderChipText: $('vm-m6-reminder-chip-text'),
     m6DropBadge: $('vm-m6-drop-badge'),
     collapseBtn: $('vm-notch-collapse-btn'),
     expandedPrayerBanner: $('vm-expanded-prayer-banner'),
@@ -289,6 +312,12 @@
     expandedPrayerLabel: $('vm-expanded-prayer-label'),
     expandedPrayerTime: $('vm-expanded-prayer-time'),
     expandedPrayerStopBtn: $('vm-expanded-prayer-stop-btn'),
+    expandedReminderBanner: $('vm-expanded-reminder-banner'),
+    expandedReminderEyes: $('vm-expanded-reminder-eyes'),
+    expandedReminderLabel: $('vm-expanded-reminder-label'),
+    expandedReminderTime: $('vm-expanded-reminder-time'),
+    expandedReminderSnoozeBtn: $('vm-expanded-reminder-snooze-btn'),
+    expandedReminderDismissBtn: $('vm-expanded-reminder-dismiss-btn'),
 
     expMusic: $('vm-exp-music'),
     expFocus: $('vm-exp-focus'),
@@ -296,8 +325,24 @@
     expDropzone: $('vm-exp-dropzone'),
     expIbadah: $('vm-exp-ibadah'),
     expCalc: $('vm-exp-calc'),
+    expCalendar: $('vm-exp-calendar'),
     ccToggleIbadah: $('vm-cc-toggle-ibadah'),
     ccToggleCalc: $('vm-cc-toggle-calc'),
+    ccToggleCalendar: $('vm-cc-toggle-calendar'),
+    calMonthLabel: $('vm-cal-month-label'),
+    calPrevBtn: $('vm-cal-prev-btn'),
+    calTodayBtn: $('vm-cal-today-btn'),
+    calNextBtn: $('vm-cal-next-btn'),
+    calGrid: $('vm-cal-grid'),
+    calSelectedLabel: $('vm-cal-selected-label'),
+    calCountBadge: $('vm-cal-count-badge'),
+    simRemH15Btn: $('vm-sim-rem-h15-btn'),
+    simRemT0Btn: $('vm-sim-rem-t0-btn'),
+    calAddForm: $('vm-cal-add-form'),
+    calTitleInput: $('vm-cal-title-input'),
+    calTimeInput: $('vm-cal-time-input'),
+    calRepeatSelect: $('vm-cal-repeat-select'),
+    calAgendaList: $('vm-cal-agenda-list'),
     ccWifiBtn: $('vm-cc-wifi-btn'),
     ccWifiSub: $('vm-cc-wifi-sub'),
     ccWifiDrawer: $('vm-cc-wifi-drawer'),
@@ -547,6 +592,30 @@
           fill: 'var(--vm-prayer-accent, #ffffff)',
         })
       );
+      return;
+    }
+
+    // Reminder T-0 expression (◉ ♥ — Pulsing left circle+dot + Heart right eye intact)
+    if (expr === 'reminder_t0') {
+      svgEl.appendChild(
+        createSvgNode('circle', {
+          cx: 8,
+          cy: 8,
+          r: 5.2,
+          fill: 'none',
+          stroke: '#fb7185',
+          'stroke-width': 1.7,
+        })
+      );
+      svgEl.appendChild(
+        createSvgNode('circle', {
+          cx: 8,
+          cy: 8,
+          r: 2.2,
+          fill: '#fb7185',
+        })
+      );
+      svgEl.appendChild(createSvgNode('path', { d: heartPath, fill: '#ffffff' }));
       return;
     }
 
@@ -1576,6 +1645,7 @@
 
   function resolveActiveExpression() {
     if (state.prayerAlertActive) return 'prayer';
+    if (state.reminderT0Active && state.calendarEnabled) return 'reminder_t0';
     if (state.mode === 'lyrics') return 'music';
     if (state.mode === 'todo') return state.dualIdleActive ? 'dual_active' : 'focus';
     if (state.droppedIds.length > 0) return 'drop_zone';
@@ -1588,6 +1658,9 @@
     }
     if (state.expandedTab === 'calc') {
       return state.calcEnabled ? 'calc' : 'control';
+    }
+    if (state.expandedTab === 'calendar') {
+      return state.calendarEnabled ? 'calendar' : 'control';
     }
     if (
       state.expandedTab === 'music' ||
@@ -1619,6 +1692,8 @@
     renderCompactRestingLeftEye(el.restingLeftEye, state.droppedIds.length > 0);
     renderCompanionAvatar(el.prayerEyes, 'prayer');
     renderCompanionAvatar(el.expandedPrayerEyes, 'prayer');
+    renderCompanionAvatar(el.reminderEyes, 'reminder_t0');
+    renderCompanionAvatar(el.expandedReminderEyes, 'reminder_t0');
 
     const popDropEye = state.droppedIds.length > 0 && Date.now() < state.dropEyePopUntil;
     [el.restingLeftEye, el.eyes, el.m6Eyes].forEach((node) => {
@@ -1630,6 +1705,12 @@
     }
 
     const showExpandedPrayerBanner = isExpanded && state.prayerAlertActive;
+    const showExpandedReminderBanner =
+      isExpanded &&
+      !state.prayerAlertActive &&
+      state.reminderT0Active &&
+      state.calendarEnabled &&
+      variant !== 'calendar';
 
     if (el.capsule) {
       el.capsule.setAttribute('data-state', isExpanded ? 'expanded' : 'idle');
@@ -1637,8 +1718,16 @@
       el.capsule.setAttribute('data-five-tabs', state.ibadahEnabled ? 'true' : 'false');
       el.capsule.setAttribute('data-prayer-alert', state.prayerAlertActive ? 'true' : 'false');
       el.capsule.setAttribute(
+        'data-reminder-alert',
+        state.reminderT0Active && state.calendarEnabled && !state.prayerAlertActive ? 'true' : 'false'
+      );
+      el.capsule.setAttribute(
         'data-has-prayer-banner',
         showExpandedPrayerBanner ? 'true' : 'false'
+      );
+      el.capsule.setAttribute(
+        'data-has-reminder-banner',
+        showExpandedReminderBanner ? 'true' : 'false'
       );
     }
 
@@ -1648,6 +1737,9 @@
     if (el.m6CalcTab) {
       el.m6CalcTab.hidden = !state.calcEnabled;
     }
+    if (el.m6CalendarTab) {
+      el.m6CalendarTab.hidden = !state.calendarEnabled;
+    }
     if (el.ccToggleIbadah) {
       el.ccToggleIbadah.classList.toggle('active', state.ibadahEnabled);
       el.ccToggleIbadah.setAttribute('aria-pressed', state.ibadahEnabled ? 'true' : 'false');
@@ -1655,6 +1747,10 @@
     if (el.ccToggleCalc) {
       el.ccToggleCalc.classList.toggle('active', state.calcEnabled);
       el.ccToggleCalc.setAttribute('aria-pressed', state.calcEnabled ? 'true' : 'false');
+    }
+    if (el.ccToggleCalendar) {
+      el.ccToggleCalendar.classList.toggle('active', state.calendarEnabled);
+      el.ccToggleCalendar.setAttribute('aria-pressed', state.calendarEnabled ? 'true' : 'false');
     }
     if (el.ccWifiDrawer) {
       el.ccWifiDrawer.hidden = !state.wifiDrawerOpen || variant !== 'control';
@@ -1669,6 +1765,21 @@
     }
     if (el.expandedPrayerBanner) {
       el.expandedPrayerBanner.hidden = !showExpandedPrayerBanner;
+    }
+    if (el.expandedReminderBanner) {
+      el.expandedReminderBanner.hidden = !showExpandedReminderBanner;
+    }
+    if (el.expandedReminderLabel) {
+      el.expandedReminderLabel.textContent = state.reminderAlertTitle;
+    }
+    if (el.expandedReminderTime) {
+      el.expandedReminderTime.textContent = state.reminderAlertTime;
+    }
+    if (el.reminderAlertTitle) {
+      el.reminderAlertTitle.textContent = state.reminderAlertTitle;
+    }
+    if (el.reminderAlertTime) {
+      el.reminderAlertTime.textContent = state.reminderAlertTime;
     }
 
     if (el.idleLayer) el.idleLayer.hidden = isExpanded;
@@ -1695,20 +1806,52 @@
       }
     }
 
-    // Idle Layers (Priority Prayer T-0 Pill > Compact × ♥ > HUD > Wide Feature Idle Bar)
+    // Idle Layers (Prayer T-0 > Reminder T-0 > Compact × ♥ > HUD > Wide Feature Idle Bar)
     const showPrayerPill = !isExpanded && state.prayerAlertActive;
+    const showReminderPill =
+      !isExpanded && !showPrayerPill && state.reminderT0Active && state.calendarEnabled;
     const showCompactEyesOnly =
       !isExpanded &&
       !showPrayerPill &&
+      !showReminderPill &&
       !state.hudKind &&
       (state.mode === 'resting' || state.mode === 'ibadah');
-    const showHud = !isExpanded && !showPrayerPill && Boolean(state.hudKind);
-    const showActivePill = !isExpanded && !showPrayerPill && !showCompactEyesOnly && !showHud;
+    const showHud = !isExpanded && !showPrayerPill && !showReminderPill && Boolean(state.hudKind);
+    const showActivePill =
+      !isExpanded && !showPrayerPill && !showReminderPill && !showCompactEyesOnly && !showHud;
 
     if (el.prayerPill) el.prayerPill.hidden = !showPrayerPill;
+    if (el.reminderPill) el.reminderPill.hidden = !showReminderPill;
     if (el.restingPill) {
       el.restingPill.hidden = !showCompactEyesOnly;
       el.restingPill.setAttribute('data-sleep', state.isRestingSleep ? 'true' : 'false');
+    }
+    const showHeadsUpReminder =
+      state.calendarEnabled &&
+      state.reminderH15Active &&
+      !state.prayerAlertActive &&
+      !state.reminderT0Active &&
+      !state.hudKind;
+    if (el.reminderSatPill) {
+      const showSat = !isExpanded && showHeadsUpReminder && !state.isRestingSleep;
+      el.reminderSatPill.hidden = !showSat;
+      if (showSat) {
+        if (el.reminderSatMins) el.reminderSatMins.textContent = `${state.reminderH15Minutes}m`;
+        if (el.reminderSatTitle) el.reminderSatTitle.textContent = state.reminderH15Title;
+      }
+    }
+    if (el.m6ReminderChip) {
+      const showHeaderChip =
+        isExpanded &&
+        variant !== 'calendar' &&
+        state.calendarEnabled &&
+        state.reminderH15Active &&
+        !state.prayerAlertActive &&
+        !state.reminderT0Active;
+      el.m6ReminderChip.hidden = !showHeaderChip;
+      if (showHeaderChip && el.m6ReminderChipText) {
+        el.m6ReminderChipText.textContent = `${state.reminderH15Minutes}m`;
+      }
     }
     if (el.hudPill) el.hudPill.hidden = !showHud;
     if (el.activePill) el.activePill.hidden = !showActivePill;
@@ -1783,6 +1926,7 @@
         (tab === 'hud' && variant === 'control') ||
         (tab === 'ibadah' && variant === 'ibadah') ||
         (tab === 'calc' && variant === 'calc') ||
+        (tab === 'calendar' && variant === 'calendar') ||
         (tab === 'dropzone' && variant === 'dropzone');
       btn.setAttribute('aria-selected', isMatch ? 'true' : 'false');
     });
@@ -1794,6 +1938,7 @@
     if (el.expDropzone) el.expDropzone.hidden = variant !== 'dropzone';
     if (el.expIbadah) el.expIbadah.hidden = variant !== 'ibadah';
     if (el.expCalc) el.expCalc.hidden = variant !== 'calc';
+    if (el.expCalendar) el.expCalendar.hidden = variant !== 'calendar';
 
     if (el.ibadahCountdown) {
       const sec = Math.max(0, state.prayerCountdownSeconds);
@@ -2457,6 +2602,385 @@
     return String(clean);
   }
 
+  const CAL_MONTHS_ID = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+  ];
+  const CAL_MONTHS_SHORT_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  const CAL_WEEKDAYS_ID = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+
+  function formatLocalISODate(dt) {
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const d = String(dt.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  function sanitizeShowcaseReminderTitle(raw) {
+    return String(raw || '')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/[\u0000-\u001F\u007F\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80);
+  }
+
+  function renderCalendarShowcase() {
+    if (!el.calGrid || !el.calAgendaList) return;
+    const now = new Date();
+    const todayISO = formatLocalISODate(now);
+    if (!state.calSelectedDateISO) {
+      state.calSelectedDateISO = todayISO;
+    }
+
+    const year = state.calViewYear;
+    const month0 = state.calViewMonth;
+    const first = new Date(year, month0, 1, 12, 0, 0, 0);
+    const actualY = first.getFullYear();
+    const actualM = first.getMonth();
+    const daysInMonth = new Date(actualY, actualM + 1, 0, 12, 0, 0, 0).getDate();
+    const firstDowMon0 = (first.getDay() + 6) % 7;
+    const totalCells = firstDowMon0 + daysInMonth > 35 ? 42 : 35;
+
+    if (el.calMonthLabel) {
+      el.calMonthLabel.textContent = `${CAL_MONTHS_ID[actualM] || ''} ${actualY}`;
+    }
+
+    const onceDates = new Set(
+      state.calReminders
+        .filter((r) => r.enabled && r.repeat === 'once')
+        .map((r) => r.dateISO)
+    );
+
+    clearNode(el.calGrid);
+    for (let i = 0; i < totalCells; i++) {
+      const cellDt = new Date(actualY, actualM, 1 - firstDowMon0 + i, 12, 0, 0, 0);
+      const cellISO = formatLocalISODate(cellDt);
+      const inMonth = cellDt.getMonth() === actualM;
+      const isToday = cellISO === todayISO;
+      const isPast = cellISO < todayISO;
+      const isSelected = cellISO === state.calSelectedDateISO;
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'vm-cal-day';
+      btn.setAttribute('data-calendar-date', cellISO);
+      btn.setAttribute('data-in-month', inMonth ? 'true' : 'false');
+      if (!inMonth) btn.classList.add('is-out');
+      if (isPast) btn.classList.add('is-past');
+      if (isToday) btn.classList.add('is-today');
+      if (isSelected) btn.classList.add('is-selected');
+
+      const numSpan = document.createElement('span');
+      numSpan.textContent = String(cellDt.getDate());
+      btn.appendChild(numSpan);
+
+      if (onceDates.has(cellISO)) {
+        const dot = document.createElement('span');
+        dot.className = 'vm-cal-day-dot';
+        dot.setAttribute('aria-hidden', 'true');
+        btn.appendChild(dot);
+      }
+
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.calSelectedDateISO = cellISO;
+        if (!inMonth) {
+          state.calViewYear = cellDt.getFullYear();
+          state.calViewMonth = cellDt.getMonth();
+        }
+        renderCalendarShowcase();
+      });
+
+      el.calGrid.appendChild(btn);
+    }
+
+    const [sy, sm, sd] = state.calSelectedDateISO.split('-').map(Number);
+    const selDt = new Date(sy, sm - 1, sd, 12, 0, 0, 0);
+    if (el.calSelectedLabel) {
+      const wLabel = CAL_WEEKDAYS_ID[selDt.getDay()] || '';
+      const mLabel = CAL_MONTHS_SHORT_ID[selDt.getMonth()] || '';
+      el.calSelectedLabel.textContent = `${wLabel}, ${sd} ${mLabel}${state.calSelectedDateISO === todayISO ? ' · Hari Ini' : ''}`;
+    }
+    if (el.calCountBadge) {
+      el.calCountBadge.textContent = `${state.calReminders.length}/50`;
+    }
+    if (el.calTodayBtn) {
+      const isDefaultTodayView =
+        actualY === now.getFullYear() &&
+        actualM === now.getMonth() &&
+        state.calSelectedDateISO === todayISO;
+      el.calTodayBtn.hidden = isDefaultTodayView;
+    }
+
+    const isSelectedPast = state.calSelectedDateISO < todayISO;
+    if (el.calRepeatSelect) {
+      const onceOpt = el.calRepeatSelect.querySelector('option[value="once"]');
+      if (onceOpt) {
+        onceOpt.disabled = isSelectedPast;
+      }
+      if (isSelectedPast && el.calRepeatSelect.value === 'once') {
+        el.calRepeatSelect.value = 'daily';
+      }
+    }
+
+    const dayItems = state.calReminders
+      .filter((r) => {
+        if (r.repeat === 'once') return r.dateISO === state.calSelectedDateISO;
+        if (state.calSelectedDateISO < r.dateISO) return false;
+        if (r.repeat === 'daily') return true;
+        const dow = selDt.getDay();
+        return dow >= 1 && dow <= 5;
+      })
+      .slice()
+      .sort((a, b) => (a.timeHHMM < b.timeHHMM ? -1 : a.timeHHMM > b.timeHHMM ? 1 : 0));
+
+    clearNode(el.calAgendaList);
+    if (dayItems.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'vm-cal-row-tag';
+      empty.style.alignSelf = 'center';
+      empty.style.marginTop = '18px';
+      empty.textContent = 'Belum ada agenda di tanggal ini';
+      el.calAgendaList.appendChild(empty);
+      return;
+    }
+
+    dayItems.forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'vm-cal-agenda-row';
+      row.setAttribute('data-calendar-agenda-item', item.id);
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.type = 'button';
+      toggleBtn.className = `vm-cal-toggle-btn${item.enabled ? ' is-enabled' : ''}`;
+      toggleBtn.textContent = item.enabled ? '✓' : '';
+      toggleBtn.setAttribute('aria-label', item.enabled ? 'Nonaktifkan pengingat' : 'Aktifkan pengingat');
+      toggleBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        item.enabled = !item.enabled;
+        if (!item.enabled) item.snoozed = false;
+        renderCalendarShowcase();
+      });
+
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'vm-cal-row-time tabular';
+      timeSpan.textContent = item.timeHHMM;
+
+      const titleSpan = document.createElement('span');
+      titleSpan.className = `vm-cal-row-title${item.enabled ? '' : ' is-disabled'}`;
+      titleSpan.textContent = item.title;
+
+      row.appendChild(toggleBtn);
+      row.appendChild(timeSpan);
+      row.appendChild(titleSpan);
+
+      if (item.repeat !== 'once') {
+        const repTag = document.createElement('span');
+        repTag.className = 'vm-cal-row-tag';
+        repTag.textContent = item.repeat === 'daily' ? 'Harian' : 'Sen–Jum';
+        row.appendChild(repTag);
+      }
+
+      if (item.snoozed) {
+        const snTag = document.createElement('span');
+        snTag.className = 'vm-cal-row-tag is-snoozed';
+        snTag.textContent = 'Snoozed';
+        row.appendChild(snTag);
+      }
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'vm-cal-del-btn';
+      delBtn.textContent = '×';
+      delBtn.setAttribute('aria-label', `Hapus ${item.title}`);
+      delBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.calReminders = state.calReminders.filter((r) => r.id !== item.id);
+        renderCalendarShowcase();
+      });
+      row.appendChild(delBtn);
+
+      el.calAgendaList.appendChild(row);
+    });
+  }
+
+  function initV250CalendarShowcase() {
+    const now = new Date();
+    const todayISO = formatLocalISODate(now);
+    state.calViewYear = now.getFullYear();
+    state.calViewMonth = now.getMonth();
+    state.calSelectedDateISO = todayISO;
+    if (state.calReminders.length === 0) {
+      state.calReminders = [
+        {
+          id: 'vm-rem-1',
+          title: 'Standup Tim',
+          dateISO: todayISO,
+          timeHHMM: '09:00',
+          repeat: 'weekdays',
+          enabled: true,
+          snoozed: false,
+        },
+        {
+          id: 'vm-rem-2',
+          title: 'Review Rilis CASA',
+          dateISO: todayISO,
+          timeHHMM: '16:00',
+          repeat: 'once',
+          enabled: true,
+          snoozed: false,
+        },
+      ];
+    }
+
+    if (el.calPrevBtn) {
+      el.calPrevBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const prev = new Date(state.calViewYear, state.calViewMonth - 1, 1, 12, 0, 0, 0);
+        state.calViewYear = prev.getFullYear();
+        state.calViewMonth = prev.getMonth();
+        renderCalendarShowcase();
+      });
+    }
+    if (el.calNextBtn) {
+      el.calNextBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const next = new Date(state.calViewYear, state.calViewMonth + 1, 1, 12, 0, 0, 0);
+        state.calViewYear = next.getFullYear();
+        state.calViewMonth = next.getMonth();
+        renderCalendarShowcase();
+      });
+    }
+    if (el.calTodayBtn) {
+      el.calTodayBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const cur = new Date();
+        const curISO = formatLocalISODate(cur);
+        state.calViewYear = cur.getFullYear();
+        state.calViewMonth = cur.getMonth();
+        state.calSelectedDateISO = curISO;
+        renderCalendarShowcase();
+      });
+    }
+    if (el.calTitleInput) {
+      el.calTitleInput.addEventListener('click', (ev) => ev.stopPropagation());
+      el.calTitleInput.addEventListener('keydown', (ev) => ev.stopPropagation());
+    }
+    if (el.calTimeInput) {
+      el.calTimeInput.addEventListener('click', (ev) => ev.stopPropagation());
+      el.calTimeInput.addEventListener('keydown', (ev) => ev.stopPropagation());
+    }
+    if (el.calRepeatSelect) {
+      el.calRepeatSelect.addEventListener('click', (ev) => ev.stopPropagation());
+    }
+
+    if (el.calAddForm) {
+      el.calAddForm.addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (state.calReminders.length >= 50) return;
+        const cleanTitle = sanitizeShowcaseReminderTitle(el.calTitleInput?.value || '');
+        if (!cleanTitle) return;
+        const timeVal = el.calTimeInput?.value || '09:00';
+        const curToday = formatLocalISODate(new Date());
+        let repeatVal = el.calRepeatSelect?.value || 'once';
+        if (state.calSelectedDateISO < curToday && repeatVal === 'once') {
+          repeatVal = 'daily';
+        }
+        state.calReminders.push({
+          id: `vm-rem-${Date.now().toString(36)}`,
+          title: cleanTitle,
+          dateISO: state.calSelectedDateISO,
+          timeHHMM: timeVal,
+          repeat: repeatVal,
+          enabled: true,
+          snoozed: false,
+        });
+        if (el.calTitleInput) el.calTitleInput.value = '';
+        renderCalendarShowcase();
+      });
+    }
+
+    if (el.simRemH15Btn) {
+      el.simRemH15Btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const firstActive = state.calReminders.find((r) => r.enabled);
+        state.calendarEnabled = true;
+        state.reminderT0Active = false;
+        state.reminderH15Active = true;
+        state.reminderH15Minutes = 5;
+        state.reminderH15Title = firstActive ? firstActive.title : 'Standup Tim';
+        state.isRestingSleep = false;
+        state.hudKind = '';
+        state.mode = 'resting';
+        state.capsuleState = 'idle';
+        syncUI();
+      });
+    }
+
+    const openCalendarFromHeadsUp = (ev) => {
+      if (ev) ev.stopPropagation();
+      state.calendarEnabled = true;
+      state.isRestingSleep = false;
+      state.hudKind = '';
+      state.capsuleState = 'expanded';
+      state.expandedTab = 'calendar';
+      renderCalendarShowcase();
+      syncUI();
+    };
+
+    if (el.reminderSatPill) {
+      el.reminderSatPill.addEventListener('click', openCalendarFromHeadsUp);
+    }
+    if (el.m6ReminderChip) {
+      el.m6ReminderChip.addEventListener('click', openCalendarFromHeadsUp);
+    }
+
+    if (el.simRemT0Btn) {
+      el.simRemT0Btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const firstActive = state.calReminders.find((r) => r.enabled);
+        state.calendarEnabled = true;
+        state.reminderH15Active = false;
+        state.reminderT0Active = true;
+        state.reminderAlertTitle = firstActive ? firstActive.title : 'Standup Tim';
+        state.reminderAlertTime = firstActive ? firstActive.timeHHMM : '09:00';
+        state.isRestingSleep = false;
+        state.hudKind = '';
+        if (state.expandedTab === 'calendar') {
+          state.capsuleState = 'idle';
+        }
+        syncUI();
+      });
+    }
+
+    const handleShowcaseReminderSnooze = (ev) => {
+      if (ev) ev.stopPropagation();
+      const target = state.calReminders.find((r) => r.enabled && r.title === state.reminderAlertTitle) || state.calReminders[0];
+      if (target) target.snoozed = true;
+      state.reminderT0Active = false;
+      state.reminderH15Active = true;
+      state.reminderH15Minutes = 5;
+      state.reminderH15Title = state.reminderAlertTitle;
+      renderCalendarShowcase();
+      syncUI();
+    };
+
+    const handleShowcaseReminderDismiss = (ev) => {
+      if (ev) ev.stopPropagation();
+      state.reminderT0Active = false;
+      syncUI();
+    };
+
+    if (el.reminderSnoozeBtn) el.reminderSnoozeBtn.addEventListener('click', handleShowcaseReminderSnooze);
+    if (el.expandedReminderSnoozeBtn) el.expandedReminderSnoozeBtn.addEventListener('click', handleShowcaseReminderSnooze);
+    if (el.reminderDismissBtn) el.reminderDismissBtn.addEventListener('click', handleShowcaseReminderDismiss);
+    if (el.expandedReminderDismissBtn) el.expandedReminderDismissBtn.addEventListener('click', handleShowcaseReminderDismiss);
+
+    renderCalendarShowcase();
+  }
+
   function initV240ShowcaseFeatures() {
     // Quick Module Toggle Chips inside Control Center
     if (el.ccToggleIbadah) {
@@ -2475,6 +2999,20 @@
         state.calcEnabled = !state.calcEnabled;
         if (!state.calcEnabled && state.expandedTab === 'calc') {
           state.expandedTab = 'control';
+        }
+        syncUI();
+      });
+    }
+    if (el.ccToggleCalendar) {
+      el.ccToggleCalendar.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        state.calendarEnabled = !state.calendarEnabled;
+        if (!state.calendarEnabled) {
+          state.reminderT0Active = false;
+          state.reminderH15Active = false;
+          if (state.expandedTab === 'calendar') {
+            state.expandedTab = 'control';
+          }
         }
         syncUI();
       });
@@ -2767,12 +3305,17 @@
         } else if (tab === 'calc') {
           state.calcEnabled = true;
           state.expandedTab = 'calc';
+        } else if (tab === 'calendar') {
+          state.calendarEnabled = true;
+          state.expandedTab = 'calendar';
+          renderCalendarShowcase();
         }
         syncUI();
       });
     });
 
     initV240ShowcaseFeatures();
+    initV250CalendarShowcase();
 
     el.musicSubButtons.forEach((btn) => {
       btn.addEventListener('click', (ev) => {
@@ -2800,8 +3343,8 @@
 
       el.capsule.addEventListener('click', (ev) => {
         if (ev.target && ev.target.closest('button')) return;
-        // hoverExpandLocked parity during Pengingat Ibadah T-0 idle pill
-        if (state.capsuleState === 'idle' && state.prayerAlertActive) return;
+        // hoverExpandLocked parity during Pengingat Ibadah T-0 or Jadwal T-0 idle pill
+        if (state.capsuleState === 'idle' && (state.prayerAlertActive || state.reminderT0Active)) return;
         if (state.capsuleState === 'idle') {
           state.isRestingSleep = false;
           state.capsuleState = 'expanded';
@@ -3368,7 +3911,7 @@
           ? exeVersion.trim().startsWith('v')
             ? exeVersion.trim()
             : `v${exeVersion.trim()}`
-          : 'v2.3.2';
+          : 'v2.5.0';
       el.downloadSizeText.textContent = `${versionTag} · NSIS Setup (.exe) · ${exeSize}`;
     }
     if (el.downloadCountText) {
@@ -3488,13 +4031,13 @@
       let exeSize = null;
       let exeVersion = null;
       if (v2Release && Array.isArray(v2Release.assets)) {
-        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.3.2';
+        exeVersion = typeof v2Release.tag_name === 'string' ? v2Release.tag_name : 'v2.5.0';
         const exeAsset = v2Release.assets.find(
           (a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe')
         );
         if (exeAsset && isSafeGitHubUrl(exeAsset.browser_download_url)) {
           exeUrl = exeAsset.browser_download_url;
-          exeSize = formatMegabytes(exeAsset.size) || '4.67 MB';
+          exeSize = formatMegabytes(exeAsset.size) || '4.71 MB';
         }
       }
 
@@ -3513,7 +4056,7 @@
         );
       } catch (_err) {}
     } catch (_err) {
-      // Keep static v2.3.2 fallback link & hide download count gracefully when offline/rate-limited
+      // Keep static v2.5.0 fallback link & hide download count gracefully when offline/rate-limited
     }
   }
 

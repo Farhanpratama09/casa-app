@@ -13,7 +13,7 @@ import puppeteer from 'puppeteer-core';
 
 const DOCS_DIR = path.resolve('docs');
 const EXE_BUNDLE_PATH = path.resolve(
-  'src-tauri/target/release/bundle/nsis/CASA_2.3.2_x64-setup.exe'
+  'src-tauri/target/release/bundle/nsis/CASA_2.5.0_x64-setup.exe'
 );
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -130,18 +130,18 @@ async function main() {
           contentType: 'application/json',
           body: JSON.stringify([
             {
-              tag_name: 'v2.3.2',
+              tag_name: 'v2.5.0',
               assets: [
                 {
-                  name: 'CASA_2.3.2_x64-setup.exe',
+                  name: 'CASA_2.5.0_x64-setup.exe',
                   size: 4882545,
                   download_count: 8,
                   browser_download_url:
-                    'https://github.com/Farhanpratama09/casa-app/releases/download/v2.3.2/CASA_2.3.2_x64-setup.exe',
+                    'https://github.com/Farhanpratama09/casa-app/releases/download/v2.5.0/CASA_2.5.0_x64-setup.exe',
                 },
-                { name: 'CASA_2.3.2_x64-setup.exe.sig', size: 444, download_count: 90 },
-                { name: 'CASA_2.3.2_x64_en-US.msi', size: 5865472, download_count: 3 },
-                { name: 'CASA_2.3.2_x64_en-US.msi.sig', size: 444, download_count: 45 },
+                { name: 'CASA_2.5.0_x64-setup.exe.sig', size: 444, download_count: 90 },
+                { name: 'CASA_2.5.0_x64_en-US.msi', size: 5865472, download_count: 3 },
+                { name: 'CASA_2.5.0_x64_en-US.msi.sig', size: 444, download_count: 45 },
                 { name: 'latest.json', size: 1200, download_count: 500 },
               ],
             },
@@ -228,8 +228,8 @@ async function main() {
     check(
       layoutAudit.hasPrimaryExe &&
         layoutAudit.primaryLabelText === 'Download CASA for Windows' &&
-        layoutAudit.dlSizeText.startsWith('v2.3.2 · NSIS Setup (.exe) ·') &&
-        layoutAudit.primaryHref.includes('CASA_2.3.2_x64-setup.exe') &&
+        layoutAudit.dlSizeText.startsWith('v2.5.0 · NSIS Setup (.exe) ·') &&
+        layoutAudit.primaryHref.includes('CASA_2.5.0_x64-setup.exe') &&
         layoutAudit.shaClosedInitially &&
         layoutAudit.shaSummaryText === 'Verify SHA-256 checksum' &&
         /^[0-9A-F]{64}$/.test(layoutAudit.shaText) &&
@@ -354,7 +354,7 @@ async function main() {
     const m6OpenCheck = await page.evaluate(() => ({
       expanded: document.getElementById('vm-notch-capsule')?.getAttribute('data-state') === 'expanded',
       variant: document.getElementById('vm-notch-capsule')?.getAttribute('data-variant'),
-      hasNavTabs: document.querySelectorAll('.casa-m6-tab:not([hidden])').length === 5,
+      hasNavTabs: document.querySelectorAll('.casa-m6-tab:not([hidden])').length === 6,
     }));
     await page.keyboard.down('AltLeft');
     await page.keyboard.press('Space');
@@ -642,7 +642,7 @@ async function main() {
     }));
 
     check(
-      ibadahPanelAudit.visibleTabs === 6 &&
+      ibadahPanelAudit.visibleTabs === 7 &&
         ibadahPanelAudit.ibadahOpen &&
         ibadahPanelAudit.hasParabolicSvg &&
         ibadahPanelAudit.hasRefreshNearCity &&
@@ -776,7 +776,7 @@ async function main() {
 
     check(
       v240CalcAudit.hasHybridNav &&
-        v240CalcAudit.visibleTabCount === 6 &&
+        v240CalcAudit.visibleTabCount === 7 &&
         v240CalcAudit.lastTabIsKontrol &&
         v240CalcAudit.activeBg === 'rgba(255, 255, 255, 0.08)' &&
         v240CalcAudit.activeColor === 'rgb(244, 244, 245)' &&
@@ -800,6 +800,176 @@ async function main() {
         v240WifiAudit.hasEnterpriseNote,
       `Mode 6 v2.4.0: Kontrol-last high-contrast nav, 2-col keypad (${v240CalcAudit.keypadMath}), searchable currency (SAR), Focus icon, ◈ ♥ Drop eye & Wi-Fi Portal/802.1X verified`,
       JSON.stringify({ v240CalcAudit, focusIconAudit, dropEyeAudit, v240WifiAudit })
+    );
+
+    // Mode 6 v2.5.0: Hybrid 7-Tab Nav (Jadwal #FB7185 before Kontrol), 560x216 Split Calendar, Contextual Hari Ini, Sen-Jum, <=5m Satellite/Header Chip & T-0 (◉ ♥) + Snooze 5m/Dismiss
+    await page.click('[data-m6-tab="calendar"]');
+    await new Promise((r) => setTimeout(r, 180));
+    const v250CalAudit = await page.evaluate(() => {
+      const capsule = document.getElementById('vm-notch-capsule');
+      const calPanel = document.getElementById('vm-exp-calendar');
+      const visibleTabs = Array.from(document.querySelectorAll('.casa-m6-tab')).filter((b) => !b.hidden);
+      const tabOrder = visibleTabs.map((b) => b.getAttribute('data-m6-tab'));
+      const calTabBtn = document.getElementById('vm-m6-calendar-tab');
+      const calIconEl = calTabBtn?.querySelector('.casa-m6-tab-ico');
+      const calIconStyle = calIconEl ? window.getComputedStyle(calIconEl) : null;
+      const inMonthDays = Array.from(
+        document.querySelectorAll('#vm-cal-grid .vm-cal-day[data-in-month="true"]')
+      );
+      const todayBtn = document.getElementById('vm-cal-today-btn');
+      const todayBtnHiddenInitially = Boolean(todayBtn?.hidden);
+      const weekdayOptText =
+        document.querySelector('#vm-cal-repeat-select option[value="weekdays"]')?.textContent?.trim() || '';
+
+      // Select a past date (or navigate back 1 month if on day 1) and verify contextual Hari Ini & Sekali disable
+      let pastCell = document.querySelector('#vm-cal-grid .vm-cal-day.is-past');
+      if (!pastCell) {
+        document.getElementById('vm-cal-prev-btn')?.click();
+        pastCell = document.querySelector('#vm-cal-grid .vm-cal-day');
+      }
+      pastCell?.click();
+      const todayBtnShownOnAway = todayBtn?.hidden === false;
+      const onceOpt = document.querySelector('#vm-cal-repeat-select option[value="once"]');
+      const onceDisabledOnPast = Boolean(onceOpt?.disabled);
+
+      // Jump back to today, verify Hari Ini hides again, and add a reminder containing HTML tags to test sanitization
+      todayBtn?.click();
+      const todayBtnHiddenAfterJump = Boolean(todayBtn?.hidden);
+      const titleInput = document.getElementById('vm-cal-title-input');
+      const addForm = document.getElementById('vm-cal-add-form');
+      if (titleInput && addForm) {
+        titleInput.value = '<b>Standup Sync</b>';
+        addForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      }
+      const agendaList = document.getElementById('vm-cal-agenda-list');
+      const injectedBoldCount = agendaList ? agendaList.querySelectorAll('b').length : -1;
+      const countText = document.getElementById('vm-cal-count-badge')?.textContent?.trim() || '';
+
+      return {
+        variant: capsule?.getAttribute('data-variant'),
+        calVisible: Boolean(calPanel && !calPanel.hidden),
+        hasSplit2Col: calPanel?.getAttribute('data-calendar-layout') === 'split-2col',
+        tabOrder,
+        lastTabIsKontrol: tabOrder[tabOrder.length - 1] === 'hud',
+        jadwalBeforeKontrol: tabOrder.indexOf('calendar') === tabOrder.indexOf('hud') - 1,
+        calIconColor: calIconStyle?.color || '',
+        calIconFilter: calIconStyle?.filter || '',
+        inMonthDayCount: inMonthDays.length,
+        todayBtnHiddenInitially,
+        todayBtnShownOnAway,
+        todayBtnHiddenAfterJump,
+        weekdayOptText,
+        onceDisabledOnPast,
+        injectedBoldCount,
+        countText,
+      };
+    });
+
+    // Simulate <= 5m -> detached right satellite pill in Idle (clean inner IdlePill), header chip in other Mode 6 tabs
+    await page.click('#vm-sim-rem-h15-btn');
+    await new Promise((r) => setTimeout(r, 150));
+    const v250H15Audit = await page.evaluate(() => ({
+      isIdle: document.getElementById('vm-notch-capsule')?.getAttribute('data-state') === 'idle',
+      satVisible: document.getElementById('vm-reminder-satellite-pill')?.hidden === false,
+      satText: document.getElementById('vm-reminder-sat-mins')?.textContent?.trim() || '',
+      satTitle: document.getElementById('vm-reminder-sat-title')?.textContent?.trim() || '',
+    }));
+
+    // Click satellite pill -> expands directly to Calendar; switch to Focus tab -> verifies header chip appears
+    await page.click('#vm-reminder-satellite-pill');
+    await new Promise((r) => setTimeout(r, 140));
+    const satClickVariant = await page.evaluate(
+      () => document.getElementById('vm-notch-capsule')?.getAttribute('data-variant')
+    );
+    await page.click('[data-m6-tab="todo"]');
+    await new Promise((r) => setTimeout(r, 120));
+    const headerChipAudit = await page.evaluate(() => ({
+      chipVisible: document.getElementById('vm-m6-reminder-chip')?.hidden === false,
+      chipText: document.getElementById('vm-m6-reminder-chip-text')?.textContent?.trim() || '',
+    }));
+
+    // Click header chip -> switches directly back to Calendar tab, simulate T-0 alert pill (◉ ♥), then test Snooze 5m & Dismiss
+    await page.click('#vm-m6-reminder-chip');
+    await new Promise((r) => setTimeout(r, 120));
+    await page.click('#vm-sim-rem-t0-btn');
+    await new Promise((r) => setTimeout(r, 150));
+    const v250T0Audit = await page.evaluate(() => ({
+      pillVisible: document.getElementById('casa-reminder-pill')?.hidden === false,
+      eyesExpr: document.getElementById('vm-reminder-eyes')?.getAttribute('data-companion-expression'),
+    }));
+
+    // Clicking non-button area on T-0 pill stays hoverExpandLocked (does NOT expand Mode 6)
+    await page.click('#vm-reminder-alert-title');
+    await new Promise((r) => setTimeout(r, 100));
+    const t0LockAudit = await page.evaluate(() => ({
+      stayedIdle: document.getElementById('vm-notch-capsule')?.getAttribute('data-state') === 'idle',
+    }));
+
+    // Snooze 5m -> hides T-0 pill & shows 5m satellite pill
+    await page.click('#vm-reminder-snooze-btn');
+    await new Promise((r) => setTimeout(r, 120));
+    const t0SnoozeAudit = await page.evaluate(() => ({
+      pillHidden: document.getElementById('casa-reminder-pill')?.hidden === true,
+      satVisible: document.getElementById('vm-reminder-satellite-pill')?.hidden === false,
+      satText: document.getElementById('vm-reminder-sat-mins')?.textContent?.trim() || '',
+    }));
+
+    // Toggle Jadwal quick chip in Control Center off/on & verify aligned Control Center chip colors
+    await page.click('#vm-notch-capsule');
+    await new Promise((r) => setTimeout(r, 120));
+    await page.click('[data-m6-tab="hud"]');
+    await new Promise((r) => setTimeout(r, 120));
+    const ccChipColors = await page.evaluate(() => ({
+      ibadah: window.getComputedStyle(document.getElementById('vm-cc-toggle-ibadah')).color,
+      calc: window.getComputedStyle(document.getElementById('vm-cc-toggle-calc')).color,
+      calendar: window.getComputedStyle(document.getElementById('vm-cc-toggle-calendar')).color,
+    }));
+    await page.click('#vm-cc-toggle-calendar');
+    await new Promise((r) => setTimeout(r, 100));
+    const calHiddenWhenOff = await page.evaluate(
+      () => document.getElementById('vm-m6-calendar-tab')?.hidden === true
+    );
+    await page.click('#vm-cc-toggle-calendar');
+    await new Promise((r) => setTimeout(r, 100));
+    const calShownWhenOn = await page.evaluate(
+      () => document.getElementById('vm-m6-calendar-tab')?.hidden === false
+    );
+
+    check(
+      v250CalAudit.variant === 'calendar' &&
+        v250CalAudit.calVisible &&
+        v250CalAudit.hasSplit2Col &&
+        v250CalAudit.lastTabIsKontrol &&
+        v250CalAudit.jadwalBeforeKontrol &&
+        v250CalAudit.calIconColor === 'rgb(251, 113, 133)' &&
+        v250CalAudit.calIconFilter.includes('drop-shadow') &&
+        v250CalAudit.inMonthDayCount >= 28 &&
+        v250CalAudit.todayBtnHiddenInitially &&
+        v250CalAudit.todayBtnShownOnAway &&
+        v250CalAudit.todayBtnHiddenAfterJump &&
+        v250CalAudit.weekdayOptText === 'Sen–Jum' &&
+        v250CalAudit.onceDisabledOnPast &&
+        v250CalAudit.injectedBoldCount === 0 &&
+        v250CalAudit.countText === '3/50' &&
+        v250H15Audit.isIdle &&
+        v250H15Audit.satVisible &&
+        v250H15Audit.satText === '5m' &&
+        satClickVariant === 'calendar' &&
+        headerChipAudit.chipVisible &&
+        headerChipAudit.chipText === '5m' &&
+        v250T0Audit.pillVisible &&
+        v250T0Audit.eyesExpr === 'reminder_t0' &&
+        t0LockAudit.stayedIdle &&
+        t0SnoozeAudit.pillHidden &&
+        t0SnoozeAudit.satVisible &&
+        t0SnoozeAudit.satText === '5m' &&
+        ccChipColors.ibadah === 'rgb(16, 185, 129)' &&
+        ccChipColors.calc === 'rgb(251, 146, 60)' &&
+        ccChipColors.calendar === 'rgb(251, 113, 133)' &&
+        calHiddenWhenOff &&
+        calShownWhenOn,
+      `Mode 6 v2.5.0: 7-tab Jadwal (#FB7185), contextual Hari Ini, Sen–Jum, <=5m satellite pill + header chip, CC colors, T-0 ◉ ♥ + Snooze 5m verified`,
+      JSON.stringify({ v250CalAudit, v250H15Audit, satClickVariant, headerChipAudit, v250T0Audit, t0SnoozeAudit, ccChipColors })
     );
 
     // Clean Path Routing Without `#` (/casa-app/<section>, popstate Back, Logo reset -> /casa-app/)

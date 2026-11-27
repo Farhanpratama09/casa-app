@@ -425,16 +425,23 @@ textarea {
   height: 186px;
 }
 
+.vm-notch-capsule[data-state="expanded"][data-variant="calendar"] {
+  width: min(560px, calc(100% - 8px));
+  height: 216px;
+}
+
 .vm-notch-capsule[data-state="expanded"][data-variant="dropzone"] {
   width: min(580px, calc(100% - 8px));
   height: 192px;
 }
 
-.vm-notch-capsule[data-state="expanded"][data-has-prayer-banner="true"] {
+.vm-notch-capsule[data-state="expanded"][data-has-prayer-banner="true"],
+.vm-notch-capsule[data-state="expanded"][data-has-reminder-banner="true"] {
   height: 214px;
 }
 
-.vm-notch-capsule[data-state="expanded"][data-variant="dropzone"][data-has-prayer-banner="true"] {
+.vm-notch-capsule[data-state="expanded"][data-variant="dropzone"][data-has-prayer-banner="true"],
+.vm-notch-capsule[data-state="expanded"][data-variant="dropzone"][data-has-reminder-banner="true"] {
   height: 220px;
 }
 
@@ -1315,6 +1322,11 @@ textarea {
   filter: drop-shadow(0 0 5px rgba(251, 146, 60, 0.55));
 }
 
+.casa-m6-tab[aria-selected="true"][data-m6-tab="calendar"] .casa-m6-tab-ico {
+  color: #fb7185;
+  filter: drop-shadow(0 0 5px rgba(251, 113, 133, 0.55));
+}
+
 .casa-m6-tab[aria-selected="true"][data-m6-tab="hud"] .casa-m6-tab-ico {
   color: #a78bfa;
   filter: drop-shadow(0 0 5px rgba(167, 139, 250, 0.55));
@@ -1339,6 +1351,30 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 4px;
+}
+
+.casa-m6-reminder-chip {
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  border: 1px solid rgba(251, 113, 133, 0.44);
+  background: rgba(251, 113, 133, 0.14);
+  color: #fb7185;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: normal;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.casa-m6-reminder-chip[hidden],
+.casa-reminder-satellite[hidden] {
+  display: none !important;
 }
 
 .casa-m6-icon-btn {
@@ -2073,6 +2109,24 @@ textarea {
   color: #ffffff;
 }
 
+#vm-cc-toggle-ibadah.active {
+  border-color: rgba(16, 185, 129, 0.48);
+  background: rgba(16, 185, 129, 0.14);
+  color: #10b981;
+}
+
+#vm-cc-toggle-calc.active {
+  border-color: rgba(251, 146, 60, 0.48);
+  background: rgba(251, 146, 60, 0.14);
+  color: #fb923c;
+}
+
+#vm-cc-toggle-calendar.active {
+  border-color: rgba(251, 113, 133, 0.48);
+  background: rgba(251, 113, 133, 0.14);
+  color: #fb7185;
+}
+
 .casa-cc-wifi-drawer {
   position: absolute;
   inset: 4px 10px 6px;
@@ -2207,12 +2261,497 @@ textarea {
 }
 
 /* Mode 6 Quick Calculator & Offline Converter (v2.4.0) */
-.casa-m6-calc {
+.casa-m6-calc,
+.casa-m6-calendar {
   padding: 7px 14px 10px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   gap: 7px;
+}
+
+/* Mode 6 Calendar & Smart Reminders (v2.5.0 Split 2-Column 560x216) */
+.casa-m6-calendar {
+  padding: 6px 12px 8px;
+  display: grid;
+  grid-template-columns: 214px minmax(0, 1fr);
+  flex-direction: row;
+  gap: 10px;
+}
+
+.casa-m6-calendar[hidden],
+.casa-reminder-pill[hidden],
+.casa-m6-reminder-banner[hidden],
+.casa-reminder-h15-badge[hidden] {
+  display: none !important;
+}
+
+.casa-cal-month-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-right: 10px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  min-width: 0;
+}
+
+.casa-cal-month-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  height: 20px;
+}
+
+.casa-cal-month-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.casa-cal-month-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.casa-cal-nav-btn,
+.casa-cal-today-btn {
+  height: 18px;
+  border-radius: 5px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 8.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.casa-cal-nav-btn {
+  width: 18px;
+  padding: 0;
+}
+
+.casa-cal-today-btn {
+  padding: 0 6px;
+}
+
+.casa-cal-nav-btn:hover,
+.casa-cal-today-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+.casa-cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  color: rgba(255, 255, 255, 0.42);
+  text-align: center;
+}
+
+.casa-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+  flex: 1;
+  align-content: start;
+}
+
+.vm-cal-day {
+  position: relative;
+  height: 19px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.vm-cal-day.is-out {
+  color: rgba(255, 255, 255, 0.22);
+}
+
+.vm-cal-day.is-past:not(.is-selected):not(.is-out) {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.vm-cal-day:hover:not(.is-selected) {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.vm-cal-day.is-today:not(.is-selected) {
+  border-color: #fb7185;
+  background: rgba(255, 255, 255, 0.06);
+  font-weight: 600;
+}
+
+.vm-cal-day.is-selected {
+  background: #fb7185;
+  color: #000000;
+  font-weight: 700;
+}
+
+.vm-cal-day-dot {
+  position: absolute;
+  bottom: 1.5px;
+  width: 3px;
+  height: 3px;
+  border-radius: 9999px;
+  background: #fb7185;
+}
+
+.vm-cal-day.is-selected .vm-cal-day-dot {
+  background: #000000;
+}
+
+.casa-cal-agenda-col {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.casa-cal-agenda-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 18px;
+}
+
+.casa-cal-agenda-head-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.casa-cal-selected-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.casa-cal-count-badge {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.casa-cal-sim-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.casa-cal-add-form {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.casa-cal-input,
+.casa-cal-time-input,
+.casa-cal-select {
+  height: 23px;
+  padding: 0 6px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: #0a0a0d;
+  color: #ffffff;
+  font-size: 9.5px;
+  outline: none;
+}
+
+.casa-cal-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.casa-cal-time-input {
+  width: 66px;
+  font-family: var(--font-mono);
+  color-scheme: dark;
+}
+
+.casa-cal-select {
+  width: 62px;
+}
+
+.casa-cal-add-btn {
+  width: 23px;
+  height: 23px;
+  border-radius: 7px;
+  border: 0;
+  background: #fb7185;
+  color: #000000;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.casa-cal-agenda-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vm-cal-agenda-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.vm-cal-toggle-btn {
+  width: 13px;
+  height: 13px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: transparent;
+  color: #000000;
+  font-size: 8.5px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.vm-cal-toggle-btn.is-enabled {
+  background: #fb7185;
+  border-color: #fb7185;
+}
+
+.vm-cal-row-time {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.85);
+  flex-shrink: 0;
+}
+
+.vm-cal-row-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.92);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vm-cal-row-title.is-disabled {
+  color: rgba(255, 255, 255, 0.35);
+  text-decoration: line-through;
+}
+
+.vm-cal-row-tag {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 7.5px;
+  flex-shrink: 0;
+}
+
+.vm-cal-row-tag.is-snoozed {
+  background: rgba(251, 113, 133, 0.16);
+  color: #fb7185;
+}
+
+.vm-cal-del-btn {
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+.vm-cal-del-btn:hover {
+  color: #ffffff;
+}
+
+/* Detached Right Satellite Pill for <= 5m Reminder (Idle Mode, 36px height, max 168px width) */
+.casa-reminder-satellite {
+  position: absolute;
+  top: 1.5px;
+  left: calc(100% + 8px);
+  height: 36px;
+  max-width: 168px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  background: #000000;
+  border: 1px solid rgba(251, 113, 133, 0.4);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.72);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  z-index: 25;
+  white-space: nowrap;
+}
+
+.casa-rem-sat-ico {
+  color: #fb7185;
+  flex-shrink: 0;
+}
+
+.casa-rem-sat-mins {
+  color: #fb7185;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: normal;
+  flex-shrink: 0;
+}
+
+.casa-rem-sat-title {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.casa-reminder-pill {
+  min-width: 288px;
+  max-width: min(340px, 100%);
+  height: 39px;
+  padding: 0 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: default;
+}
+
+.casa-reminder-pill-left,
+.casa-m6-reminder-banner-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.casa-reminder-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.casa-reminder-time {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.52);
+  flex-shrink: 0;
+}
+
+.casa-reminder-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.casa-rem-snooze-btn,
+.casa-rem-dismiss-btn {
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.casa-rem-snooze-btn {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.casa-rem-dismiss-btn {
+  border: 0;
+  background: #fb7185;
+  color: #000000;
+  font-weight: 700;
+}
+
+.casa-rem-snooze-btn.compact,
+.casa-rem-dismiss-btn.compact {
+  height: 18px;
+  padding: 0 6px;
+  font-size: 8.5px;
+}
+
+.casa-m6-reminder-banner {
+  height: 28px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: linear-gradient(90deg, rgba(251, 113, 133, 0.12), rgba(8, 8, 10, 0.96) 65%);
+  border-bottom: 1px solid rgba(251, 113, 133, 0.28);
+  flex-shrink: 0;
+}
+
+.casa-m6-reminder-banner-left strong {
+  color: #fb7185;
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes casaReminderPulse {
+  0%, 100% {
+    opacity: 0.76;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+.casa-reminder-eyes-pulse {
+  animation: casaReminderPulse 1.9s ease-in-out infinite;
 }
 
 .casa-calc-top {
@@ -3964,8 +4503,30 @@ textarea {
 
   .casa-m6-music,
   .casa-m6-focus,
-  .casa-calc-split {
+  .casa-calc-split,
+  .casa-m6-calendar {
     grid-template-columns: 1fr;
+  }
+
+  .casa-cal-month-col {
+    padding-right: 0;
+    padding-bottom: 6px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .casa-reminder-pill {
+    min-width: 0;
+    width: auto;
+    max-width: 100%;
+  }
+
+  .casa-reminder-satellite {
+    position: relative;
+    top: auto;
+    left: auto;
+    margin-top: 6px;
+    max-width: 100%;
   }
 
   .casa-queue-popout,

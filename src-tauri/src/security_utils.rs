@@ -222,9 +222,17 @@ pub struct ComGuard(bool);
 #[cfg(windows)]
 impl ComGuard {
     pub fn init_mta() -> Self {
+        use windows::Win32::Foundation::{RPC_E_CHANGED_MODE, S_FALSE, S_OK};
         use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
         let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-        Self(hr.is_ok())
+        match hr {
+            S_OK | S_FALSE => Self(true),
+            RPC_E_CHANGED_MODE => Self(false),
+            _ => {
+                eprintln!("[CASA COM] CoInitializeEx MTA warning: {:?}", hr);
+                Self(false)
+            }
+        }
     }
 
     pub fn init_sta() -> Result<Self, String> {

@@ -740,7 +740,7 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
 export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   if (!isTauriEnv) {
     return {
-      currentVersion: '2.3.2',
+      currentVersion: '2.5.0',
       available: false,
       version: null,
       body: null,
@@ -755,7 +755,7 @@ export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
 export async function getUpdateNotificationStatus(): Promise<UpdateNotificationStatus> {
   if (!isTauriEnv) {
     return {
-      currentVersion: '2.3.2',
+      currentVersion: '2.5.0',
       latestVersion: null,
       releaseUrl: null,
       releaseNotes: null,
@@ -768,7 +768,7 @@ export async function getUpdateNotificationStatus(): Promise<UpdateNotificationS
     return await invoke<UpdateNotificationStatus>('get_update_notification_status');
   } catch {
     return {
-      currentVersion: '2.3.2',
+      currentVersion: '2.5.0',
       latestVersion: null,
       releaseUrl: null,
       releaseNotes: null,
@@ -1149,5 +1149,64 @@ export async function openWindowsNetworkSettings(
     await invoke('open_windows_network_settings', { target });
   } catch (err) {
     console.warn('[CASA IPC] open_windows_network_settings failed:', err);
+  }
+}
+
+let lastDuckingRequested: boolean | null = null;
+
+export async function setBackgroundAudioDucking(ducked: boolean): Promise<boolean> {
+  if (!isTauriEnv) {
+    lastDuckingRequested = ducked;
+    return ducked;
+  }
+  if (lastDuckingRequested === ducked) {
+    return ducked;
+  }
+  lastDuckingRequested = ducked;
+  try {
+    return await invoke<boolean>('set_background_audio_ducking', { ducked });
+  } catch (err) {
+    lastDuckingRequested = null;
+    console.warn('[CASA Audio] set_background_audio_ducking failed:', err);
+    return false;
+  }
+}
+
+export async function pauseSmtcForAdzan(): Promise<string | null> {
+  if (!isTauriEnv) return null;
+  try {
+    return await invoke<string | null>('pause_smtc_for_adzan');
+  } catch (err) {
+    console.warn('[CASA Audio] pause_smtc_for_adzan failed:', err);
+    return null;
+  }
+}
+
+export async function resumeSmtcAfterAdzan(sessionId: string): Promise<boolean> {
+  if (!isTauriEnv || !sessionId) return false;
+  try {
+    return await invoke<boolean>('resume_smtc_after_adzan', { sessionId });
+  } catch (err) {
+    console.warn('[CASA Audio] resume_smtc_after_adzan failed:', err);
+    return false;
+  }
+}
+
+export async function playCalendarChimeNative(): Promise<boolean> {
+  if (!isTauriEnv) return false;
+  try {
+    return await invoke<boolean>('play_calendar_chime');
+  } catch (err) {
+    console.warn('[CASA Audio] play_calendar_chime failed:', err);
+    return false;
+  }
+}
+
+export async function stopCalendarChimeNative(): Promise<void> {
+  if (!isTauriEnv) return;
+  try {
+    await invoke<boolean>('stop_calendar_chime');
+  } catch (err) {
+    console.warn('[CASA Audio] stop_calendar_chime failed:', err);
   }
 }

@@ -77,6 +77,7 @@ export interface CasaSettings {
   launchAtStartup: boolean;
   playerRegion: CasaPlayerRegion;
   calculatorEnabled: boolean;
+  calendarEnabled: boolean;
   ibadah: IbadahSettings;
 }
 
@@ -186,6 +187,7 @@ export const DEFAULT_CASA_SETTINGS: CasaSettings = {
   launchAtStartup: false,
   playerRegion: 'auto',
   calculatorEnabled: true,
+  calendarEnabled: true,
   ibadah: DEFAULT_IBADAH_SETTINGS,
 };
 
@@ -377,6 +379,10 @@ function sanitizeSettings(raw: unknown): CasaSettings {
       typeof input.calculatorEnabled === 'boolean'
         ? input.calculatorEnabled
         : DEFAULT_CASA_SETTINGS.calculatorEnabled,
+    calendarEnabled:
+      typeof input.calendarEnabled === 'boolean'
+        ? input.calendarEnabled
+        : DEFAULT_CASA_SETTINGS.calendarEnabled,
     ibadah: sanitizeIbadahSettings(input.ibadah),
   };
 }

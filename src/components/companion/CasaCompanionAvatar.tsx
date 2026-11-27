@@ -5,11 +5,14 @@ import { useSkillStore } from '../../skills/store';
 import { useSystemHardware } from '../../hooks/useSystemHardware';
 import { useSystemTelemetry } from '../../hooks/useSystemTelemetry';
 import { usePrayerStore } from '../../features/ibadah/prayerStore';
+import { useCalendarStore } from '../../features/calendar/calendarStore';
 import { useDropZoneStore } from '../../stores/useDropZoneStore';
+import { useSettingsStore } from '../../stores/useSettingsStore';
 
 export type CompanionExpression =
   | 'prayer'      // ✦ ☾ (Waktu Ibadah tiba - Bintang & Bulan Sabit Pure Monochrome OLED)
   | 'alarm'       // > < (Alarm berbunyi - aksen Warm Amber)
+  | 'reminder_t0' // ◉ ♥ (Pengingat Jadwal T-0 - Mata kiri ◉ berdenyut halus, mata kanan ♥ utuh)
   | 'dual_active' // •̀ ♪ (Focus timer & Musik aktif bersamaan)
   | 'focus'       // •̀ ♥ (Focus timer berjalan)
   | 'music'       // ♪ ♥ (Musik diputar)
@@ -21,6 +24,7 @@ export type CompanionExpression =
 export interface CompanionExpressionInputs {
   isPrayerAlert?: boolean;
   isAlarmRinging: boolean;
+  isReminderAlert?: boolean;
   isTimerRunning: boolean;
   isPlaying: boolean;
   keepAwake: boolean;
@@ -34,17 +38,19 @@ export interface CompanionExpressionInputs {
  * Pure priority resolver for reactive companion eye expressions:
  * 1. prayer (✦ ☾)
  * 2. alarm (> <)
- * 3. dual_active (•̀ ♪)
- * 4. focus (•̀ ♥)
- * 5. music (♪ ♥)
- * 6. awake_lock (✦ ♥)
- * 7. drop_zone (◈ ♥)
- * 8. low_battery (× ♡)
- * 9. idle (× ♥)
+ * 3. reminder_t0 (◉ ♥)
+ * 4. dual_active (•̀ ♪)
+ * 5. focus (•̀ ♥)
+ * 6. music (♪ ♥)
+ * 7. awake_lock (✦ ♥)
+ * 8. drop_zone (◈ ♥)
+ * 9. low_battery (× ♡)
+ * 10. idle (× ♥)
  */
 export function resolveCompanionExpression({
   isPrayerAlert = false,
   isAlarmRinging,
+  isReminderAlert = false,
   isTimerRunning,
   isPlaying,
   keepAwake,
@@ -55,6 +61,7 @@ export function resolveCompanionExpression({
 }: CompanionExpressionInputs): CompanionExpression {
   if (isPrayerAlert) return 'prayer';
   if (isAlarmRinging) return 'alarm';
+  if (isReminderAlert) return 'reminder_t0';
   if (isTimerRunning && isPlaying) return 'dual_active';
   if (isTimerRunning) return 'focus';
   if (isPlaying) return 'music';
@@ -69,6 +76,7 @@ export interface CasaCompanionAvatarProps {
   isTimerRunning?: boolean;
   isAlarmRinging?: boolean;
   isPrayerAlert?: boolean;
+  isReminderAlert?: boolean;
   keepAwake?: boolean;
   hasDropItems?: boolean;
   batteryLevel?: number;
@@ -82,6 +90,7 @@ export interface CasaCompanionAvatarProps {
 const EXPRESSION_TITLES: Record<CompanionExpression, string> = {
   prayer: 'CASA (✦ ☾ Waktu Ibadah)',
   alarm: 'CASA (> < Time\'s Up!)',
+  reminder_t0: 'CASA (◉ ♥ Pengingat Jadwal T-0)',
   dual_active: 'CASA (•̀ ♪ Focus + Music)',
   focus: 'CASA (•̀ ♥ Focus Active)',
   music: 'CASA (♪ ♥ Music Playing)',
@@ -108,6 +117,7 @@ export const CasaCompanionAvatar: React.FC<CasaCompanionAvatarProps> = memo(({
   isTimerRunning: propIsTimerRunning,
   isAlarmRinging: propIsAlarmRinging,
   isPrayerAlert: propIsPrayerAlert,
+  isReminderAlert: propIsReminderAlert,
   keepAwake: propKeepAwake,
   hasDropItems: propHasDropItems,
   batteryLevel: propBatteryLevel,
@@ -126,6 +136,8 @@ export const CasaCompanionAvatar: React.FC<CasaCompanionAvatarProps> = memo(({
   });
   const timerState = useSkillStore((s) => s.skillStates['core.timer']);
   const prayerStore = usePrayerStore();
+  const calendarStore = useCalendarStore();
+  const { settings } = useSettingsStore();
   const dropZoneCount = useDropZoneStore((s) => s.items.length);
   const prevDropCountRef = useRef(dropZoneCount);
   const [dropPopTick, setDropPopTick] = useState(0);
@@ -153,6 +165,12 @@ export const CasaCompanionAvatar: React.FC<CasaCompanionAvatarProps> = memo(({
     propIsPrayerAlert !== undefined
       ? propIsPrayerAlert
       : Boolean(prayerStore.activeAlert && !prayerStore.activeAlert.suppressVisual);
+  const isReminderAlert =
+    propIsReminderAlert !== undefined
+      ? propIsReminderAlert
+      : Boolean(settings.calendarEnabled && calendarStore.activeAlert);
+  const reminderAccentColor =
+    settings.theme === 'monochrome' ? '#FFFFFF' : '#FB7185';
   const keepAwake =
     propKeepAwake !== undefined ? propKeepAwake : Boolean(telemetry.stay_awake);
   const hasDropItems = propHasDropItems !== undefined ? propHasDropItems : dropZoneCount > 0;
@@ -178,6 +196,7 @@ export const CasaCompanionAvatar: React.FC<CasaCompanionAvatarProps> = memo(({
     resolveCompanionExpression({
       isPrayerAlert,
       isAlarmRinging,
+      isReminderAlert,
       isTimerRunning,
       isPlaying,
       keepAwake,
@@ -213,6 +232,21 @@ export const CasaCompanionAvatar: React.FC<CasaCompanionAvatarProps> = memo(({
             strokeLinecap="round"
             strokeLinejoin="round"
           />
+        );
+      case 'reminder_t0':
+        // ◉ concentric pulse target eye (right eye ♥ stays intact)
+        return (
+          <g>
+            <circle
+              cx="8"
+              cy="8"
+              r="5.2"
+              fill="none"
+              stroke={reminderAccentColor}
+              strokeWidth="1.7"
+            />
+            <circle cx="8" cy="8" r="2.2" fill={reminderAccentColor} />
+          </g>
         );
       case 'dual_active':
       case 'focus':
@@ -370,6 +404,8 @@ export const CasaCompanionAvatar: React.FC<CasaCompanionAvatarProps> = memo(({
   const bobAnimate =
     resolvedExpression === 'prayer'
       ? { opacity: [0.78, 1, 0.78], scale: [0.95, 1.05, 0.95], x: 0, y: 0 }
+      : resolvedExpression === 'reminder_t0'
+      ? { opacity: [0.76, 1, 0.76], scale: [0.96, 1.04, 0.96], x: 0, y: 0 }
       : resolvedExpression === 'alarm'
       ? { x: [0, -1, 1, -1, 0], scale: 1, opacity: 1 }
       : hasMusicMotion
@@ -379,6 +415,8 @@ export const CasaCompanionAvatar: React.FC<CasaCompanionAvatarProps> = memo(({
   const bobTransition =
     resolvedExpression === 'prayer'
       ? { repeat: Infinity, duration: 2.3, ease: 'easeInOut' as const }
+      : resolvedExpression === 'reminder_t0'
+      ? { repeat: Infinity, duration: 1.9, ease: 'easeInOut' as const }
       : resolvedExpression === 'alarm'
       ? { repeat: Infinity, duration: 0.45, ease: 'easeInOut' as const }
       : hasMusicMotion

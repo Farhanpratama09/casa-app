@@ -17,6 +17,7 @@ const CHIME_NOTES_HZ = [523.25, 659.25, 783.99, 987.77]; // C5 -> E5 -> G5 -> B5
 const CHIME_INTERVAL_MS = 3500;
 const MAX_CHIME_CYCLES = 15;
 const SAFETY_MAX_DURATION_MS = 52_000;
+export const ALARM_CHIME_PEAK_GAIN = 0.85;
 
 const CUSTOM_ALARM_DB_NAME = 'casa_custom_alarm_db';
 const CUSTOM_ALARM_DB_VERSION = 1;
@@ -374,7 +375,7 @@ export async function resetCustomAlarm(): Promise<void> {
 }
 
 /**
- * Unlocks WebView2 AudioContext synchronously on user gesture (e.g. Start button click)
+ * Unlocks WebView2 AudioContext on user gesture (e.g. Start button click or first click/key)
  * so the alarm is never blocked by autoplay policy when the timer finishes later.
  */
 export function unlockAlarmAudio(): void {
@@ -400,6 +401,30 @@ export function unlockAlarmAudio(): void {
   }
 }
 
+async function ensureAudioContextRunning(ctx: AudioContext): Promise<void> {
+  if (ctx.state === 'suspended') {
+    await ctx.resume().catch(() => {});
+  }
+}
+
+if (typeof window !== 'undefined') {
+  const handleFirstGestureUnlock = () => {
+    unlockAlarmAudio();
+    if (audioCtx && audioCtx.state === 'running') {
+      window.removeEventListener('pointerdown', handleFirstGestureUnlock, true);
+      window.removeEventListener('keydown', handleFirstGestureUnlock, true);
+    }
+  };
+  window.addEventListener('pointerdown', handleFirstGestureUnlock, {
+    capture: true,
+    passive: true,
+  });
+  window.addEventListener('keydown', handleFirstGestureUnlock, {
+    capture: true,
+    passive: true,
+  });
+}
+
 export function syncActiveAlarmVolume(volumePercent: number): void {
   const vol = Math.max(0, Math.min(1, volumePercent / 100));
   for (const g of activeGainNodes) {
@@ -418,7 +443,21 @@ function playSingleHarmonicCycle(ctx: AudioContext): number {
 
   const masterGain = ctx.createGain();
   masterGain.gain.setValueAtTime(vol, now);
-  masterGain.connect(ctx.destination);
+
+  let outputNode: AudioNode = ctx.destination;
+  if (typeof ctx.createDynamicsCompressor === 'function') {
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.setValueAtTime(-3, now);
+    compressor.knee.setValueAtTime(6, now);
+    compressor.ratio.setValueAtTime(8, now);
+    compressor.attack.setValueAtTime(0.003, now);
+    compressor.release.setValueAtTime(0.15, now);
+    compressor.connect(ctx.destination);
+    activeNodes.push(compressor);
+    outputNode = compressor;
+  }
+
+  masterGain.connect(outputNode);
   activeNodes.push(masterGain);
   activeGainNodes.push(masterGain);
 
@@ -437,12 +476,12 @@ function playSingleHarmonicCycle(ctx: AudioContext): number {
 
       const mainGain = ctx.createGain();
       mainGain.gain.setValueAtTime(0.0001, noteStart);
-      mainGain.gain.linearRampToValueAtTime(0.16, noteStart + 0.02);
+      mainGain.gain.linearRampToValueAtTime(ALARM_CHIME_PEAK_GAIN, noteStart + 0.02);
       mainGain.gain.exponentialRampToValueAtTime(0.0008, noteStart + noteDuration);
 
       const harmonicGain = ctx.createGain();
       harmonicGain.gain.setValueAtTime(0.0001, noteStart);
-      harmonicGain.gain.linearRampToValueAtTime(0.026, noteStart + 0.015);
+      harmonicGain.gain.linearRampToValueAtTime(0.12, noteStart + 0.015);
       harmonicGain.gain.exponentialRampToValueAtTime(0.0005, noteStart + noteDuration * 0.65);
 
       oscMain.connect(mainGain);
@@ -511,17 +550,16 @@ function playResolvedCycle(ctx: AudioContext, customBuf: AudioBuffer | null): nu
   return playSingleHarmonicCycle(ctx);
 }
 
-function beginAlarmLoop(
+async function beginAlarmLoop(
   runId: number,
   ctx: AudioContext,
   customBuf: AudioBuffer | null,
   onAutoStop?: () => void
-): void {
+): Promise<void> {
   if (runId !== activeRunId) return;
 
-  if (ctx.state === 'suspended') {
-    void ctx.resume().catch(() => {});
-  }
+  await ensureAudioContextRunning(ctx);
+  if (runId !== activeRunId) return;
 
   cycleCount = 1;
   playResolvedCycle(ctx, customBuf);
@@ -531,22 +569,23 @@ function beginAlarmLoop(
     : CHIME_INTERVAL_MS;
 
   repeatTimer = setInterval(() => {
-    if (runId !== activeRunId || cycleCount >= MAX_CHIME_CYCLES) {
-      stopAlarmChime();
-      onAutoStop?.();
-      return;
-    }
+    void (async () => {
+      if (runId !== activeRunId || cycleCount >= MAX_CHIME_CYCLES) {
+        stopAlarmChime();
+        onAutoStop?.();
+        return;
+      }
 
-    cycleCount += 1;
-    const currentCtx = getOrCreateAudioContext();
-    if (!currentCtx) {
-      stopAlarmChime();
-      return;
-    }
-    if (currentCtx.state === 'suspended') {
-      void currentCtx.resume().catch(() => {});
-    }
-    playResolvedCycle(currentCtx, customBuf);
+      cycleCount += 1;
+      const currentCtx = getOrCreateAudioContext();
+      if (!currentCtx) {
+        stopAlarmChime();
+        return;
+      }
+      await ensureAudioContextRunning(currentCtx);
+      if (runId !== activeRunId) return;
+      playResolvedCycle(currentCtx, customBuf);
+    })();
   }, repeatMs);
 
   safetyTimer = setTimeout(() => {
@@ -571,18 +610,18 @@ export function startAlarmChime(onAutoStop?: () => void): void {
   const hasCustomSetting = Boolean(getSettingsSnapshot().customAlarmMeta);
 
   if (cachedCustomBuffer !== undefined) {
-    beginAlarmLoop(runId, ctx, cachedCustomBuffer, onAutoStop);
+    void beginAlarmLoop(runId, ctx, cachedCustomBuffer, onAutoStop);
     return;
   }
 
   if (!hasCustomSetting) {
-    beginAlarmLoop(runId, ctx, null, onAutoStop);
+    void beginAlarmLoop(runId, ctx, null, onAutoStop);
     return;
   }
 
   void preloadCustomAlarmBuffer().then((buf) => {
     if (runId !== activeRunId) return;
-    beginAlarmLoop(runId, ctx, buf, onAutoStop);
+    void beginAlarmLoop(runId, ctx, buf, onAutoStop);
   });
 }
 
@@ -592,14 +631,13 @@ export function startAlarmChime(onAutoStop?: () => void): void {
 export function playAlarmNoticeOnce(): void {
   const ctx = getOrCreateAudioContext();
   if (!ctx) return;
-  if (ctx.state === 'suspended') {
-    void ctx.resume().catch(() => {});
-  }
-  if (cachedCustomBuffer) {
-    playSingleCustomCycle(ctx, cachedCustomBuffer);
-  } else {
-    playSingleHarmonicCycle(ctx);
-  }
+  void ensureAudioContextRunning(ctx).then(() => {
+    if (cachedCustomBuffer) {
+      playSingleCustomCycle(ctx, cachedCustomBuffer);
+    } else {
+      playSingleHarmonicCycle(ctx);
+    }
+  });
 }
 
 /**
@@ -612,13 +650,12 @@ export function previewAlarmChime(onEnded?: () => void): void {
     onEnded?.();
     return;
   }
-  if (ctx.state === 'suspended') {
-    void ctx.resume().catch(() => {});
-  }
 
   const runId = ++activeRunId;
 
-  const trigger = (buf: AudioBuffer | null) => {
+  const trigger = async (buf: AudioBuffer | null) => {
+    if (runId !== activeRunId) return;
+    await ensureAudioContextRunning(ctx);
     if (runId !== activeRunId) return;
     const durationSec = playResolvedCycle(ctx, buf);
     previewStopTimer = setTimeout(() => {
@@ -630,10 +667,10 @@ export function previewAlarmChime(onEnded?: () => void): void {
   };
 
   if (cachedCustomBuffer !== undefined) {
-    trigger(cachedCustomBuffer);
+    void trigger(cachedCustomBuffer);
   } else {
     void preloadCustomAlarmBuffer().then((buf) => {
-      trigger(buf);
+      void trigger(buf);
     });
   }
 }

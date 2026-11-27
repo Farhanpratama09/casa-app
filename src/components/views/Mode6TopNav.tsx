@@ -18,6 +18,7 @@ import {
   FolderDown,
   MoonStar,
   Calculator,
+  CalendarDays,
 } from 'lucide-react';
 import { IslandMode } from '../../types/island';
 import { playChimeCue } from '../../utils/tauriBridge';
@@ -32,6 +33,7 @@ import {
   useUpdateNotification,
 } from '../../hooks/useUpdateNotification';
 import { useSettingsStore } from '../../stores/useSettingsStore';
+import type { UpcomingReminderBadge } from '../../features/calendar/calendarScheduleLogic';
 
 export interface Mode6TopNavProps {
   currentMode: IslandMode;
@@ -40,6 +42,7 @@ export interface Mode6TopNavProps {
   onCollapse?: () => void;
   onHeaderClick?: (e: React.MouseEvent) => void;
   isPeekPreview?: boolean;
+  upcomingReminderBadge?: UpcomingReminderBadge | null;
 }
 
 interface NavTabSpec {
@@ -94,6 +97,15 @@ const CALCULATOR_NAV_TAB: NavTabSpec = {
   matchModes: ['expanded_calculator'],
   icon: Calculator,
   activeIconColor: '#FB923C',
+};
+
+const CALENDAR_NAV_TAB: NavTabSpec = {
+  id: 'expanded_calendar',
+  label: 'Jadwal & Pengingat',
+  shortLabel: 'Jadwal',
+  matchModes: ['expanded_calendar'],
+  icon: CalendarDays,
+  activeIconColor: '#FB7185',
 };
 
 const CONTROL_NAV_TAB: NavTabSpec = {
@@ -162,6 +174,7 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
   onCollapse,
   onHeaderClick,
   isPeekPreview = false,
+  upcomingReminderBadge = null,
 }) => {
   const { hudAlert: rawHudAlert } = useSystemHardware();
   const { stats: systemStats } = useSystemTelemetry(false);
@@ -193,6 +206,7 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
     ...CORE_LEFT_TABS,
     ...(settings.ibadah.enabled ? [IBADAH_NAV_TAB] : []),
     ...(settings.calculatorEnabled ? [CALCULATOR_NAV_TAB] : []),
+    ...(settings.calendarEnabled ? [CALENDAR_NAV_TAB] : []),
     CONTROL_NAV_TAB,
   ];
 
@@ -343,8 +357,38 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
         </AnimatePresence>
       </div>
 
-      {/* Kanan: Cincin Baterai Lingkaran (Auto-Hide di Control Center) + Settings + Collapse */}
+      {/* Kanan: Chip <= 5m + Cincin Baterai Lingkaran (Auto-Hide di Control Center) + Settings + Collapse */}
       <div className="flex items-center justify-end gap-1 shrink-0 min-w-0">
+        {upcomingReminderBadge && currentMode !== 'expanded_calendar' && (
+          <button
+            type="button"
+            data-header-reminder-chip="true"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              playChimeCue('tap');
+              onSelectMode('expanded_calendar');
+            }}
+            style={
+              isMonochrome
+                ? {
+                    borderColor: 'rgba(255, 255, 255, 0.38)',
+                    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+                    color: '#FFFFFF',
+                  }
+                : {
+                    borderColor: 'rgba(251, 113, 133, 0.44)',
+                    backgroundColor: 'rgba(251, 113, 133, 0.14)',
+                    color: '#FB7185',
+                  }
+            }
+            className="inline-flex items-center gap-1 h-[20px] px-1.5 rounded-full border text-[9.5px] font-mono font-semibold tabular-nums leading-normal cursor-pointer hover:brightness-110 active:scale-95 transition-all shrink-0 max-w-[78px]"
+            title={`Segera (${upcomingReminderBadge.remainingMinutes}m): ${upcomingReminderBadge.title} — Klik untuk buka Jadwal`}
+          >
+            <CalendarDays className="w-2.5 h-2.5 shrink-0" />
+            <span className="truncate leading-normal">{upcomingReminderBadge.remainingMinutes}m</span>
+          </button>
+        )}
         {showHeaderBattery && (
           <BatteryPill battery={systemStats.battery} showPercentage={true} size={14} />
         )}

@@ -340,6 +340,7 @@ fn toggle_gaming_mode(app: tauri::AppHandle, enabled: bool) -> Result<bool, Stri
 /// Command to cleanly terminate the application and unregister global shortcuts
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
+    native_audio::restore_background_audio_ducking();
     connect_hp::shutdown_connect_hp_server();
     drop_zone::cleanup_ephemeral_transit_dir(&app);
     #[cfg(desktop)]
@@ -376,6 +377,7 @@ fn apply_win32_window_styles(window: &tauri::WebviewWindow) {
 fn apply_win32_window_styles(_window: &tauri::WebviewWindow) {}
 
 pub fn run() {
+    let _ducking_guard = native_audio::AudioDuckingDropGuard;
     tauri::Builder::default()
         .manage(system_stats::SystemStatsState::new())
         .manage(update_monitor::UpdateMonitorState::default())
@@ -488,6 +490,7 @@ pub fn run() {
                             let _ = app.emit("tray-toggle-gaming", ());
                         }
                         "quit" => {
+                            native_audio::restore_background_audio_ducking();
                             connect_hp::shutdown_connect_hp_server();
                             drop_zone::cleanup_ephemeral_transit_dir(app);
                             #[cfg(desktop)]
@@ -554,6 +557,11 @@ pub fn run() {
             native_audio::browse_collection_tracks_native,
             native_audio::get_player_region_info,
             native_audio::resolve_track_stream,
+            native_audio::set_background_audio_ducking,
+            native_audio::play_calendar_chime,
+            native_audio::stop_calendar_chime,
+            native_audio::pause_smtc_for_adzan,
+            native_audio::resume_smtc_after_adzan,
             system_stats::get_system_telemetry,
             system_hardware::get_hardware_telemetry,
             system_hardware::set_master_volume,

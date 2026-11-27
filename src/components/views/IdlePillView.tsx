@@ -18,6 +18,7 @@ import { useSkillStore } from '../../skills/store';
 import { useTimerState } from '../../features/timer/useTimerState';
 import { stopPrayerAlert, usePrayerStore } from '../../features/ibadah/prayerStore';
 import { resolvePrayerVisualTheme } from '../../features/ibadah/prayerScheduleLogic';
+import type { DueReminderAlert } from '../../features/calendar/calendarScheduleLogic';
 import { useDropZoneStore } from '../../stores/useDropZoneStore';
 import { TodoItem } from '../../types/island';
 import { useSystemHardware, SystemHudAlert } from '../../hooks/useSystemHardware';
@@ -50,6 +51,9 @@ interface IdlePillViewProps {
   isTucked?: boolean;
   isTuckedPeek?: boolean;
   remeasureKey?: number;
+  activeReminderAlert?: DueReminderAlert | null;
+  onSnoozeReminder?: () => void;
+  onDismissReminder?: () => void;
   onExpandSkill?: (skillId: string) => void;
   onContentWidthChange?: (width: number) => void;
 }
@@ -234,6 +238,9 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
   isRestingSleep = false,
   isTucked = false,
   remeasureKey = 0,
+  activeReminderAlert = null,
+  onSnoozeReminder,
+  onDismissReminder,
   onExpandSkill,
   onContentWidthChange,
 }) => {
@@ -423,11 +430,13 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
       ? prayerStore.activeAlert
       : null;
   const isPrayerAlertVisible = activePrayerAlert !== null;
+  const isReminderAlertVisible = activeReminderAlert !== null;
   const parkedFileCount = useDropZoneStore((s) => s.items.length);
 
   const companionExpression: CompanionExpression = resolveCompanionExpression({
     isPrayerAlert: isPrayerAlertVisible,
     isAlarmRinging,
+    isReminderAlert: isReminderAlertVisible,
     isTimerRunning: isTimerActive && !isTimerPaused,
     isPlaying,
     keepAwake: isKeepAwake,
@@ -440,6 +449,7 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
   const isRestingMode =
     !isPrayerAlertVisible &&
     !isAlarmRinging &&
+    !isReminderAlertVisible &&
     !isPlaying &&
     !isTimerActive &&
     isRestingSleep &&
@@ -451,6 +461,8 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
     ? 'prayer-takeover'
     : isAlarmRinging
     ? 'alarm-takeover'
+    : isReminderAlertVisible
+    ? 'reminder-takeover'
     : hudAlert
     ? 'system-hud'
     : isPlaying && isTimerActive
@@ -516,6 +528,8 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
       ? rawArtist
       : '';
 
+  const reminderAccentColor =
+    settings.theme === 'monochrome' ? '#FFFFFF' : '#FB7185';
   const timerText = formatDurationClock(timerRemaining);
   const showLyricFocus = Boolean(isIdleLyricsEnabled && activeLyricText);
   const dropZoneIdleBadge =
@@ -852,6 +866,72 @@ export const IdlePillViewComponent: React.FC<IdlePillViewProps> = ({
                 </button>
               </>
             )}
+          </div>
+        </motion.div>
+      ) : activeModeKey === 'reminder-takeover' && activeReminderAlert ? (
+        /* PRIORITY BANNER TAKEOVER: Pengingat Jadwal T-0 (◉ ♥ + Judul + Snooze 5m + Dismiss) */
+        <motion.div
+          key={`mode-reminder-takeover-${activeReminderAlert.fireKey}`}
+          data-reminder-pill="t0"
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+          onClick={(e) => {
+            // hoverExpandLocked: klik area non-tombol TIDAK melebarkan Mode 6
+            e.stopPropagation();
+          }}
+          className="min-w-[276px] max-w-[330px] px-3 h-full flex items-center justify-between gap-2 bg-transparent select-none cursor-default"
+        >
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <CasaCompanionAvatar isPlaying={false} expression="reminder_t0" />
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <span
+                className="font-sans text-[11px] font-semibold tracking-tight text-white truncate"
+                title={activeReminderAlert.title}
+              >
+                {activeReminderAlert.title}
+              </span>
+              {activeReminderAlert.scheduledTimeHHMM && (
+                <span className="font-mono text-[9.5px] tabular-nums text-white/50 shrink-0">
+                  {activeReminderAlert.scheduledTimeHHMM}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              data-reminder-action="snooze"
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSnoozeReminder?.();
+              }}
+              className="h-[21px] px-2 rounded-full bg-white/[0.10] hover:bg-white/[0.20] border border-white/15 text-white font-sans text-[9.5px] font-semibold transition-colors cursor-pointer active:scale-95 whitespace-nowrap"
+              title="Tunda pengingat 5 menit"
+            >
+              Snooze 5m
+            </button>
+            <button
+              type="button"
+              data-reminder-action="dismiss"
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDismissReminder?.();
+              }}
+              style={{
+                backgroundColor: reminderAccentColor,
+                color: '#000000',
+              }}
+              className="h-[21px] px-2 rounded-full hover:brightness-95 font-sans text-[9.5px] font-bold transition-all cursor-pointer active:scale-95 whitespace-nowrap"
+              title="Tutup pengingat jadwal"
+            >
+              Dismiss
+            </button>
           </div>
         </motion.div>
       ) : activeModeKey === 'system-hud' && hudAlert ? (

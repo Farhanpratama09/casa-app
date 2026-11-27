@@ -21,6 +21,7 @@ import {
   ShieldAlert,
   MoonStar,
   Calculator,
+  CalendarDays,
 } from 'lucide-react';
 import { useSystemHardware, formatAudioOutputLabel } from '../../../hooks/useSystemHardware';
 import { useSystemTelemetry } from '../../../hooks/useSystemTelemetry';
@@ -820,11 +821,17 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
               }
               style={
                 settings.ibadah.enabled
-                  ? {
-                      borderColor: `${themePalette.ibadah}70`,
-                      backgroundColor: `${themePalette.ibadah}22`,
-                      color: themePalette.ibadah,
-                    }
+                  ? settings.theme === 'monochrome'
+                    ? {
+                        borderColor: 'rgba(255, 255, 255, 0.45)',
+                        backgroundColor: 'rgba(255, 255, 255, 0.14)',
+                        color: '#FFFFFF',
+                      }
+                    : {
+                        borderColor: 'rgba(16, 185, 129, 0.48)',
+                        backgroundColor: 'rgba(16, 185, 129, 0.14)',
+                        color: '#10B981',
+                      }
                   : undefined
               }
               className={`inline-flex items-center gap-0.5 px-1.5 h-[14px] rounded-full border text-[8px] font-semibold leading-none cursor-pointer transition-colors active:scale-95 ${
@@ -852,11 +859,17 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
               }
               style={
                 settings.calculatorEnabled
-                  ? {
-                      borderColor: `${themePalette.timer}70`,
-                      backgroundColor: `${themePalette.timer}20`,
-                      color: themePalette.timer,
-                    }
+                  ? settings.theme === 'monochrome'
+                    ? {
+                        borderColor: 'rgba(255, 255, 255, 0.45)',
+                        backgroundColor: 'rgba(255, 255, 255, 0.14)',
+                        color: '#FFFFFF',
+                      }
+                    : {
+                        borderColor: 'rgba(251, 146, 60, 0.48)',
+                        backgroundColor: 'rgba(251, 146, 60, 0.14)',
+                        color: '#FB923C',
+                      }
                   : undefined
               }
               className={`inline-flex items-center gap-0.5 px-1.5 h-[14px] rounded-full border text-[8px] font-semibold leading-none cursor-pointer transition-colors active:scale-95 ${
@@ -867,6 +880,44 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
             >
               <Calculator className="w-2 h-2 shrink-0" />
               <span>Calc</span>
+            </button>
+            <button
+              type="button"
+              data-quick-module-toggle="calendar"
+              aria-pressed={settings.calendarEnabled}
+              onClick={(e) => {
+                e.stopPropagation();
+                playChimeCue('tap');
+                updateSettings({ calendarEnabled: !settings.calendarEnabled });
+              }}
+              title={
+                settings.calendarEnabled
+                  ? 'Nonaktifkan tab modul Jadwal & Pengingat (Jadwal)'
+                  : 'Aktifkan tab modul Jadwal & Pengingat (Jadwal)'
+              }
+              style={
+                settings.calendarEnabled
+                  ? settings.theme === 'monochrome'
+                    ? {
+                        borderColor: 'rgba(255, 255, 255, 0.45)',
+                        backgroundColor: 'rgba(255, 255, 255, 0.14)',
+                        color: '#FFFFFF',
+                      }
+                    : {
+                        borderColor: 'rgba(251, 113, 133, 0.48)',
+                        backgroundColor: 'rgba(251, 113, 133, 0.14)',
+                        color: '#FB7185',
+                      }
+                  : undefined
+              }
+              className={`inline-flex items-center gap-0.5 px-1.5 h-[14px] rounded-full border text-[8px] font-semibold leading-none cursor-pointer transition-colors active:scale-95 ${
+                settings.calendarEnabled
+                  ? ''
+                  : 'bg-[#0a0a0a] border-white/[0.10] text-white/45 hover:text-white/80 hover:border-white/[0.20]'
+              }`}
+            >
+              <CalendarDays className="w-2 h-2 shrink-0" />
+              <span>Jadwal</span>
             </button>
           </div>
           <div className="flex items-center justify-end gap-1 min-w-0">
@@ -885,7 +936,7 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
                       : d.name
                   )
                   .join(', ')}
-                className="inline-flex items-center gap-1 px-1.5 h-[14px] rounded-full bg-[#0a0a0a] border border-white/[0.10] hover:border-white/[0.20] text-[8.5px] font-medium text-white/75 leading-none max-w-[118px] cursor-pointer transition-colors"
+                className="inline-flex items-center gap-1 px-1.5 h-[14px] rounded-full bg-[#0a0a0a] border border-white/[0.10] hover:border-white/[0.20] text-[8.5px] font-medium text-white/75 leading-none max-w-[92px] cursor-pointer transition-colors"
               >
                 <Bluetooth className="w-2.5 h-2.5 shrink-0" style={{ color: themePalette.bluetooth }} />
                 <span className="truncate">
@@ -899,7 +950,7 @@ export const Mode6ControlCenterView: React.FC<Mode6ControlCenterViewProps> = ({
             )}
 
             <span
-              className="inline-flex items-center gap-1 px-1.5 h-[14px] rounded-full bg-[#0a0a0a] border border-white/[0.10] text-[8.5px] font-medium text-white/80 leading-none max-w-[116px] shrink-0"
+              className="inline-flex items-center gap-1 px-1.5 h-[14px] rounded-full bg-[#0a0a0a] border border-white/[0.10] text-[8.5px] font-medium text-white/80 leading-none max-w-[92px] shrink-0"
               title={`Audio Output: ${telemetry.audio_device_name}`}
             >
               {telemetry.audio_output_kind === 'bluetooth' ? (

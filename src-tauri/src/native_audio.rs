@@ -2229,7 +2229,7 @@ async fn ensure_yt_dlp_bootstrapped(app: &tauri::AppHandle) -> Result<PathBuf, S
 
     let mut res = download_client
         .get(download_url)
-        .header("User-Agent", "CASA-Desktop-Audio-Engine/2.3.2")
+        .header("User-Agent", "CASA-Desktop-Audio-Engine/2.5.0")
         .send()
         .await
         .map_err(|e| format!("Failed downloading yt-dlp binary: {}", e))?;
@@ -2990,6 +2990,507 @@ pub async fn resolve_track_stream(
     }
 }
 
+// =========================================================================
+// Smart Audio: Persistent Core Audio Session Ducking & Adzan SMTC Helpers
+// =========================================================================
+
+pub const DUCK_VOLUME_FACTOR: f32 = 0.12;
+pub const DUCK_WATCHDOG_TIMEOUT_SECS: u64 = 300;
+pub const CALENDAR_CHIME_PEAK_GAIN: f32 = 0.85;
+
+#[derive(Debug, Default)]
+struct AudioDuckingState {
+    is_ducked: bool,
+    generation: u64,
+    saved_volumes: HashMap<String, f32>,
+    ducked_at: Option<Instant>,
+}
+
+static AUDIO_DUCKING_STATE: OnceLock<Mutex<AudioDuckingState>> = OnceLock::new();
+static CALENDAR_CHIME_WAV_U16: OnceLock<Vec<u16>> = OnceLock::new();
+
+fn ducking_state_lock() -> &'static Mutex<AudioDuckingState> {
+    AUDIO_DUCKING_STATE.get_or_init(|| Mutex::new(AudioDuckingState::default()))
+}
+
+pub fn compute_ducked_volume(original: f32) -> f32 {
+    if !original.is_finite() {
+        return 0.0;
+    }
+    (original.clamp(0.0, 1.0) * DUCK_VOLUME_FACTOR).clamp(0.0, 1.0)
+}
+
+/// Synthesizes a soft 2-note bell chime (D5 -> A5, 44.1 kHz mono 16-bit PCM WAV)
+/// normalized to `CALENDAR_CHIME_PEAK_GAIN` (0.85) for autoplay-immune Win32 playback.
+pub fn build_calendar_chime_wav_bytes() -> Vec<u8> {
+    let sample_rate: u32 = 44_100;
+    let duration_secs: f32 = 0.95;
+    let num_frames = (sample_rate as f32 * duration_secs).round() as usize;
+    let mut mix = vec![0.0_f32; num_frames];
+
+    let notes: [(f32, f32, f32, f32); 2] = [
+        (587.33, 0.00, 0.45, 5.5), // D5 warm attack/decay
+        (880.00, 0.14, 0.81, 4.2), // A5 resonant ring
+    ];
+
+    for (freq, start_sec, dur_sec, decay_rate) in notes {
+        let start_idx = (start_sec * sample_rate as f32) as usize;
+        let end_idx = ((start_sec + dur_sec) * sample_rate as f32).min(num_frames as f32) as usize;
+        for (i, sample) in mix.iter_mut().enumerate().take(end_idx).skip(start_idx) {
+            let dt = (i - start_idx) as f32 / sample_rate as f32;
+            let attack = (dt / 0.015).min(1.0);
+            let env = attack * (-decay_rate * dt).exp();
+            let fundamental = (2.0 * std::f32::consts::PI * freq * dt).sin();
+            let harmonic = 0.15 * (2.0 * std::f32::consts::PI * (freq * 2.0) * dt).sin();
+            *sample += (fundamental + harmonic) * env;
+        }
+    }
+
+    let peak = mix.iter().fold(0.0_f32, |acc, &s| acc.max(s.abs()));
+    let norm = if peak > 1e-6 {
+        CALENDAR_CHIME_PEAK_GAIN / peak
+    } else {
+        0.0
+    };
+
+    let data_bytes = u32::try_from(num_frames * 2).unwrap_or(0);
+    let mut wav = Vec::with_capacity(44 + data_bytes as usize);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36u32 + data_bytes).to_le_bytes());
+    wav.extend_from_slice(b"WAVE");
+    wav.extend_from_slice(b"fmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes()); // PCM subchunk size
+    wav.extend_from_slice(&1u16.to_le_bytes()); // PCM format = 1
+    wav.extend_from_slice(&1u16.to_le_bytes()); // Mono
+    wav.extend_from_slice(&sample_rate.to_le_bytes());
+    wav.extend_from_slice(&(sample_rate * 2).to_le_bytes()); // Byte rate
+    wav.extend_from_slice(&2u16.to_le_bytes()); // Block align
+    wav.extend_from_slice(&16u16.to_le_bytes()); // Bits per sample
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_bytes.to_le_bytes());
+
+    for s in mix {
+        let scaled = (s * norm).clamp(-1.0, 1.0);
+        let pcm = (scaled * i16::MAX as f32).round() as i16;
+        wav.extend_from_slice(&pcm.to_le_bytes());
+    }
+    wav
+}
+
+fn calendar_chime_wav_u16() -> &'static [u16] {
+    CALENDAR_CHIME_WAV_U16.get_or_init(|| {
+        let bytes = build_calendar_chime_wav_bytes();
+        let mut words = Vec::with_capacity(bytes.len().div_ceil(2));
+        for chunk in bytes.chunks(2) {
+            let lo = chunk[0];
+            let hi = *chunk.get(1).unwrap_or(&0);
+            words.push(u16::from_le_bytes([lo, hi]));
+        }
+        words
+    })
+}
+
+#[cfg(target_os = "windows")]
+pub fn collect_self_and_descendant_pids(root_pid: u32) -> HashSet<u32> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    let mut result = HashSet::new();
+    result.insert(root_pid);
+
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE || snap.is_null() {
+            return result;
+        }
+
+        let mut children_by_parent: HashMap<u32, Vec<u32>> = HashMap::new();
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+        if Process32FirstW(snap, &mut entry) != 0 {
+            loop {
+                children_by_parent
+                    .entry(entry.th32ParentProcessID)
+                    .or_default()
+                    .push(entry.th32ProcessID);
+                if Process32NextW(snap, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        let _ = CloseHandle(snap);
+
+        let mut queue = VecDeque::new();
+        queue.push_back(root_pid);
+        while let Some(pid) = queue.pop_front() {
+            if let Some(children) = children_by_parent.get(&pid) {
+                for &child_pid in children {
+                    if result.insert(child_pid) {
+                        queue.push_back(child_pid);
+                    }
+                }
+            }
+        }
+    }
+
+    result
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn collect_self_and_descendant_pids(root_pid: u32) -> HashSet<u32> {
+    let mut result = HashSet::new();
+    result.insert(root_pid);
+    result
+}
+
+#[cfg(target_os = "windows")]
+fn apply_background_audio_ducking_sync(ducked: bool) -> Result<(bool, u64), String> {
+    use windows::Win32::Media::Audio::{
+        eRender, IAudioSessionControl2, IAudioSessionEnumerator, IAudioSessionManager2,
+        IMMDeviceCollection, IMMDeviceEnumerator, ISimpleAudioVolume, MMDeviceEnumerator,
+        DEVICE_STATE_ACTIVE,
+    };
+    use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_ALL};
+    use windows_core::Interface;
+
+    let _com = crate::security_utils::ComGuard::init_mta();
+
+    if ducked {
+        {
+            let guard = ducking_state_lock()
+                .lock()
+                .map_err(|_| "Audio ducking lock poisoned".to_string())?;
+            if guard.is_ducked {
+                return Ok((true, guard.generation));
+            }
+        }
+
+        let excluded_pids = collect_self_and_descendant_pids(std::process::id());
+        let mut captured_saved: HashMap<String, f32> = HashMap::new();
+
+        unsafe {
+            let enumerator: IMMDeviceEnumerator =
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                    .map_err(|e| format!("MMDeviceEnumerator failed: {e}"))?;
+            let collection: IMMDeviceCollection = enumerator
+                .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
+                .map_err(|e| format!("EnumAudioEndpoints failed: {e}"))?;
+            let dev_count = collection.GetCount().unwrap_or(0);
+
+            for dev_idx in 0..dev_count {
+                let Ok(device) = collection.Item(dev_idx) else {
+                    continue;
+                };
+                let Ok(mgr) = device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else {
+                    continue;
+                };
+                let Ok(session_enum): Result<IAudioSessionEnumerator, _> = mgr.GetSessionEnumerator() else {
+                    continue;
+                };
+                let count = session_enum.GetCount().unwrap_or(0);
+
+                for i in 0..count {
+                    let Ok(ctrl) = session_enum.GetSession(i) else {
+                        continue;
+                    };
+                    let Ok(ctrl2) = ctrl.cast::<IAudioSessionControl2>() else {
+                        continue;
+                    };
+                    let pid = ctrl2.GetProcessId().unwrap_or(0);
+                    if excluded_pids.contains(&pid) {
+                        // Force CASA's own/descendant WebView2 audio sessions to 100% so chimes & timer alarms stay crisp.
+                        if let Ok(simple_vol) = ctrl.cast::<ISimpleAudioVolume>() {
+                            let _ = simple_vol.SetMasterVolume(1.0, std::ptr::null());
+                        }
+                        continue;
+                    }
+                    if pid == 0 {
+                        continue;
+                    }
+                    let Ok(simple_vol) = ctrl.cast::<ISimpleAudioVolume>() else {
+                        continue;
+                    };
+                    let Ok(orig_vol) = simple_vol.GetMasterVolume() else {
+                        continue;
+                    };
+                    if !orig_vol.is_finite() || orig_vol <= 0.001 {
+                        continue;
+                    }
+
+                    let session_key = match ctrl2.GetSessionInstanceIdentifier() {
+                        Ok(pwstr) => {
+                            let s = pwstr.to_string().unwrap_or_default();
+                            CoTaskMemFree(Some(pwstr.as_ptr() as _));
+                            if s.is_empty() {
+                                format!("dev:{}:pid:{}:idx:{}", dev_idx, pid, i)
+                            } else {
+                                s
+                            }
+                        }
+                        Err(_) => format!("dev:{}:pid:{}:idx:{}", dev_idx, pid, i),
+                    };
+
+                    let clamped_orig = orig_vol.clamp(0.0, 1.0);
+                    let target_vol = compute_ducked_volume(clamped_orig);
+                    if simple_vol.SetMasterVolume(target_vol, std::ptr::null()).is_ok() {
+                        captured_saved.entry(session_key).or_insert(clamped_orig);
+                    }
+                }
+            }
+        }
+
+        let mut guard = ducking_state_lock()
+            .lock()
+            .map_err(|_| "Audio ducking lock poisoned".to_string())?;
+        if guard.is_ducked {
+            return Ok((true, guard.generation));
+        }
+        guard.is_ducked = true;
+        guard.generation = guard.generation.wrapping_add(1);
+        guard.saved_volumes = captured_saved;
+        guard.ducked_at = Some(Instant::now());
+        Ok((true, guard.generation))
+    } else {
+        let (saved_volumes, generation) = {
+            let mut guard = ducking_state_lock()
+                .lock()
+                .map_err(|_| "Audio ducking lock poisoned".to_string())?;
+            guard.is_ducked = false;
+            guard.ducked_at = None;
+            guard.generation = guard.generation.wrapping_add(1);
+            (std::mem::take(&mut guard.saved_volumes), guard.generation)
+        };
+
+        if saved_volumes.is_empty() {
+            return Ok((false, generation));
+        }
+
+        unsafe {
+            let enumerator: IMMDeviceEnumerator =
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                    .map_err(|e| format!("MMDeviceEnumerator failed: {e}"))?;
+            if let Ok(collection) = enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) {
+                let dev_count = collection.GetCount().unwrap_or(0);
+                for dev_idx in 0..dev_count {
+                    let Ok(device) = collection.Item(dev_idx) else {
+                        continue;
+                    };
+                    let Ok(mgr) = device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else {
+                        continue;
+                    };
+                    let Ok(session_enum) = mgr.GetSessionEnumerator() else {
+                        continue;
+                    };
+                    let count = session_enum.GetCount().unwrap_or(0);
+                    for i in 0..count {
+                        let Ok(ctrl) = session_enum.GetSession(i) else {
+                            continue;
+                        };
+                        let Ok(ctrl2) = ctrl.cast::<IAudioSessionControl2>() else {
+                            continue;
+                        };
+                        let pid = ctrl2.GetProcessId().unwrap_or(0);
+                        let session_key = match ctrl2.GetSessionInstanceIdentifier() {
+                            Ok(pwstr) => {
+                                let s = pwstr.to_string().unwrap_or_default();
+                                CoTaskMemFree(Some(pwstr.as_ptr() as _));
+                                if s.is_empty() {
+                                    format!("dev:{}:pid:{}:idx:{}", dev_idx, pid, i)
+                                } else {
+                                    s
+                                }
+                            }
+                            Err(_) => format!("dev:{}:pid:{}:idx:{}", dev_idx, pid, i),
+                        };
+                        if let Some(&orig_vol) = saved_volumes.get(&session_key) {
+                            if let Ok(simple_vol) = ctrl.cast::<ISimpleAudioVolume>() {
+                                let _ = simple_vol
+                                    .SetMasterVolume(orig_vol.clamp(0.0, 1.0), std::ptr::null());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok((false, generation))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_background_audio_ducking_sync(ducked: bool) -> Result<(bool, u64), String> {
+    let mut guard = ducking_state_lock()
+        .lock()
+        .map_err(|_| "Audio ducking lock poisoned".to_string())?;
+    guard.is_ducked = ducked;
+    guard.generation = guard.generation.wrapping_add(1);
+    if !ducked {
+        guard.saved_volumes.clear();
+        guard.ducked_at = None;
+    } else {
+        guard.ducked_at = Some(Instant::now());
+    }
+    Ok((ducked, guard.generation))
+}
+
+pub fn restore_background_audio_ducking() {
+    let _ = apply_background_audio_ducking_sync(false);
+}
+
+pub struct AudioDuckingDropGuard;
+
+impl Drop for AudioDuckingDropGuard {
+    fn drop(&mut self) {
+        restore_background_audio_ducking();
+    }
+}
+
+#[tauri::command]
+pub async fn set_background_audio_ducking(ducked: bool) -> Result<bool, String> {
+    let res = tokio::time::timeout(
+        Duration::from_millis(1500),
+        tokio::task::spawn_blocking(move || apply_background_audio_ducking_sync(ducked)),
+    )
+    .await
+    .map_err(|_| "Timeout adjusting background audio ducking".to_string())?
+    .map_err(|e| format!("Audio ducking task failed: {e}"))??;
+
+    let (is_ducked, expected_gen) = res;
+    if is_ducked {
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(DUCK_WATCHDOG_TIMEOUT_SECS)).await;
+            let should_auto_restore = ducking_state_lock()
+                .lock()
+                .map(|g| g.is_ducked && g.generation == expected_gen)
+                .unwrap_or(false);
+            if should_auto_restore {
+                eprintln!("[CASA Audio] Watchdog auto-restoring ducked background audio after 5m safety ceiling.");
+                let _ = tokio::task::spawn_blocking(restore_background_audio_ducking).await;
+            }
+        });
+    }
+
+    Ok(is_ducked)
+}
+
+#[tauri::command]
+pub async fn play_calendar_chime() -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let res = tokio::time::timeout(
+            Duration::from_millis(1200),
+            tokio::task::spawn_blocking(|| {
+                use windows::core::PCWSTR;
+                use windows::Win32::Media::Audio::{
+                    PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT,
+                };
+
+                let wav_u16 = calendar_chime_wav_u16();
+                if wav_u16.is_empty() {
+                    return false;
+                }
+                unsafe {
+                    PlaySoundW(
+                        PCWSTR(wav_u16.as_ptr()),
+                        None,
+                        SND_MEMORY | SND_ASYNC | SND_NODEFAULT,
+                    )
+                    .as_bool()
+                }
+            }),
+        )
+        .await
+        .map_err(|_| "Timeout playing native calendar chime".to_string())?
+        .map_err(|e| format!("Native calendar chime task failed: {e}"))?;
+        Ok(res)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+pub async fn stop_calendar_chime() -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let res = tokio::time::timeout(
+            Duration::from_millis(800),
+            tokio::task::spawn_blocking(|| {
+                use windows::core::PCWSTR;
+                use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC};
+                unsafe { PlaySoundW(PCWSTR::null(), None, SND_ASYNC).as_bool() }
+            }),
+        )
+        .await
+        .map_err(|_| "Timeout stopping native calendar chime".to_string())?
+        .map_err(|e| format!("Stop calendar chime task failed: {e}"))?;
+        Ok(res)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+pub async fn pause_smtc_for_adzan() -> Result<Option<String>, String> {
+    #[cfg(windows)]
+    {
+        let res = tokio::time::timeout(
+            Duration::from_millis(1200),
+            tokio::task::spawn_blocking(|| {
+                let Some(media) = crate::media::gsmtc::fetch_current_media_state() else {
+                    return Ok::<Option<String>, String>(None);
+                };
+                if !media.is_playing || media.session_id.trim().is_empty() {
+                    return Ok(None);
+                }
+                crate::media::gsmtc::control_media_session_sync(&media.session_id, "pause")?;
+                Ok(Some(media.session_id))
+            }),
+        )
+        .await
+        .map_err(|_| "Timeout checking/pausing SMTC session for Adzan".to_string())?
+        .map_err(|e| format!("SMTC pause task failed: {e}"))?;
+        res
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+pub async fn resume_smtc_after_adzan(session_id: String) -> Result<bool, String> {
+    #[cfg(windows)]
+    {
+        let trimmed = session_id.trim().to_string();
+        if trimmed.is_empty() {
+            return Ok(false);
+        }
+        let res = tokio::time::timeout(
+            Duration::from_millis(1200),
+            tokio::task::spawn_blocking(move || {
+                crate::media::gsmtc::control_media_session_sync(&trimmed, "play")
+            }),
+        )
+        .await
+        .map_err(|_| "Timeout resuming SMTC session after Adzan".to_string())?
+        .map_err(|e| format!("SMTC resume task failed: {e}"))?;
+        res.map(|_| true)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = session_id;
+        Ok(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3403,5 +3904,43 @@ mod tests {
         assert_eq!(cache.map.len(), MAX_STREAM_REGISTRY_ENTRIES);
         assert!(cache.get("vid_0").is_none());
         assert!(cache.get("vid_69").is_some());
+    }
+
+    #[test]
+    fn computes_ducked_volume_and_collects_self_pid_tree() {
+        assert!((compute_ducked_volume(1.0) - 0.12).abs() < 1e-6);
+        assert!((compute_ducked_volume(0.5) - 0.06).abs() < 1e-6);
+        assert!((compute_ducked_volume(1.5) - 0.12).abs() < 1e-6);
+        assert!((compute_ducked_volume(-0.2) - 0.0).abs() < 1e-6);
+        assert!((compute_ducked_volume(f32::NAN) - 0.0).abs() < 1e-6);
+
+        let self_pid = std::process::id();
+        let pids = collect_self_and_descendant_pids(self_pid);
+        assert!(pids.contains(&self_pid), "Own PID must always be excluded from ducking");
+        assert_eq!(DUCK_WATCHDOG_TIMEOUT_SECS, 300);
+    }
+
+    #[test]
+    fn synthesizes_valid_calendar_chime_wav_at_target_peak() {
+        let wav = build_calendar_chime_wav_bytes();
+        assert!(wav.len() > 44);
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert_eq!(&wav[8..12], b"WAVE");
+        assert_eq!(&wav[12..16], b"fmt ");
+        assert_eq!(&wav[36..40], b"data");
+
+        let data_len = u32::from_le_bytes(wav[40..44].try_into().unwrap()) as usize;
+        assert_eq!(wav.len(), 44 + data_len);
+        assert_eq!(data_len % 2, 0);
+
+        let mut max_amp = 0.0_f32;
+        for chunk in wav[44..].chunks_exact(2) {
+            let sample = i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / i16::MAX as f32;
+            max_amp = max_amp.max(sample.abs());
+        }
+        assert!(
+            (0.80..=0.86).contains(&max_amp),
+            "Expected peak amplitude near 0.85, got {max_amp}"
+        );
     }
 }

@@ -17,6 +17,10 @@ export const ISLAND_DIMENSIONS = {
   IDLE_HUD_MIN_WIDTH: 244,
   ALARM_BANNER_WIDTH: 360,
   PRAYER_BANNER_WIDTH: 256,
+  REMINDER_BANNER_WIDTH: 296,
+  REMINDER_SATELLITE_MAX_WIDTH: 168,
+  REMINDER_SATELLITE_HEIGHT: 36,
+  REMINDER_SATELLITE_GAP: 8,
   EXPANDED_ALERT_BANNER_EXTRA_HEIGHT: 28,
   IDLE_PHYSICAL_HEIGHT: 39,
   IDLE_WINDOW_HEIGHT: 40,
@@ -36,6 +40,8 @@ export const ISLAND_DIMENSIONS = {
   EXPANDED_IBADAH_HEIGHT: 186,
   EXPANDED_CALCULATOR_WIDTH: 540,
   EXPANDED_CALCULATOR_HEIGHT: 186,
+  EXPANDED_CALENDAR_WIDTH: 560,
+  EXPANDED_CALENDAR_HEIGHT: 216,
   EXPANDED_DROPZONE_WIDTH: 580,
   EXPANDED_DROPZONE_HEIGHT: 192,
   POST_FULLSCREEN_HOVER_COOLDOWN_MS: 450,
@@ -53,8 +59,10 @@ export interface IslandLayoutInput {
   hasHudAlert: boolean;
   isAlarmRinging: boolean;
   isPrayerAlertActive?: boolean;
+  isReminderAlertActive?: boolean;
   isIbadahEnabled?: boolean;
   isCalculatorEnabled?: boolean;
+  isCalendarEnabled?: boolean;
   isRestingSleep: boolean;
   isLyricsOpen: boolean;
   isFocusHoverPeek: boolean;
@@ -81,8 +89,16 @@ export function resolveEffectiveIslandLayout(
   input: IslandLayoutInput
 ): EffectiveIslandLayout {
   const isPrayerAlert = Boolean(input.isPrayerAlertActive);
+  const isReminderAlert = Boolean(input.isReminderAlertActive);
   const isIbadahEnabled = Boolean(input.isIbadahEnabled);
-  const hasPriorityAlert = input.isAlarmRinging || isPrayerAlert;
+  const isCalculatorEnabled = Boolean(input.isCalculatorEnabled);
+  const isCalendarEnabled = Boolean(input.isCalendarEnabled);
+  const optionalTabCount =
+    (isIbadahEnabled ? 1 : 0) +
+    (isCalculatorEnabled ? 1 : 0) +
+    (isCalendarEnabled ? 1 : 0);
+  const useWideNavWidth = isIbadahEnabled || isCalendarEnabled || optionalTabCount >= 2;
+  const hasPriorityAlert = input.isAlarmRinging || isPrayerAlert || isReminderAlert;
 
   const effectiveState: EffectiveIslandState =
     input.islandState === 'expanded' || input.islandState === 'idle_peek'
@@ -123,7 +139,7 @@ export function resolveEffectiveIslandLayout(
           expandedWidth = snapEvenDimension(
             input.isLyricsOpen
               ? ISLAND_DIMENSIONS.EXPANDED_MUSIC_LYRICS_WIDTH
-              : isIbadahEnabled
+              : useWideNavWidth
               ? ISLAND_DIMENSIONS.EXPANDED_MUSIC_FIVE_TAB_WIDTH
               : ISLAND_DIMENSIONS.EXPANDED_MUSIC_DEFAULT_WIDTH
           );
@@ -134,7 +150,7 @@ export function resolveEffectiveIslandLayout(
           break;
         case 'expanded_control':
           expandedWidth = snapEvenDimension(
-            isIbadahEnabled
+            useWideNavWidth
               ? ISLAND_DIMENSIONS.EXPANDED_CONTROL_FIVE_TAB_WIDTH
               : ISLAND_DIMENSIONS.EXPANDED_CONTROL_WIDTH
           );
@@ -151,6 +167,11 @@ export function resolveEffectiveIslandLayout(
           expandedHeight = ISLAND_DIMENSIONS.EXPANDED_CALCULATOR_HEIGHT;
           expandedRadius = 22;
           break;
+        case 'expanded_calendar':
+          expandedWidth = snapEvenDimension(ISLAND_DIMENSIONS.EXPANDED_CALENDAR_WIDTH);
+          expandedHeight = ISLAND_DIMENSIONS.EXPANDED_CALENDAR_HEIGHT;
+          expandedRadius = 22;
+          break;
         case 'expanded_timer':
         case 'expanded_todo':
           expandedWidth = snapEvenDimension(ISLAND_DIMENSIONS.EXPANDED_PRODUCTIVITY_WIDTH);
@@ -165,7 +186,10 @@ export function resolveEffectiveIslandLayout(
           break;
       }
 
-      if (isPrayerAlert && input.expandedMode !== 'expanded_ibadah') {
+      if (
+        (isPrayerAlert && input.expandedMode !== 'expanded_ibadah') ||
+        (!isPrayerAlert && isReminderAlert && input.expandedMode !== 'expanded_calendar')
+      ) {
         expandedHeight += ISLAND_DIMENSIONS.EXPANDED_ALERT_BANNER_EXTRA_HEIGHT;
       }
     }
@@ -183,12 +207,14 @@ export function resolveEffectiveIslandLayout(
     };
   }
 
-  // effectiveState === 'idle' (includes 'idle', 'tucked_peek', and HUD/alarm/prayer wakeup while tucked)
+  // effectiveState === 'idle' (includes 'idle', 'tucked_peek', and HUD/alarm/prayer/reminder wakeup while tucked)
   const safeMeasured = snapEvenDimension(Math.max(88, input.measuredPillWidth));
   const idleWidth = isPrayerAlert
     ? snapEvenDimension(Math.max(ISLAND_DIMENSIONS.PRAYER_BANNER_WIDTH, safeMeasured))
     : input.isAlarmRinging
     ? snapEvenDimension(Math.max(ISLAND_DIMENSIONS.ALARM_BANNER_WIDTH, safeMeasured))
+    : isReminderAlert
+    ? snapEvenDimension(Math.max(ISLAND_DIMENSIONS.REMINDER_BANNER_WIDTH, safeMeasured))
     : input.islandState === 'tucked' && input.hasHudAlert
     ? snapEvenDimension(Math.max(safeMeasured, ISLAND_DIMENSIONS.IDLE_HUD_MIN_WIDTH))
     : !input.isRestingSleep || input.hasHudAlert
@@ -406,6 +432,40 @@ export function computeSearchDrawerBounds(
     top_offset: podHitboxTop,
     width: podWidth,
     height: Math.min(maxHeight, baseHeight + extraHeight),
+  };
+}
+
+export interface ReminderSatelliteBoundsInput {
+  centerOffsetX: number;
+  capsuleWidth: number;
+  satelliteWidth: number;
+  isFloatingMode: boolean;
+}
+
+/**
+ * Computes the Win32 hit-test rectangle for the detached <= 5m Reminder Satellite Pill
+ * anchored 8px to the right of the primary idle capsule.
+ */
+export function computeReminderSatelliteBounds(
+  input: ReminderSatelliteBoundsInput
+): SearchDrawerBoundsRect {
+  const width = Math.min(
+    ISLAND_DIMENSIONS.REMINDER_SATELLITE_MAX_WIDTH,
+    Math.max(72, snapEvenDimension(input.satelliteWidth))
+  );
+  const height = ISLAND_DIMENSIONS.REMINDER_SATELLITE_HEIGHT;
+  const offsetX = Math.round(
+    input.capsuleWidth / 2 + ISLAND_DIMENSIONS.REMINDER_SATELLITE_GAP + width / 2
+  );
+  const topOffset = input.isFloatingMode
+    ? ISLAND_DIMENSIONS.FLOATING_TOP_OFFSET + 1
+    : 1;
+
+  return {
+    center_offset_x: input.centerOffsetX + offsetX,
+    top_offset: topOffset,
+    width,
+    height: height + 2,
   };
 }
 

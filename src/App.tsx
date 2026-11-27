@@ -7,6 +7,7 @@ import { toggleGamingMode, playChimeCue } from './utils/tauriBridge';
 import { getCurrentWindowLabel } from './utils/settingsWindow';
 import { initializeSkillsEngine } from './skills';
 import { startPrayerSchedulerEngine } from './features/ibadah/prayerStore';
+import { startCalendarSchedulerEngine } from './features/calendar/calendarStore';
 
 const DesktopSettingsWindow = React.lazy(() =>
   import('./components/settings/DesktopSettingsWindow').then((mod) => ({
@@ -27,9 +28,14 @@ function MainIslandApp() {
   const [isGamingMode, setIsGamingMode] = useState<boolean>(false);
   const [showDevTrigger, setShowDevTrigger] = useState<boolean>(false);
 
-  // Start single Prayer Scheduler Engine ONLY in main island window (0 background work when ibadah.enabled === false)
+  // Start single Prayer & Calendar Scheduler Engines ONLY in main island window (0 background work when disabled/empty)
   useEffect(() => {
-    return startPrayerSchedulerEngine();
+    const stopPrayer = startPrayerSchedulerEngine();
+    const stopCalendar = startCalendarSchedulerEngine();
+    return () => {
+      stopPrayer();
+      stopCalendar();
+    };
   }, []);
 
   const handleToggleDevTrigger = () => {

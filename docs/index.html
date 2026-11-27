@@ -40,7 +40,7 @@
     href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
     rel="stylesheet"
   />
-  <link rel="stylesheet" href="./styles.css?v=2.3.2" />
+  <link rel="stylesheet" href="./styles.css?v=2.5.0" />
 
   <script type="application/ld+json">
     {
@@ -53,7 +53,7 @@
       "description": "Ambient desktop notch & companion for Windows featuring monochrome OLED capsule interactions, synchronized lyrics, focus timer, brightness/Bluetooth telemetry, and drag-and-drop shelf.",
       "url": "https://farhanpratama09.github.io/casa-app/",
       "downloadUrl": "https://github.com/Farhanpratama09/casa-app/releases/latest",
-      "softwareVersion": "2.3.2",
+      "softwareVersion": "2.5.0",
       "license": "https://opensource.org/licenses/MIT",
       "author": {
         "@type": "Person",
@@ -266,6 +266,24 @@
                         </button>
                       </div>
 
+                      <!-- Priority Pengingat Jadwal T-0 Pill (◉ ♥ + Judul + Jam + Snooze 5m + Dismiss, hoverExpandLocked) -->
+                      <div class="casa-reminder-pill" id="casa-reminder-pill" data-reminder-pill="t0" hidden>
+                        <div class="casa-reminder-pill-left">
+                          <svg
+                            id="vm-reminder-eyes"
+                            class="casa-companion-svg casa-reminder-eyes-pulse"
+                            viewBox="0 0 34 16"
+                            aria-hidden="true"
+                          ></svg>
+                          <span class="casa-reminder-title" id="vm-reminder-alert-title">Standup Tim</span>
+                          <span class="casa-reminder-time tabular" id="vm-reminder-alert-time">09:00</span>
+                        </div>
+                        <div class="casa-reminder-actions">
+                          <button type="button" id="vm-reminder-snooze-btn" class="casa-rem-snooze-btn" data-reminder-action="snooze">Snooze 5m</button>
+                          <button type="button" id="vm-reminder-dismiss-btn" class="casa-rem-dismiss-btn" data-reminder-action="dismiss">Dismiss</button>
+                        </div>
+                      </div>
+
                       <!-- Wide Feature Idle Bar (Active only in Lyrics / To-Do / HUD-Idle / DropZone) -->
                       <div class="casa-active-pill" id="casa-active-pill" hidden>
                         <div class="casa-avatar-slot" id="casa-avatar-slot">
@@ -375,6 +393,10 @@
                             <svg class="casa-m6-tab-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="11" x2="8.01" y2="11"/><line x1="12" y1="11" x2="12.01" y2="11"/><line x1="16" y1="11" x2="16.01" y2="11"/><line x1="8" y1="15" x2="8.01" y2="15"/><line x1="12" y1="15" x2="12.01" y2="15"/><line x1="16" y1="15" x2="16.01" y2="15"/></svg>
                             <span class="casa-m6-tab-label">Calc</span>
                           </button>
+                          <button type="button" class="casa-m6-tab" id="vm-m6-calendar-tab" data-m6-tab="calendar" aria-selected="false" title="Jadwal &amp; Pengingat">
+                            <svg class="casa-m6-tab-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/></svg>
+                            <span class="casa-m6-tab-label">Jadwal</span>
+                          </button>
                           <button type="button" class="casa-m6-tab" data-m6-tab="hud" aria-selected="false" title="Control Center">
                             <svg class="casa-m6-tab-ico" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="21" y1="4" x2="14" y2="4"/><line x1="10" y1="4" x2="3" y2="4"/><line x1="21" y1="12" x2="12" y2="12"/><line x1="8" y1="12" x2="3" y2="12"/><line x1="21" y1="20" x2="16" y2="20"/><line x1="12" y1="20" x2="3" y2="20"/></svg>
                             <span class="casa-m6-tab-label">Kontrol</span>
@@ -382,6 +404,17 @@
                         </nav>
 
                         <div class="casa-m6-head-right">
+                          <button
+                            type="button"
+                            id="vm-m6-reminder-chip"
+                            class="casa-m6-reminder-chip"
+                            data-header-reminder-chip="true"
+                            title="Segera <= 5m — Klik untuk buka Jadwal"
+                            hidden
+                          >
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg>
+                            <span id="vm-m6-reminder-chip-text" class="tabular">5m</span>
+                          </button>
                           <button
                             type="button"
                             id="vm-notch-collapse-btn"
@@ -417,6 +450,24 @@
                         <button type="button" id="vm-expanded-prayer-stop-btn" class="casa-prayer-stop-btn compact">
                           Stop
                         </button>
+                      </div>
+
+                      <!-- Slim Expanded T-0 Reminder Banner (no forced tab switch) -->
+                      <div class="casa-m6-reminder-banner" id="vm-expanded-reminder-banner" data-expanded-reminder-banner="true" hidden>
+                        <div class="casa-m6-reminder-banner-left">
+                          <svg
+                            id="vm-expanded-reminder-eyes"
+                            class="casa-companion-svg casa-reminder-eyes-pulse"
+                            viewBox="0 0 34 16"
+                            aria-hidden="true"
+                          ></svg>
+                          <strong id="vm-expanded-reminder-label">Standup Tim</strong>
+                          <span class="casa-reminder-time tabular" id="vm-expanded-reminder-time">09:00</span>
+                        </div>
+                        <div class="casa-reminder-actions">
+                          <button type="button" id="vm-expanded-reminder-snooze-btn" class="casa-rem-snooze-btn compact" data-reminder-action="snooze">Snooze 5m</button>
+                          <button type="button" id="vm-expanded-reminder-dismiss-btn" class="casa-rem-dismiss-btn compact" data-reminder-action="dismiss">Dismiss</button>
+                        </div>
                       </div>
 
                       <div class="casa-m6-body">
@@ -620,6 +671,7 @@
                             <div class="casa-cc-module-chips">
                               <button type="button" id="vm-cc-toggle-ibadah" class="casa-cc-chip" aria-pressed="false" title="Toggle tab modul Ibadah">Ibadah</button>
                               <button type="button" id="vm-cc-toggle-calc" class="casa-cc-chip active" aria-pressed="true" title="Toggle tab modul Calc">Calc</button>
+                              <button type="button" id="vm-cc-toggle-calendar" data-quick-module-toggle="calendar" class="casa-cc-chip active" aria-pressed="true" title="Toggle tab modul Jadwal">Jadwal</button>
                             </div>
                           </div>
 
@@ -1006,9 +1058,67 @@
                             </div>
                           </div>
                         </div>
+
+                        <!-- Panel G: Calendar & Smart Reminders (v2.5.0 Split 2-Column 560x216) -->
+                        <div class="casa-m6-panel casa-m6-calendar" id="vm-exp-calendar" data-calendar-layout="split-2col" hidden>
+                          <div class="casa-cal-month-col">
+                            <div class="casa-cal-month-head">
+                              <span id="vm-cal-month-label" class="casa-cal-month-title">November 2026</span>
+                              <div class="casa-cal-month-nav">
+                                <button type="button" id="vm-cal-prev-btn" class="casa-cal-nav-btn" aria-label="Bulan sebelumnya">&lsaquo;</button>
+                                <button type="button" id="vm-cal-today-btn" class="casa-cal-today-btn">Hari Ini</button>
+                                <button type="button" id="vm-cal-next-btn" class="casa-cal-nav-btn" aria-label="Bulan berikutnya">&rsaquo;</button>
+                              </div>
+                            </div>
+                            <div class="casa-cal-weekdays" aria-hidden="true">
+                              <span>Sn</span><span>Sl</span><span>Rb</span><span>Km</span><span>Jm</span><span>Sb</span><span>Mg</span>
+                            </div>
+                            <div class="casa-cal-grid" id="vm-cal-grid" data-calendar-grid="true"></div>
+                          </div>
+
+                          <div class="casa-cal-agenda-col">
+                            <div class="casa-cal-agenda-head">
+                              <div class="casa-cal-agenda-head-left">
+                                <span id="vm-cal-selected-label" class="casa-cal-selected-title">Hari Ini</span>
+                                <span id="vm-cal-count-badge" class="casa-cal-count-badge tabular">2/50</span>
+                              </div>
+                              <div class="casa-cal-sim-actions">
+                                <button type="button" id="vm-sim-rem-h15-btn" class="casa-cc-mini-btn" title="Simulasi pil satelit samping <= 5m saat idle">Sim &le;5m</button>
+                                <button type="button" id="vm-sim-rem-t0-btn" class="casa-cc-mini-btn primary" title="Simulasi pengingat T-0">Sim T-0</button>
+                              </div>
+                            </div>
+
+                            <form class="casa-cal-add-form" id="vm-cal-add-form">
+                              <input type="text" id="vm-cal-title-input" class="casa-cal-input" maxlength="80" placeholder="Tambah pengingat..." aria-label="Judul pengingat" />
+                              <input type="time" id="vm-cal-time-input" class="casa-cal-time-input tabular" value="09:00" aria-label="Jam pengingat" />
+                              <select id="vm-cal-repeat-select" class="casa-cal-select" aria-label="Frekuensi pengingat">
+                                <option value="once">Sekali</option>
+                                <option value="daily">Harian</option>
+                                <option value="weekdays">Sen&ndash;Jum</option>
+                              </select>
+                              <button type="submit" id="vm-cal-add-btn" class="casa-cal-add-btn" title="Simpan pengingat" aria-label="Simpan pengingat">+</button>
+                            </form>
+
+                            <div class="casa-cal-agenda-list" id="vm-cal-agenda-list"></div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
+
+                  <!-- Detached Right Satellite Pill for <= 5m Upcoming Reminder (Idle Mode) -->
+                  <button
+                    type="button"
+                    id="vm-reminder-satellite-pill"
+                    class="casa-reminder-satellite"
+                    data-reminder-satellite="true"
+                    title="Pengingat <= 5 menit — Klik untuk buka tab Jadwal"
+                    hidden
+                  >
+                    <svg class="casa-rem-sat-ico" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg>
+                    <span id="vm-reminder-sat-mins" class="casa-rem-sat-mins tabular">5m</span>
+                    <span id="vm-reminder-sat-title" class="casa-rem-sat-title">Standup Tim</span>
+                  </button>
                 </div>
               </div>
 
@@ -1271,7 +1381,7 @@
 
             <div class="download-cta-col">
               <a
-                href="https://github.com/Farhanpratama09/casa-app/releases/download/v2.3.2/CASA_2.3.2_x64-setup.exe"
+                href="https://github.com/Farhanpratama09/casa-app/releases/download/v2.5.0/CASA_2.5.0_x64-setup.exe"
                 target="_blank"
                 rel="noopener noreferrer"
                 id="primary-download-btn"
@@ -1280,7 +1390,7 @@
                 <span id="primary-download-label">Download CASA for Windows</span>
               </a>
               <span class="download-size-note tabular" id="download-size-note">
-                <span id="download-size-text">v2.3.2 · NSIS Setup (.exe) · 4.67 MB</span><span id="download-count-text" class="download-count-meta" hidden></span>
+                <span id="download-size-text">v2.5.0 · NSIS Setup (.exe) · 4.71 MB</span><span id="download-count-text" class="download-count-meta" hidden></span>
               </span>
             </div>
           </div>
@@ -1303,11 +1413,11 @@
             <summary class="sha-summary">Verify SHA-256 checksum</summary>
             <div class="checksum-box">
               <div class="checksum-header">
-                <span>SHA-256 · CASA_2.3.2_x64-setup.exe</span>
+                <span>SHA-256 · CASA_2.5.0_x64-setup.exe</span>
                 <button type="button" id="copy-sha-btn" class="copy-mini-btn">Salin Hash</button>
               </div>
               <p class="checksum-code" id="sha-value-exe">
-                C5FF57463CAA0146E509A3028AA827D41B9DE82002F6B7400FB22E608C42FBA7
+                9674D49F1214FF15396E88681E756FE4EEFC8D979F1C5ACE204087C954E40A02
               </p>
             </div>
           </details>
@@ -1552,6 +1662,6 @@
     </div>
   </footer>
 
-  <script src="./app.js?v=2.3.2" defer></script>
+  <script src="./app.js?v=2.5.0" defer></script>
 </body>
 </html>

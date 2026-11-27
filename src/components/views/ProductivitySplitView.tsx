@@ -285,6 +285,7 @@ export const ProductivitySplitView: React.FC<ProductivitySplitViewProps> = ({
         {/* Main Horizontal Split inside Timer Pane or Time's Up Alarm Banner */}
         {isAlarmRinging ? (
           <div
+            data-timer-alarm-banner="true"
             style={{
               borderColor: 'var(--casa-timer, #F59E0B)',
               boxShadow: '0 0 18px var(--casa-timer-glow, rgba(245,158,11,0.3))',

@@ -23,9 +23,13 @@ import {
 } from '../../stores/useSettingsStore';
 import {
   getPrayerTimesNative,
+  pauseSmtcForAdzan,
   PrayerScheduleResponse,
+  resumeSmtcAfterAdzan,
+  setBackgroundAudioDucking,
 } from '../../utils/tauriBridge';
 import { stopAlarmChime } from '../../utils/alarmChime';
+import { stopCalendarAlertChime } from '../calendar/calendarChime';
 import { playPrayerAudio, stopPrayerAudio } from './prayerAudio';
 import {
   evaluateDuePrayerDecision,
@@ -91,6 +95,23 @@ let lastTickWallClockMs: number | null = null;
 let runtimeIsFullscreenActive = false;
 let refreshInFlight = false;
 let pendingRefreshRequested = false;
+let pausedByAdzan = false;
+let pausedByAdzanSessionId: string | null = null;
+let adzanMediaFlowToken = 0;
+
+function resumeMediaIfPausedByAdzan(): void {
+  adzanMediaFlowToken += 1;
+  if (!pausedByAdzan) {
+    pausedByAdzanSessionId = null;
+    return;
+  }
+  const sessionId = pausedByAdzanSessionId ?? '';
+  pausedByAdzan = false;
+  pausedByAdzanSessionId = null;
+  if (sessionId) {
+    void resumeSmtcAfterAdzan(sessionId);
+  }
+}
 
 function emit(): void {
   listeners.forEach((fn) => fn());
@@ -297,9 +318,14 @@ function triggerPrayerAlert(payload: {
   const isTotalHideFullscreen =
     runtimeIsFullscreenActive && settings.fullscreenBehavior === 'total-hide';
 
-  // Conflict arbitration (Adzan > Timer): silently halt Timer chime audio
-  // while keeping Timer `isAlarmRinging` & linked To-Do intact for after Stop.
+  // Conflict arbitration (Adzan > Timer & Calendar):
+  // - Silently halt Timer & Calendar chimes while preserving Timer `isAlarmRinging` & linked To-Do.
+  // - Release persistent ducking so Adzan takes full audio stage and auto-pauses active SMTC media.
   stopAlarmChime();
+  stopCalendarAlertChime();
+  if (audioMode !== 'visual') {
+    void setBackgroundAudioDucking(false);
+  }
 
   // Fullscreen `total-hide` Option (B):
   // - If Visual Saja: hold notification until exiting fullscreen (max 5-min grace).
@@ -340,6 +366,18 @@ function triggerPrayerAlert(payload: {
     scheduleAutoDismiss(CHIME_VISUAL_AUTO_DISMISS_MS, payload.fireKey);
     return;
   }
+
+  const flowToken = ++adzanMediaFlowToken;
+  void pauseSmtcForAdzan().then((pausedSessionId) => {
+    if (!pausedSessionId) return;
+    if (adzanMediaFlowToken !== flowToken || state.activeAlert?.fireKey !== payload.fireKey) {
+      // Adzan already ended/dismissed while pause IPC was in flight -> restore immediately
+      void resumeSmtcAfterAdzan(pausedSessionId);
+      return;
+    }
+    pausedByAdzan = true;
+    pausedByAdzanSessionId = pausedSessionId;
+  });
 
   void playPrayerAudio(audioMode, {
     prayerId: payload.prayerId,
@@ -522,6 +560,7 @@ function teardownActiveScheduler(): void {
   }
   clearAutoDismissTimer();
   stopPrayerAudio();
+  resumeMediaIfPausedByAdzan();
   lastTickWallClockMs = null;
   lastConfigKey = '';
   if (
@@ -536,6 +575,7 @@ function teardownActiveScheduler(): void {
 export function stopPrayerAlert(): void {
   clearAutoDismissTimer();
   stopPrayerAudio();
+  resumeMediaIfPausedByAdzan();
   if (state.activeAlert !== null || state.deferredVisualAlert !== null) {
     setState({
       activeAlert: null,

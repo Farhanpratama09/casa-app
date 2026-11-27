@@ -283,6 +283,34 @@ async function run() {
     'v2.4.0 Guardrails: Wi-Fi XML/PSK zero-fill & rollback, pinned ShellExecuteW portal/802.1X, Rust FX proxy & zero-eval calcParser'
   );
 
+  // v2.5.0 Calendar & Smart Reminders Security Guardrails
+  const calendarLogicTs = readRepo('src/features/calendar/calendarScheduleLogic.ts');
+  const calendarStoreTs = readRepo('src/features/calendar/calendarStore.ts');
+  const calendarViewTsx = readRepo('src/features/calendar/CalendarExpandedView.tsx');
+  check(
+    calendarLogicTs.includes('MAX_REMINDER_ITEMS = 50') &&
+      calendarLogicTs.includes('sanitizeReminderText') &&
+      calendarStoreTs.includes('clearAllTimers()') &&
+      nativeAudioRs.includes('DUCK_VOLUME_FACTOR: f32 = 0.12') &&
+      nativeAudioRs.includes('CALENDAR_CHIME_PEAK_GAIN: f32 = 0.85') &&
+      nativeAudioRs.includes('EnumAudioEndpoints') &&
+      nativeAudioRs.includes('DEVICE_STATE_ACTIVE') &&
+      nativeAudioRs.includes('SetMasterVolume(1.0') &&
+      nativeAudioRs.includes('play_calendar_chime') &&
+      nativeAudioRs.includes('PlaySoundW') &&
+      nativeAudioRs.includes('SND_MEMORY') &&
+      nativeAudioRs.includes('set_background_audio_ducking') &&
+      nativeAudioRs.includes('collect_self_and_descendant_pids') &&
+      nativeAudioRs.includes('DUCK_WATCHDOG_TIMEOUT_SECS') &&
+      nativeAudioRs.includes('ComGuard::init_mta') &&
+      securityUtilsRs.includes('RPC_E_CHANGED_MODE') &&
+      libRs.includes('restore_background_audio_ducking') &&
+      !/\binnerHTML\b|\beval\s*\(|new\s+Function\s*\(/.test(
+        calendarLogicTs + calendarStoreTs + calendarViewTsx
+      ),
+    'v2.5.0 Guardrails: Calendar sanitization/50-cap/Zero-Churn + Core Audio all-endpoint 12% ducking, self 100%, PlaySoundW & RPC_E_CHANGED_MODE'
+  );
+
   console.log(`\n  REVIEWS SECURITY & HARDENING TESTS: ${passed} passed, 0 failed\n`);
 }
 

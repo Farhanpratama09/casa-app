@@ -8,6 +8,7 @@ export type IslandMode =
   | 'expanded_control'
   | 'expanded_ibadah'
   | 'expanded_calculator'
+  | 'expanded_calendar'
   | 'drop_zone';
 
 export type IslandState =
