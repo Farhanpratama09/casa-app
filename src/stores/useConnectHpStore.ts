@@ -64,8 +64,19 @@ let unlistenStatus: UnlistenFn | null = null;
 let unlistenIncoming: UnlistenFn | null = null;
 let unsubscribeDropStore: (() => void) | null = null;
 let transferNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+let batchSyncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let suppressNextImmediateSync = false;
 let sessionOpSeq = 0;
 let pendingStopPromise: Promise<void> | null = null;
+
+const BATCH_SYNC_DEBOUNCE_MS = 350;
+
+function clearBatchSyncDebounce(): void {
+  if (batchSyncDebounceTimer) {
+    clearTimeout(batchSyncDebounceTimer);
+    batchSyncDebounceTimer = null;
+  }
+}
 
 function applySessionSnapshot(
   set: (partial: Partial<ConnectHpStoreState>) => void,
@@ -182,14 +193,31 @@ export const useConnectHpStore = create<ConnectHpStoreState>((set, get) => ({
         } else if (payload.kind === 'batch_folder' && payload.batchId) {
           const count = payload.fileCount ?? 1;
           const total = payload.batchTotal ?? count;
-          dz.upsertBatchFolderItem({
-            batchId: payload.batchId,
-            folderPath: payload.payload,
-            title: payload.fileName || 'Batch HP',
-            fileCount: count,
-            batchTotal: total,
-            sizeBytes: payload.sizeBytes ?? undefined,
-          });
+          const isIntermediateBatchProgress = count < total;
+          if (isIntermediateBatchProgress) {
+            suppressNextImmediateSync = true;
+          }
+          try {
+            dz.upsertBatchFolderItem({
+              batchId: payload.batchId,
+              folderPath: payload.payload,
+              title: payload.fileName || 'Batch HP',
+              fileCount: count,
+              batchTotal: total,
+              sizeBytes: payload.sizeBytes ?? undefined,
+            });
+          } finally {
+            suppressNextImmediateSync = false;
+          }
+          if (isIntermediateBatchProgress && get().active) {
+            clearBatchSyncDebounce();
+            batchSyncDebounceTimer = setTimeout(() => {
+              batchSyncDebounceTimer = null;
+              if (get().active) {
+                void get().pushItemsToBackend();
+              }
+            }, BATCH_SYNC_DEBOUNCE_MS);
+          }
           if (count === 1 || count === total) {
             playChimeCue('ding');
           }
@@ -208,6 +236,8 @@ export const useConnectHpStore = create<ConnectHpStoreState>((set, get) => ({
     unsubscribeDropStore = useDropZoneStore.subscribe((state) => {
       if (state.items === lastSyncedItems) return;
       lastSyncedItems = state.items;
+      if (suppressNextImmediateSync) return;
+      clearBatchSyncDebounce();
       if (get().active) {
         void get().pushItemsToBackend(state.items);
       }
@@ -239,6 +269,7 @@ export const useConnectHpStore = create<ConnectHpStoreState>((set, get) => ({
 
   stopSession: async () => {
     const seq = ++sessionOpSeq;
+    clearBatchSyncDebounce();
     if (transferNoticeTimer) {
       clearTimeout(transferNoticeTimer);
       transferNoticeTimer = null;
@@ -336,6 +367,8 @@ export function teardownConnectHpListenersForTest(): void {
   unlistenIncoming = null;
   unsubscribeDropStore = null;
   initializedListeners = false;
+  suppressNextImmediateSync = false;
+  clearBatchSyncDebounce();
   if (transferNoticeTimer) {
     clearTimeout(transferNoticeTimer);
     transferNoticeTimer = null;

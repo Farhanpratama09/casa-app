@@ -3400,7 +3400,7 @@ pub async fn fetch_exchange_rates() -> Result<ExchangeRatesResponse, String> {
         .danger_accept_invalid_certs(false)
         .connect_timeout(Duration::from_secs(4))
         .timeout(Duration::from_secs(8))
-        .user_agent("CASA-Desktop/2.5.0")
+        .user_agent("CASA-Desktop/2.5.1")
         .build()
         .map_err(|e| format!("Gagal membuat HTTP client kurs: {e}"))?;
 

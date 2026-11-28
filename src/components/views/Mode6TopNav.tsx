@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
   ChevronUp,
   Settings,
@@ -21,7 +22,7 @@ import {
   CalendarDays,
 } from 'lucide-react';
 import { IslandMode } from '../../types/island';
-import { playChimeCue } from '../../utils/tauriBridge';
+import { installAppUpdate, playChimeCue } from '../../utils/tauriBridge';
 import { openDesktopSettingsWindow } from '../../utils/settingsWindow';
 import { useSystemHardware, SystemHudAlert } from '../../hooks/useSystemHardware';
 import { useSystemTelemetry } from '../../hooks/useSystemTelemetry';
@@ -183,6 +184,79 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
   const availableUpdateVersion = updateNotification.latestVersion;
   const { settings, palette } = useSettingsStore();
   const updateAccent = settings.theme === 'monochrome' ? '#FFFFFF' : palette.timer;
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
+  const [installStatusText, setInstallStatusText] = useState<string | null>(null);
+  const [installErrorText, setInstallErrorText] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const handleInstallUpdateInPlace = async () => {
+    if (isInstallingUpdate) return;
+    setIsInstallingUpdate(true);
+    setInstallErrorText(null);
+    setInstallStatusText('Menyiapkan unduhan...');
+
+    let downloaded = 0;
+    let totalLength = 0;
+    let unlistenProgress: UnlistenFn | null = null;
+    let unlistenFinished: UnlistenFn | null = null;
+
+    try {
+      if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+        unlistenProgress = await listen<{ chunkLength?: number; contentLength?: number | null }>(
+          'casa://updater-progress',
+          (event) => {
+            if (!isMountedRef.current) return;
+            const chunk = Number(event.payload?.chunkLength ?? 0);
+            const contentLen = event.payload?.contentLength;
+            if (typeof contentLen === 'number' && contentLen > 0) {
+              totalLength = contentLen;
+            }
+            if (chunk > 0) {
+              downloaded += chunk;
+            }
+            if (totalLength > 0) {
+              const pct = Math.min(100, Math.round((downloaded / totalLength) * 100));
+              setInstallStatusText(`Mengunduh (${pct}%)...`);
+            } else if (downloaded > 0) {
+              const mb = (downloaded / (1024 * 1024)).toFixed(1);
+              setInstallStatusText(`Mengunduh (${mb} MB)...`);
+            }
+          }
+        );
+        unlistenFinished = await listen('casa://updater-finished', () => {
+          if (!isMountedRef.current) return;
+          setInstallStatusText('Terpasang — memulai ulang...');
+        });
+      }
+
+      await installAppUpdate();
+      if (isMountedRef.current) {
+        setInstallStatusText('Terpasang — memulai ulang...');
+        void updateNotification.dismissBadge();
+      }
+    } catch (err) {
+      if (isMountedRef.current) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setInstallErrorText(
+          msg.length > 48 ? 'Gagal mengunduh — klik untuk coba lagi' : msg
+        );
+        setInstallStatusText(null);
+      }
+    } finally {
+      unlistenProgress?.();
+      unlistenFinished?.();
+      if (isMountedRef.current) {
+        setIsInstallingUpdate(false);
+      }
+    }
+  };
 
   // Trigger lightweight debounced update check whenever Mode 6 opens
   // (compensates for WS_EX_NOACTIVATE preventing native window.focus events)
@@ -453,12 +527,13 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
           {/* Compact floating pop-up notification anchored directly under the Settings gear */}
           <AnimatePresence>
             {updateNotification.updateAvailable &&
-              updateNotification.badgeVisible &&
+              (updateNotification.badgeVisible || isInstallingUpdate) &&
               availableUpdateVersion && (
                 <motion.button
                   key="mode6-gear-update-popup"
                   type="button"
                   data-update-popup="true"
+                  disabled={isInstallingUpdate}
                   initial={{ opacity: 0, y: -4, scale: 0.94 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -3, scale: 0.95 }}
@@ -467,8 +542,7 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
                   onClick={(e) => {
                     e.stopPropagation();
                     playChimeCue('tap');
-                    void updateNotification.dismissBadge();
-                    void openDesktopSettingsWindow('system');
+                    void handleInstallUpdateInPlace();
                   }}
                   style={{
                     borderColor:
@@ -477,8 +551,12 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
                         : `${palette.timer}66`,
                     boxShadow: '0 8px 20px rgba(0, 0, 0, 0.85)',
                   }}
-                  className="absolute top-[28px] -right-[16px] z-50 px-2.5 py-1.5 rounded-lg bg-[#0d0d10]/95 backdrop-blur-md border text-left cursor-pointer hover:bg-[#141419] active:scale-[0.98] transition-all whitespace-nowrap"
-                  title={`Buka System & Updates untuk memeriksa v${availableUpdateVersion}`}
+                  className="absolute top-[28px] -right-[16px] z-50 px-2.5 py-1.5 rounded-lg bg-[#0d0d10]/95 backdrop-blur-md border text-left cursor-pointer hover:bg-[#141419] active:scale-[0.98] disabled:cursor-wait disabled:opacity-90 transition-all whitespace-nowrap"
+                  title={
+                    isInstallingUpdate
+                      ? `Sedang mengunduh & memasang CASA v${availableUpdateVersion}`
+                      : `Unduh & pasang CASA v${availableUpdateVersion} langsung di tempat`
+                  }
                 >
                   <span
                     aria-hidden="true"
@@ -493,14 +571,26 @@ export const Mode6TopNav: React.FC<Mode6TopNavProps> = ({
                   <div className="flex items-center gap-1.5">
                     <span
                       style={{ backgroundColor: updateAccent }}
-                      className="w-1.5 h-1.5 rounded-full shrink-0"
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        isInstallingUpdate ? 'animate-pulse' : ''
+                      }`}
                     />
                     <span className="text-[10px] font-semibold text-white leading-none">
                       Update v{availableUpdateVersion}
                     </span>
                   </div>
-                  <div className="text-[9px] text-white/55 mt-0.5 leading-none">
-                    Klik untuk Check for Updates
+                  <div
+                    className={`text-[9px] mt-0.5 leading-none tabular-nums ${
+                      installErrorText
+                        ? isMonochrome
+                          ? 'text-white/85'
+                          : 'text-rose-300/90'
+                        : 'text-white/60'
+                    }`}
+                  >
+                    {installStatusText ??
+                      installErrorText ??
+                      'Klik untuk unduh & pasang sekarang'}
                   </div>
                 </motion.button>
               )}

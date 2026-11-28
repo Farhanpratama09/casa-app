@@ -2229,7 +2229,7 @@ async fn ensure_yt_dlp_bootstrapped(app: &tauri::AppHandle) -> Result<PathBuf, S
 
     let mut res = download_client
         .get(download_url)
-        .header("User-Agent", "CASA-Desktop-Audio-Engine/2.5.0")
+        .header("User-Agent", "CASA-Desktop-Audio-Engine/2.5.1")
         .send()
         .await
         .map_err(|e| format!("Failed downloading yt-dlp binary: {}", e))?;

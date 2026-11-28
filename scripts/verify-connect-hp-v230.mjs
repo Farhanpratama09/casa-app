@@ -1221,17 +1221,19 @@ async function runSuiteC() {
     const doneBatchAll = await page.evaluate(() => ({
       countText: document.getElementById('upload-count-text')?.textContent,
       pctText: document.getElementById('upload-pct-text')?.textContent,
-      fillWidth: document.getElementById('upload-prog-fill')?.style.width,
+      fillTransform: document.getElementById('upload-prog-fill')?.style.transform,
+      usedRawUpload: window.__MOCK_XHRS__.every((x) => x.headers['X-Casa-File-Name']),
       totalXhrs: window.__MOCK_XHRS__.length,
       maxConcurrent: window.__MAX_CONCURRENT_XHRS__,
     }));
     check(
       doneBatchAll.countText === '8 / 8 selesai' &&
         doneBatchAll.pctText === '100%' &&
-        doneBatchAll.fillWidth === '100%' &&
+        doneBatchAll.fillTransform === 'scaleX(1)' &&
+        doneBatchAll.usedRawUpload &&
         doneBatchAll.totalXhrs === 8 &&
         doneBatchAll.maxConcurrent === 2,
-      'Suite C: Combined 5+3 queue finishes cleanly at 8 / 8 selesai (100%, never >2 parallel XHRs)',
+      'Suite C: Combined 5+3 queue finishes cleanly at 8 / 8 selesai via /api/upload-raw (scaleX(1), never >2 parallel XHRs)',
       JSON.stringify(doneBatchAll)
     );
 

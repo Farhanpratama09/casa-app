@@ -1,6 +1,6 @@
 use crate::drop_zone::{allow_path_in_asset_scope, sanitize_transit_filename, write_clipboard_text};
 use axum::{
-    body::Body,
+    body::{Body, Bytes, HttpBody},
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         ConnectInfo, DefaultBodyLimit, Multipart, Path as AxumPath, Query, State,
@@ -14,22 +14,29 @@ use axum::{
 use chrono::Local;
 use qrcode::{EcLevel, QrCode};
 use std::collections::HashMap;
+use std::io::{Read as _, Write as _};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
+use std::task::{Context, Poll};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager};
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
-use tokio::sync::{broadcast, oneshot, RwLock};
+use tokio::io::{AsyncRead, ReadBuf};
+use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tokio_util::io::ReaderStream;
 
 const MAX_UPLOAD_FILE_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4 GiB per file
-const MAX_DEFAULT_HTTP_BODY_BYTES: usize = 256 * 1024; // 256 KiB cap outside /api/upload
+const MAX_DEFAULT_HTTP_BODY_BYTES: usize = 256 * 1024; // 256 KiB cap outside upload routes
 const MAX_INCOMING_TEXT_CHARS: usize = 50_000;
 const IDLE_TIMEOUT_SECS: u64 = 600; // 10 menit
-const STREAM_CHUNK_BYTES: usize = 64 * 1024;
-const TOUCH_INTERVAL_BYTES: u64 = 512 * 1024;
+const UPLOAD_DISK_BUF_BYTES: usize = 1024 * 1024; // 1 MiB sequential disk buffer
+const UPLOAD_CHANNEL_CAPACITY: usize = 8; // bounded O(1) async->blocking queue
+const DOWNLOAD_CHUNK_BYTES: usize = 512 * 1024; // 512 KiB dedicated blocking read
+const DOWNLOAD_CHANNEL_CAPACITY: usize = 4; // max ~2 MiB in-flight download RAM
+const ZIP_CHUNK_BYTES: usize = 256 * 1024; // 256 KiB buffered ZIP streaming chunks
+const TOUCH_INTERVAL_BYTES: u64 = 1024 * 1024; // throttle touch_activity to every 1 MiB
 const MAX_WS_CLIENTS: usize = 8;
 const MAX_WS_MESSAGE_BYTES: usize = 4096;
 const MAX_BATCH_FOLDERS_PER_SESSION: usize = 32;
@@ -714,11 +721,125 @@ impl Drop for ActiveTransferGuard<'_> {
 }
 
 // =========================================================================
-// IEEE CRC-32 + Streaming ZIP (`STORE` Method 0, 0% Compression, O(1) RAM)
+// Zero-Crate Channel Stream Adapters & Slice-by-4 IEEE CRC-32 + Streaming ZIP
 // =========================================================================
 
-const CRC32_TABLE: [u32; 256] = {
-    let mut table = [0u32; 256];
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+pub fn percent_decode_utf8(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                out.push((hi << 4) | lo);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+struct ChannelAsyncRead {
+    rx: mpsc::Receiver<std::io::Result<Bytes>>,
+    current: Bytes,
+    offset: usize,
+}
+
+impl ChannelAsyncRead {
+    fn new(rx: mpsc::Receiver<std::io::Result<Bytes>>) -> Self {
+        Self {
+            rx,
+            current: Bytes::new(),
+            offset: 0,
+        }
+    }
+}
+
+impl AsyncRead for ChannelAsyncRead {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        if buf.remaining() == 0 {
+            return Poll::Ready(Ok(()));
+        }
+
+        loop {
+            if self.offset < self.current.len() {
+                let avail = &self.current[self.offset..];
+                let to_copy = avail.len().min(buf.remaining());
+                buf.put_slice(&avail[..to_copy]);
+                self.offset += to_copy;
+                if self.offset >= self.current.len() {
+                    self.current = Bytes::new();
+                    self.offset = 0;
+                }
+                return Poll::Ready(Ok(()));
+            }
+
+            match self.rx.poll_recv(cx) {
+                Poll::Ready(Some(Ok(chunk))) => {
+                    if chunk.is_empty() {
+                        continue;
+                    }
+                    self.current = chunk;
+                    self.offset = 0;
+                }
+                Poll::Ready(Some(Err(e))) => return Poll::Ready(Err(e)),
+                Poll::Ready(None) => return Poll::Ready(Ok(())),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+    }
+}
+
+struct ChannelSyncWriter<F: FnMut(u64)> {
+    tx: mpsc::Sender<std::io::Result<Bytes>>,
+    on_bytes: F,
+}
+
+impl<F: FnMut(u64)> ChannelSyncWriter<F> {
+    fn new(tx: mpsc::Sender<std::io::Result<Bytes>>, on_bytes: F) -> Self {
+        Self { tx, on_bytes }
+    }
+}
+
+impl<F: FnMut(u64)> std::io::Write for ChannelSyncWriter<F> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let chunk = Bytes::copy_from_slice(buf);
+        self.tx.blocking_send(Ok(chunk)).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "Client closed download stream",
+            )
+        })?;
+        (self.on_bytes)(buf.len() as u64);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+const CRC32_TABLES: [[u32; 256]; 4] = {
+    let mut tables = [[0u32; 256]; 4];
     let mut i = 0;
     while i < 256 {
         let mut c = i as u32;
@@ -731,16 +852,34 @@ const CRC32_TABLE: [u32; 256] = {
             }
             j += 1;
         }
-        table[i] = c;
+        tables[0][i] = c;
         i += 1;
     }
-    table
+    let mut t = 1;
+    while t < 4 {
+        let mut k = 0;
+        while k < 256 {
+            let prev = tables[t - 1][k];
+            tables[t][k] = (prev >> 8) ^ tables[0][(prev & 0xFF) as usize];
+            k += 1;
+        }
+        t += 1;
+    }
+    tables
 };
 
 fn crc32_update(crc: u32, data: &[u8]) -> u32 {
     let mut c = !crc;
-    for &b in data {
-        c = CRC32_TABLE[((c ^ (b as u32)) & 0xFF) as usize] ^ (c >> 8);
+    let mut chunks = data.chunks_exact(4);
+    for chunk in chunks.by_ref() {
+        c ^= u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        c = CRC32_TABLES[3][(c & 0xFF) as usize]
+            ^ CRC32_TABLES[2][((c >> 8) & 0xFF) as usize]
+            ^ CRC32_TABLES[1][((c >> 16) & 0xFF) as usize]
+            ^ CRC32_TABLES[0][(c >> 24) as usize];
+    }
+    for &b in chunks.remainder() {
+        c = CRC32_TABLES[0][((c ^ (b as u32)) & 0xFF) as usize] ^ (c >> 8);
     }
     !c
 }
@@ -844,9 +983,6 @@ pub fn prepare_store_zip_plan(folder: &Path) -> Result<PreparedZipPlan, String> 
         if !meta.is_file() || meta.len() >= (u32::MAX as u64) {
             continue;
         }
-        if std::fs::File::open(&disk_path).is_err() {
-            continue;
-        }
 
         let name_bytes = truncate_utf8_bytes(&zip_name, u16::MAX as usize);
         let name_len = name_bytes.len() as u64;
@@ -882,18 +1018,19 @@ struct ZipCentralEntry {
     dos_date: u16,
 }
 
-/// Menuliskan arsip ZIP murni metode `STORE` sesuai `PreparedZipPlan` secara 1-pass streaming
-/// (strict exact-byte length agar tidak pernah memicu `ERR_CONTENT_LENGTH_MISMATCH`).
-pub async fn write_streaming_store_zip_from_plan<W: tokio::io::AsyncWrite + Unpin>(
+/// Menuliskan arsip ZIP murni metode `STORE` sesuai `PreparedZipPlan` secara 1-pass streaming sinkron
+/// di dalam dedicated `spawn_blocking` thread (buffer 256 KiB, strict exact-byte length).
+pub fn write_streaming_store_zip_from_plan_sync<W: std::io::Write>(
     plan: &PreparedZipPlan,
     mut writer: W,
-    on_chunk: impl Fn() + Send + Sync,
+    mut on_touch: impl FnMut(),
 ) -> std::io::Result<()> {
     let (dos_time, dos_date) = dos_now_time_date();
     let mut central_entries: Vec<ZipCentralEntry> = Vec::with_capacity(plan.entries.len());
     let mut cursor_pos: u64 = 0;
-    let mut buf = vec![0u8; STREAM_CHUNK_BYTES];
-    let zero_pad = vec![0u8; STREAM_CHUNK_BYTES];
+    let mut touch_accum: u64 = 0;
+    let mut buf = vec![0u8; ZIP_CHUNK_BYTES];
+    let zero_pad = vec![0u8; ZIP_CHUNK_BYTES];
 
     for planned in &plan.entries {
         let local_offset = cursor_pos as u32;
@@ -910,25 +1047,29 @@ pub async fn write_streaming_store_zip_from_plan<W: tokio::io::AsyncWrite + Unpi
         lfh[12..14].copy_from_slice(&dos_date.to_le_bytes());
         lfh[26..28].copy_from_slice(&name_len_u16.to_le_bytes());
 
-        writer.write_all(&lfh).await?;
-        writer.write_all(trimmed_name).await?;
+        writer.write_all(&lfh)?;
+        writer.write_all(trimmed_name)?;
         cursor_pos += 30 + (trimmed_name.len() as u64);
 
         let mut crc = 0u32;
         let mut remaining = planned.expected_size as usize;
 
-        if let Ok(mut file) = tokio::fs::File::open(&planned.disk_path).await {
+        if let Ok(mut file) = std::fs::File::open(&planned.disk_path) {
             while remaining > 0 {
                 let to_read = remaining.min(buf.len());
-                let n = file.read(&mut buf[..to_read]).await?;
+                let n = file.read(&mut buf[..to_read])?;
                 if n == 0 {
                     break;
                 }
                 crc = crc32_update(crc, &buf[..n]);
-                writer.write_all(&buf[..n]).await?;
+                writer.write_all(&buf[..n])?;
                 cursor_pos += n as u64;
                 remaining -= n;
-                on_chunk();
+                touch_accum += n as u64;
+                if touch_accum >= TOUCH_INTERVAL_BYTES {
+                    touch_accum = 0;
+                    on_touch();
+                }
             }
         }
 
@@ -937,7 +1078,7 @@ pub async fn write_streaming_store_zip_from_plan<W: tokio::io::AsyncWrite + Unpi
             let chunk_len = remaining.min(zero_pad.len());
             let slice = &zero_pad[..chunk_len];
             crc = crc32_update(crc, slice);
-            writer.write_all(slice).await?;
+            writer.write_all(slice)?;
             cursor_pos += chunk_len as u64;
             remaining -= chunk_len;
         }
@@ -948,7 +1089,7 @@ pub async fn write_streaming_store_zip_from_plan<W: tokio::io::AsyncWrite + Unpi
         dd[4..8].copy_from_slice(&crc.to_le_bytes());
         dd[8..12].copy_from_slice(&size_u32.to_le_bytes());
         dd[12..16].copy_from_slice(&size_u32.to_le_bytes());
-        writer.write_all(&dd).await?;
+        writer.write_all(&dd)?;
         cursor_pos += 16;
 
         central_entries.push(ZipCentralEntry {
@@ -981,8 +1122,8 @@ pub async fn write_streaming_store_zip_from_plan<W: tokio::io::AsyncWrite + Unpi
         cdfh[38..42].copy_from_slice(&0x20u32.to_le_bytes());
         cdfh[42..46].copy_from_slice(&entry.local_offset.to_le_bytes());
 
-        writer.write_all(&cdfh).await?;
-        writer.write_all(&entry.name_bytes).await?;
+        writer.write_all(&cdfh)?;
+        writer.write_all(&entry.name_bytes)?;
         cd_size += 46 + (entry.name_bytes.len() as u64);
     }
 
@@ -994,21 +1135,21 @@ pub async fn write_streaming_store_zip_from_plan<W: tokio::io::AsyncWrite + Unpi
     eocd[12..16].copy_from_slice(&(cd_size as u32).to_le_bytes());
     eocd[16..20].copy_from_slice(&cd_offset.to_le_bytes());
 
-    writer.write_all(&eocd).await?;
-    writer.flush().await?;
+    writer.write_all(&eocd)?;
+    writer.flush()?;
     Ok(())
 }
 
 /// Menuliskan arsip ZIP murni metode `STORE` (0% kompresi) secara 1-pass streaming dengan Data Descriptor (`0x08074b50`) & UTF-8 flag (`0x0808`).
 #[cfg(test)]
-pub async fn write_streaming_store_zip<W: tokio::io::AsyncWrite + Unpin>(
+pub async fn write_streaming_store_zip(
     folder: &Path,
-    writer: W,
-    on_chunk: impl Fn() + Send + Sync,
+    writer: &mut Vec<u8>,
+    on_chunk: impl FnMut(),
 ) -> std::io::Result<()> {
     let plan = prepare_store_zip_plan(folder)
         .map_err(|msg| std::io::Error::new(std::io::ErrorKind::NotFound, msg))?;
-    write_streaming_store_zip_from_plan(&plan, writer, on_chunk).await
+    write_streaming_store_zip_from_plan_sync(&plan, writer, on_chunk)
 }
 
 // =========================================================================
@@ -1093,7 +1234,7 @@ async fn connect_hp_security_middleware(
             runtime.touch_activity();
         }
     } else {
-        let enforce_origin = matches!(path, "/ws" | "/api/text" | "/api/upload")
+        let enforce_origin = matches!(path, "/ws" | "/api/text" | "/api/upload" | "/api/upload-raw")
             || !matches!(*req.method(), Method::GET | Method::HEAD);
         if let Err((code, msg)) = verify_request_access(
             &runtime,
@@ -1405,6 +1546,410 @@ fn write_mark_of_the_web(path: &Path) {
 #[cfg(not(windows))]
 fn write_mark_of_the_web(_path: &Path) {}
 
+struct BlockingUploadResult {
+    final_path: PathBuf,
+    final_name: String,
+    written_bytes: u64,
+}
+
+async fn resolve_or_create_upload_target_dir(
+    runtime: &ServerRuntime,
+    base_drop_dir: &Path,
+    wants_batch_folder: bool,
+    batch_id: Option<&String>,
+    batch_total: u32,
+) -> Result<(PathBuf, bool, Option<String>), (StatusCode, String)> {
+    if !wants_batch_folder {
+        return Ok((base_drop_dir.to_path_buf(), false, None));
+    }
+    let Some(b_id) = batch_id else {
+        return Ok((base_drop_dir.to_path_buf(), false, None));
+    };
+
+    let mut batches = runtime.batch_folders.lock().await;
+    if let Some(existing) = batches.get(b_id) {
+        return Ok((
+            existing.dir_path.clone(),
+            true,
+            Some(existing.folder_name.clone()),
+        ));
+    }
+    if batches.len() >= MAX_BATCH_FOLDERS_PER_SESSION {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            "Batas folder batch per sesi Connect HP (32) tercapai".to_string(),
+        ));
+    }
+
+    let base_clone = base_drop_dir.to_path_buf();
+    let (dir_path, folder_name) = tokio::task::spawn_blocking(move || {
+        create_unique_batch_subfolder(&base_clone)
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Gagal menjadwalkan folder batch: {}", e),
+        )
+    })?
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    batches.insert(
+        b_id.clone(),
+        BatchFolderState {
+            dir_path: dir_path.clone(),
+            folder_name: folder_name.clone(),
+            received_files: 0,
+            total_bytes: 0,
+            batch_total,
+        },
+    );
+    Ok((dir_path, true, Some(folder_name)))
+}
+
+fn spawn_blocking_upload_writer(
+    part_path: PathBuf,
+    target_dir: PathBuf,
+    safe_name: String,
+    mut rx: mpsc::Receiver<Bytes>,
+    commit_ok: Arc<AtomicBool>,
+) -> tokio::task::JoinHandle<Result<BlockingUploadResult, (StatusCode, String)>> {
+    tokio::task::spawn_blocking(move || {
+        let mut part_guard = PartFileCleanupGuard::new(part_path.clone());
+        let file = std::fs::File::create(&part_path).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Gagal membuat berkas sementara: {}", e),
+            )
+        })?;
+        let mut writer = std::io::BufWriter::with_capacity(UPLOAD_DISK_BUF_BYTES, file);
+        let mut written_bytes: u64 = 0;
+
+        while let Some(chunk) = rx.blocking_recv() {
+            writer.write_all(&chunk).map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Gagal menulis chunk ke disk: {}", e),
+                )
+            })?;
+            written_bytes = written_bytes.saturating_add(chunk.len() as u64);
+        }
+
+        if !commit_ok.load(Ordering::Acquire) || written_bytes == 0 {
+            drop(writer);
+            return Ok(BlockingUploadResult {
+                final_path: part_path,
+                final_name: safe_name,
+                written_bytes: 0,
+            });
+        }
+
+        writer.flush().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Gagal menyelesaikan penulisan berkas: {}", e),
+            )
+        })?;
+        drop(writer);
+
+        let final_path = reserve_unique_dest_path(&target_dir, &safe_name)
+            .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+        std::fs::rename(&part_path, &final_path).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Gagal memindahkan berkas final: {}", e),
+            )
+        })?;
+        part_guard.disarm();
+        write_mark_of_the_web(&final_path);
+
+        let final_name = final_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or(safe_name);
+
+        Ok(BlockingUploadResult {
+            final_path,
+            final_name,
+            written_bytes,
+        })
+    })
+}
+
+async fn emit_uploaded_file_event(
+    runtime: &ServerRuntime,
+    target_dir: &Path,
+    final_path: &Path,
+    final_name: &str,
+    written_bytes: u64,
+    is_batch_folder: bool,
+    batch_id: Option<&String>,
+    batch_folder_name: Option<String>,
+    batch_total: u32,
+) {
+    if let (true, Some(b_id), Some(folder_name)) = (is_batch_folder, batch_id, batch_folder_name) {
+        let (recv_count, sum_bytes, total_expected) = {
+            let mut batches = runtime.batch_folders.lock().await;
+            if let Some(st) = batches.get_mut(b_id) {
+                st.received_files = st.received_files.saturating_add(1);
+                st.total_bytes = st.total_bytes.saturating_add(written_bytes);
+                (st.received_files, st.total_bytes, st.batch_total)
+            } else {
+                (1, written_bytes, batch_total)
+            }
+        };
+
+        if let Some(ref app) = runtime.app_handle {
+            let _ = app.emit(
+                "casa://connect-hp-item",
+                ConnectHpIncomingEventPayload {
+                    kind: "batch_folder".to_string(),
+                    payload: target_dir.to_string_lossy().to_string(),
+                    file_name: Some(folder_name),
+                    size_bytes: Some(sum_bytes),
+                    copied_to_clipboard: false,
+                    batch_id: Some(b_id.clone()),
+                    file_count: Some(recv_count),
+                    batch_total: Some(total_expected),
+                },
+            );
+        }
+    } else if let Some(ref app) = runtime.app_handle {
+        allow_path_in_asset_scope(app, final_path);
+        let _ = app.emit(
+            "casa://connect-hp-item",
+            ConnectHpIncomingEventPayload {
+                kind: "file".to_string(),
+                payload: final_path.to_string_lossy().to_string(),
+                file_name: Some(final_name.to_string()),
+                size_bytes: Some(written_bytes),
+                copied_to_clipboard: false,
+                batch_id: None,
+                file_count: None,
+                batch_total: None,
+            },
+        );
+    }
+}
+
+async fn handle_upload_raw(
+    State(runtime): State<Arc<ServerRuntime>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Query(query): Query<TokenQuery>,
+    req: HttpRequest<Body>,
+) -> Response {
+    if let Err((code, msg)) =
+        verify_request_access(&runtime, addr.ip(), req.headers(), query.t.as_deref(), true)
+    {
+        return (code, msg).into_response();
+    }
+    runtime.touch_activity();
+    let _transfer_guard = ActiveTransferGuard::new(&runtime.active_transfers);
+
+    if let Some(declared_len) = req
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse::<u64>().ok())
+    {
+        if declared_len > MAX_UPLOAD_FILE_BYTES {
+            return (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Ukuran berkas melebihi batas 4 GB",
+            )
+                .into_response();
+        }
+    }
+
+    let raw_name = req
+        .headers()
+        .get("x-casa-file-name")
+        .and_then(|v| v.to_str().ok())
+        .map(percent_decode_utf8)
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "upload-hp.bin".to_string());
+    let safe_name = sanitize_transit_filename(&raw_name);
+
+    let batch_id = sanitize_batch_id(
+        req.headers()
+            .get("x-casa-batch-id")
+            .and_then(|v| v.to_str().ok()),
+    );
+    let batch_total: u32 = req
+        .headers()
+        .get("x-casa-batch-total")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(1)
+        .max(1);
+    let wants_batch_folder = batch_total > 5 && batch_id.is_some();
+
+    let base_drop_dir = match runtime.app_handle.as_ref() {
+        Some(app) => match resolve_casa_drop_dir(app) {
+            Ok(dir) => dir,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+        },
+        None => runtime.download_dir.clone(),
+    };
+
+    let mut data_stream = req.into_body().into_data_stream();
+    let mut received_bytes: u64 = 0;
+    let mut touch_accum: u64 = 0;
+
+    let mut active_writer: Option<(
+        mpsc::Sender<Bytes>,
+        Arc<AtomicBool>,
+        tokio::task::JoinHandle<Result<BlockingUploadResult, (StatusCode, String)>>,
+        PathBuf,
+        bool,
+        Option<String>,
+    )> = None;
+
+    while let Some(frame_res) =
+        std::future::poll_fn(|cx| Pin::new(&mut data_stream).poll_frame(cx)).await
+    {
+        match frame_res {
+            Ok(frame) => {
+                let Ok(chunk) = frame.into_data() else {
+                    continue;
+                };
+                if chunk.is_empty() {
+                    continue;
+                }
+                let chunk_len = chunk.len() as u64;
+                if received_bytes.saturating_add(chunk_len) > MAX_UPLOAD_FILE_BYTES {
+                    drop(active_writer);
+                    return (
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        "Ukuran berkas melebihi batas 4 GB",
+                    )
+                        .into_response();
+                }
+
+                if active_writer.is_none() {
+                    let (target_dir, is_batch_folder, batch_folder_name) =
+                        match resolve_or_create_upload_target_dir(
+                            &runtime,
+                            &base_drop_dir,
+                            wants_batch_folder,
+                            batch_id.as_ref(),
+                            batch_total,
+                        )
+                        .await
+                        {
+                            Ok(v) => v,
+                            Err((code, msg)) => return (code, msg).into_response(),
+                        };
+
+                    let millis = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis();
+                    let seq = UPLOAD_PART_SEQ.fetch_add(1, Ordering::Relaxed);
+                    let part_path =
+                        base_drop_dir.join(format!(".{}_{}_{}.part", millis, seq, safe_name));
+                    let (tx, rx) = mpsc::channel::<Bytes>(UPLOAD_CHANNEL_CAPACITY);
+                    let commit_ok = Arc::new(AtomicBool::new(false));
+                    let handle = spawn_blocking_upload_writer(
+                        part_path,
+                        target_dir.clone(),
+                        safe_name.clone(),
+                        rx,
+                        Arc::clone(&commit_ok),
+                    );
+                    active_writer = Some((
+                        tx,
+                        commit_ok,
+                        handle,
+                        target_dir,
+                        is_batch_folder,
+                        batch_folder_name,
+                    ));
+                }
+
+                let tx_ref = &active_writer.as_ref().unwrap().0;
+                if tx_ref.send(chunk).await.is_err() {
+                    if let Some((tx, _, handle, _, _, _)) = active_writer.take() {
+                        drop(tx);
+                        if let Ok(Err((code, msg))) = handle.await {
+                            return (code, msg).into_response();
+                        }
+                    }
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Writer disk terhenti saat menerima berkas",
+                    )
+                        .into_response();
+                }
+
+                received_bytes += chunk_len;
+                touch_accum += chunk_len;
+                if touch_accum >= TOUCH_INTERVAL_BYTES {
+                    touch_accum = 0;
+                    runtime.touch_activity();
+                }
+            }
+            Err(e) => {
+                drop(active_writer);
+                return (
+                    StatusCode::BAD_REQUEST,
+                    format!("Stream unggahan terputus: {}", e),
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    let Some((tx, commit_ok, handle, target_dir, is_batch_folder, batch_folder_name)) =
+        active_writer
+    else {
+        return (StatusCode::BAD_REQUEST, "Tidak ada berkas yang valid").into_response();
+    };
+
+    commit_ok.store(true, Ordering::Release);
+    drop(tx);
+
+    let saved = match handle.await {
+        Ok(Ok(res)) => res,
+        Ok(Err((code, msg))) => return (code, msg).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Task penulisan berkas gagal: {}", e),
+            )
+                .into_response()
+        }
+    };
+    runtime.touch_activity();
+
+    if saved.written_bytes == 0 {
+        return (StatusCode::BAD_REQUEST, "Tidak ada berkas yang valid").into_response();
+    }
+
+    emit_uploaded_file_event(
+        &runtime,
+        &target_dir,
+        &saved.final_path,
+        &saved.final_name,
+        saved.written_bytes,
+        is_batch_folder,
+        batch_id.as_ref(),
+        batch_folder_name,
+        batch_total,
+    )
+    .await;
+
+    Json(serde_json::json!({
+        "ok": true,
+        "saved": [{
+            "fileName": saved.final_name,
+            "sizeBytes": saved.written_bytes,
+            "batchFolder": is_batch_folder,
+        }],
+    }))
+    .into_response()
+}
+
 async fn handle_upload_file(
     State(runtime): State<Arc<ServerRuntime>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -1447,48 +1992,90 @@ async fn handle_upload_file(
         let safe_name = sanitize_transit_filename(&raw_name);
         let wants_batch_folder = batch_total > 5 && batch_id.is_some();
 
-        let millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        let seq = UPLOAD_PART_SEQ.fetch_add(1, Ordering::Relaxed);
-        let part_path = base_drop_dir.join(format!(".{}_{}_{}.part", millis, seq, safe_name));
-        let mut part_guard = PartFileCleanupGuard::new(part_path.clone());
-
-        let file = match tokio::fs::File::create(&part_path).await {
-            Ok(f) => f,
-            Err(e) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Gagal membuat berkas sementara: {}", e),
-                )
-                    .into_response();
-            }
-        };
-
-        let mut writer = BufWriter::with_capacity(STREAM_CHUNK_BYTES, file);
-        let mut written_bytes: u64 = 0;
+        let mut received_bytes: u64 = 0;
         let mut touch_accum: u64 = 0;
+        let mut active_writer: Option<(
+            mpsc::Sender<Bytes>,
+            Arc<AtomicBool>,
+            tokio::task::JoinHandle<Result<BlockingUploadResult, (StatusCode, String)>>,
+            PathBuf,
+            bool,
+            Option<String>,
+        )> = None;
 
         loop {
             match field.chunk().await {
                 Ok(Some(chunk)) => {
+                    if chunk.is_empty() {
+                        continue;
+                    }
                     let chunk_len = chunk.len() as u64;
-                    if written_bytes.saturating_add(chunk_len) > MAX_UPLOAD_FILE_BYTES {
+                    if received_bytes.saturating_add(chunk_len) > MAX_UPLOAD_FILE_BYTES {
+                        drop(active_writer);
                         return (
                             StatusCode::PAYLOAD_TOO_LARGE,
                             "Ukuran berkas melebihi batas 4 GB",
                         )
                             .into_response();
                     }
-                    if let Err(e) = writer.write_all(&chunk).await {
+
+                    if active_writer.is_none() {
+                        let (target_dir, is_batch_folder, batch_folder_name) =
+                            match resolve_or_create_upload_target_dir(
+                                &runtime,
+                                &base_drop_dir,
+                                wants_batch_folder,
+                                batch_id.as_ref(),
+                                batch_total,
+                            )
+                            .await
+                            {
+                                Ok(v) => v,
+                                Err((code, msg)) => return (code, msg).into_response(),
+                            };
+
+                        let millis = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis();
+                        let seq = UPLOAD_PART_SEQ.fetch_add(1, Ordering::Relaxed);
+                        let part_path =
+                            base_drop_dir.join(format!(".{}_{}_{}.part", millis, seq, safe_name));
+                        let (tx, rx) = mpsc::channel::<Bytes>(UPLOAD_CHANNEL_CAPACITY);
+                        let commit_ok = Arc::new(AtomicBool::new(false));
+                        let handle = spawn_blocking_upload_writer(
+                            part_path,
+                            target_dir.clone(),
+                            safe_name.clone(),
+                            rx,
+                            Arc::clone(&commit_ok),
+                        );
+                        active_writer = Some((
+                            tx,
+                            commit_ok,
+                            handle,
+                            target_dir,
+                            is_batch_folder,
+                            batch_folder_name,
+                        ));
+                    }
+
+                    let tx_ref = &active_writer.as_ref().unwrap().0;
+                    if tx_ref.send(chunk).await.is_err() {
+                        if let Some((tx, _, handle, _, _, _)) = active_writer.take() {
+                            drop(tx);
+                            if let Ok(Err((code, msg))) = handle.await {
+                                return (code, msg).into_response();
+                            }
+                        }
                         return (
                             StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("Gagal menulis chunk ke disk: {}", e),
+                            "Writer disk terhenti saat menerima berkas",
                         )
                             .into_response();
                     }
-                    written_bytes += chunk_len;
+
+                    received_bytes += chunk_len;
                     touch_accum += chunk_len;
                     if touch_accum >= TOUCH_INTERVAL_BYTES {
                         touch_accum = 0;
@@ -1497,6 +2084,7 @@ async fn handle_upload_file(
                 }
                 Ok(None) => break,
                 Err(e) => {
+                    drop(active_writer);
                     return (
                         StatusCode::BAD_REQUEST,
                         format!("Stream unggahan terputus: {}", e),
@@ -1506,128 +2094,48 @@ async fn handle_upload_file(
             }
         }
 
-        if let Err(e) = writer.flush().await {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Gagal menyelesaikan penulisan berkas: {}", e),
-            )
-                .into_response();
-        }
-        drop(writer);
+        let Some((tx, commit_ok, handle, target_dir, is_batch_folder, batch_folder_name)) =
+            active_writer
+        else {
+            continue;
+        };
+
+        commit_ok.store(true, Ordering::Release);
+        drop(tx);
+
+        let saved = match handle.await {
+            Ok(Ok(res)) => res,
+            Ok(Err((code, msg))) => return (code, msg).into_response(),
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Task penulisan berkas gagal: {}", e),
+                )
+                    .into_response()
+            }
+        };
         runtime.touch_activity();
 
-        if written_bytes == 0 {
+        if saved.written_bytes == 0 {
             continue;
         }
 
-        // Tunda pembuatan folder batch hingga dipastikan ada payload (> 0 byte) dan patuhi batas 32 batch per sesi
-        let (target_dir, is_batch_folder, batch_folder_name) = if wants_batch_folder {
-            let b_id = batch_id.as_ref().unwrap();
-            let mut batches = runtime.batch_folders.lock().await;
-            if let Some(existing) = batches.get(b_id) {
-                (
-                    existing.dir_path.clone(),
-                    true,
-                    Some(existing.folder_name.clone()),
-                )
-            } else if batches.len() >= MAX_BATCH_FOLDERS_PER_SESSION {
-                return (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "Batas folder batch per sesi Connect HP (32) tercapai",
-                )
-                    .into_response();
-            } else {
-                match create_unique_batch_subfolder(&base_drop_dir) {
-                    Ok((dir_path, folder_name)) => {
-                        batches.insert(
-                            b_id.clone(),
-                            BatchFolderState {
-                                dir_path: dir_path.clone(),
-                                folder_name: folder_name.clone(),
-                                received_files: 0,
-                                total_bytes: 0,
-                                batch_total,
-                            },
-                        );
-                        (dir_path, true, Some(folder_name))
-                    }
-                    Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
-                }
-            }
-        } else {
-            (base_drop_dir.clone(), false, None)
-        };
-
-        let final_path = match reserve_unique_dest_path(&target_dir, &safe_name) {
-            Ok(p) => p,
-            Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
-        };
-
-        if let Err(e) = tokio::fs::rename(&part_path, &final_path).await {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Gagal memindahkan berkas final: {}", e),
-            )
-                .into_response();
-        }
-        part_guard.disarm();
-        write_mark_of_the_web(&final_path);
-
-        let final_str = final_path.to_string_lossy().to_string();
-        let final_name = final_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| safe_name.clone());
-
-        if let (true, Some(b_id), Some(folder_name)) =
-            (is_batch_folder, batch_id.as_ref(), batch_folder_name)
-        {
-            let (recv_count, sum_bytes, total_expected) = {
-                let mut batches = runtime.batch_folders.lock().await;
-                if let Some(st) = batches.get_mut(b_id) {
-                    st.received_files = st.received_files.saturating_add(1);
-                    st.total_bytes = st.total_bytes.saturating_add(written_bytes);
-                    (st.received_files, st.total_bytes, st.batch_total)
-                } else {
-                    (1, written_bytes, batch_total)
-                }
-            };
-
-            if let Some(ref app) = runtime.app_handle {
-                let _ = app.emit(
-                    "casa://connect-hp-item",
-                    ConnectHpIncomingEventPayload {
-                        kind: "batch_folder".to_string(),
-                        payload: target_dir.to_string_lossy().to_string(),
-                        file_name: Some(folder_name),
-                        size_bytes: Some(sum_bytes),
-                        copied_to_clipboard: false,
-                        batch_id: Some(b_id.clone()),
-                        file_count: Some(recv_count),
-                        batch_total: Some(total_expected),
-                    },
-                );
-            }
-        } else if let Some(ref app) = runtime.app_handle {
-            allow_path_in_asset_scope(app, &final_path);
-            let _ = app.emit(
-                "casa://connect-hp-item",
-                ConnectHpIncomingEventPayload {
-                    kind: "file".to_string(),
-                    payload: final_str,
-                    file_name: Some(final_name.clone()),
-                    size_bytes: Some(written_bytes),
-                    copied_to_clipboard: false,
-                    batch_id: None,
-                    file_count: None,
-                    batch_total: None,
-                },
-            );
-        }
+        emit_uploaded_file_event(
+            &runtime,
+            &target_dir,
+            &saved.final_path,
+            &saved.final_name,
+            saved.written_bytes,
+            is_batch_folder,
+            batch_id.as_ref(),
+            batch_folder_name,
+            batch_total,
+        )
+        .await;
 
         saved_results.push(serde_json::json!({
-            "fileName": final_name,
-            "sizeBytes": written_bytes,
+            "fileName": saved.final_name,
+            "sizeBytes": saved.written_bytes,
             "batchFolder": is_batch_folder,
         }));
     }
@@ -1799,19 +2307,33 @@ async fn handle_download_file(
         };
 
         let total_zip_bytes = plan.total_zip_bytes;
-        let (duplex_writer, duplex_reader) = tokio::io::duplex(128 * 1024);
+        let (tx, rx) = mpsc::channel::<std::io::Result<Bytes>>(DOWNLOAD_CHANNEL_CAPACITY);
         let runtime_clone = Arc::clone(&runtime);
 
-        tokio::spawn(async move {
+        tokio::task::spawn_blocking(move || {
             let _guard = ActiveTransferGuard::new(&runtime_clone.active_transfers);
-            let rt_ref = &runtime_clone;
-            let _ = write_streaming_store_zip_from_plan(&plan, duplex_writer, move || {
-                rt_ref.touch_activity();
-            })
-            .await;
+            let rt_ref = Arc::clone(&runtime_clone);
+            let mut touch_accum: u64 = 0;
+            let channel_writer = ChannelSyncWriter::new(tx.clone(), move |n| {
+                touch_accum = touch_accum.saturating_add(n);
+                if touch_accum >= TOUCH_INTERVAL_BYTES {
+                    touch_accum = 0;
+                    rt_ref.touch_activity();
+                }
+            });
+            let mut buffered_writer =
+                std::io::BufWriter::with_capacity(ZIP_CHUNK_BYTES, channel_writer);
+            let rt_touch = Arc::clone(&runtime_clone);
+            if let Err(e) =
+                write_streaming_store_zip_from_plan_sync(&plan, &mut buffered_writer, move || {
+                    rt_touch.touch_activity();
+                })
+            {
+                let _ = tx.blocking_send(Err(e));
+            }
         });
 
-        let stream = ReaderStream::with_capacity(duplex_reader, STREAM_CHUNK_BYTES);
+        let stream = ReaderStream::with_capacity(ChannelAsyncRead::new(rx), ZIP_CHUNK_BYTES);
         let body = Body::from_stream(stream);
         let mut resp = Response::new(body);
         resp.headers_mut().insert(
@@ -1835,9 +2357,9 @@ async fn handle_download_file(
         return resp;
     }
 
-    // Streaming Single File (64 KB chunks via ReaderStream)
-    let file = match tokio::fs::File::open(&disk_path).await {
-        Ok(f) => f,
+    // Streaming Single File (dedicated spawn_blocking 512 KiB reader -> bounded mpsc(4) -> Body::from_stream)
+    let file_for_read = match tokio::fs::File::open(&disk_path).await {
+        Ok(f) => f.into_std().await,
         Err(_) => return (StatusCode::NOT_FOUND, "Gagal membuka berkas").into_response(),
     };
 
@@ -1849,7 +2371,36 @@ async fn handle_download_file(
     let mime_type = guess_download_mime_type(&raw_file_name);
     let file_len = meta.len();
 
-    let stream = ReaderStream::with_capacity(file, STREAM_CHUNK_BYTES);
+    let (tx, rx) = mpsc::channel::<std::io::Result<Bytes>>(DOWNLOAD_CHANNEL_CAPACITY);
+    let runtime_clone = Arc::clone(&runtime);
+    tokio::task::spawn_blocking(move || {
+        let _guard = ActiveTransferGuard::new(&runtime_clone.active_transfers);
+        let mut file = file_for_read;
+        let mut touch_accum: u64 = 0;
+        loop {
+            let mut chunk_buf = vec![0u8; DOWNLOAD_CHUNK_BYTES];
+            match file.read(&mut chunk_buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    chunk_buf.truncate(n);
+                    touch_accum = touch_accum.saturating_add(n as u64);
+                    if touch_accum >= TOUCH_INTERVAL_BYTES {
+                        touch_accum = 0;
+                        runtime_clone.touch_activity();
+                    }
+                    if tx.blocking_send(Ok(Bytes::from(chunk_buf))).is_err() {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.blocking_send(Err(e));
+                    break;
+                }
+            }
+        }
+    });
+
+    let stream = ReaderStream::with_capacity(ChannelAsyncRead::new(rx), DOWNLOAD_CHUNK_BYTES);
     let body = Body::from_stream(stream);
     let mut resp = Response::new(body);
     resp.headers_mut()
@@ -1931,6 +2482,10 @@ fn build_connect_hp_router(runtime: Arc<ServerRuntime>) -> Router {
         .route("/ws", get(handle_ws_upgrade))
         .route("/api/items", get(handle_get_items))
         .route("/api/text", post(handle_post_text))
+        .route(
+            "/api/upload-raw",
+            post(handle_upload_raw).layer(DefaultBodyLimit::disable()),
+        )
         .route(
             "/api/upload",
             post(handle_upload_file).layer(DefaultBodyLimit::disable()),
@@ -2037,6 +2592,7 @@ pub async fn start_connect_hp(
             listener,
             router.into_make_service_with_connect_info::<SocketAddr>(),
         )
+        .tcp_nodelay(true)
         .with_graceful_shutdown(async move {
             let _ = shutdown_rx.await;
         })
@@ -2343,9 +2899,11 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
   .pick-input { display: none; }
   .prog-wrap { margin-top: 12px; display: none; }
   .prog-wrap.active { display: block; }
-  .prog-meta { display: flex; justify-content: space-between; font-size: 11px; font-family: ui-monospace, monospace; color: #d4d4d8; margin-bottom: 6px; }
+  .prog-meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11px; font-family: ui-monospace, monospace; color: #d4d4d8; margin-bottom: 6px; }
+  .prog-right { display: inline-flex; align-items: center; gap: 8px; }
+  .prog-speed { color: #a1a1aa; font-size: 10.5px; }
   .prog-bar { width: 100%; height: 6px; background: rgba(255,255,255,0.12); border-radius: 999px; overflow: hidden; }
-  .prog-fill { height: 100%; width: 0%; background: #ffffff; transition: width 0.15s linear; }
+  .prog-fill { height: 100%; width: 100%; background: #ffffff; transform-origin: left center; transform: scaleX(0); transition: transform 0.1s linear; will-change: transform; }
   .wake-note { margin-top: 8px; font-size: 11px; color: #d4d4d8; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 7px 10px; }
   .list { display: flex; flex-direction: column; gap: 8px; }
   .item-block { display: flex; flex-direction: column; gap: 4px; }
@@ -2387,7 +2945,10 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
     <div class="prog-wrap" id="upload-prog-wrap">
       <div class="prog-meta">
         <span id="upload-count-text">0 / 0 selesai</span>
-        <span id="upload-pct-text">0%</span>
+        <span class="prog-right">
+          <span id="upload-speed-text" class="prog-speed"></span>
+          <span id="upload-pct-text">0%</span>
+        </span>
       </div>
       <div class="prog-bar"><div class="prog-fill" id="upload-prog-fill"></div></div>
       <div class="wake-note">Jangan kunci layar atau pindah aplikasi selama transfer berlangsung.</div>
@@ -2434,6 +2995,7 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
   const progWrap = document.getElementById('upload-prog-wrap');
   const progFill = document.getElementById('upload-prog-fill');
   const countText = document.getElementById('upload-count-text');
+  const speedText = document.getElementById('upload-speed-text');
   const pctText = document.getElementById('upload-pct-text');
   const laptopList = document.getElementById('laptop-list');
   const laptopCount = document.getElementById('laptop-count');
@@ -2588,7 +3150,34 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
     }
   });
 
-  function uploadSingleFileXhr(file, batchId, batchTotal, onProgress) {
+  function uploadSingleFileRawXhr(file, batchId, batchTotal, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/upload-raw');
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      xhr.setRequestHeader('X-Casa-Token', SESSION_TOKEN);
+      xhr.setRequestHeader('X-Casa-File-Name', encodeURIComponent(file.name || 'file.bin'));
+      xhr.setRequestHeader('X-Casa-Batch-Id', batchId);
+      xhr.setRequestHeader('X-Casa-Batch-Total', String(batchTotal));
+      xhr.upload.onprogress = (ev) => {
+        if (ev.lengthComputable) onProgress(ev.loaded, ev.total);
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(true);
+        } else {
+          const err = new Error('HTTP ' + xhr.status);
+          err.httpStatus = xhr.status;
+          reject(err);
+        }
+      };
+      xhr.onerror = () => reject(new Error('Network error'));
+      xhr.onabort = () => reject(new Error('Aborted'));
+      xhr.send(file);
+    });
+  }
+
+  function uploadSingleFileMultipartXhr(file, batchId, batchTotal, onProgress) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/upload');
@@ -2610,18 +3199,47 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
     });
   }
 
+  let preferMultipartFallback = false;
+
+  async function uploadSingleFileXhr(file, batchId, batchTotal, onProgress) {
+    if (preferMultipartFallback) {
+      return await uploadSingleFileMultipartXhr(file, batchId, batchTotal, onProgress);
+    }
+    try {
+      return await uploadSingleFileRawXhr(file, batchId, batchTotal, onProgress);
+    } catch (err) {
+      if (err && (err.httpStatus === 404 || err.httpStatus === 405 || err.httpStatus === 415)) {
+        preferMultipartFallback = true;
+        onProgress(0, file.size || 1);
+        return await uploadSingleFileMultipartXhr(file, batchId, batchTotal, onProgress);
+      }
+      throw err;
+    }
+  }
+
   async function uploadWithRetry(file, batchId, batchTotal, onProgress) {
     try {
       return await uploadSingleFileXhr(file, batchId, batchTotal, onProgress);
     } catch (_err) {
       onProgress(0, file.size || 1);
-      return await uploadSingleFileXhr(file, batchId, batchTotal, onProgress);
+      try {
+        return await uploadSingleFileXhr(file, batchId, batchTotal, onProgress);
+      } catch (_rawErr) {
+        if (!preferMultipartFallback) {
+          onProgress(0, file.size || 1);
+          return await uploadSingleFileMultipartXhr(file, batchId, batchTotal, onProgress);
+        }
+        throw _rawErr;
+      }
     }
   }
 
   const MAX_CONCURRENT_UPLOADS = 2;
+  const LARGE_FILE_EXCLUSIVE_BYTES = 16 * 1024 * 1024;
+  const PROGRESS_THROTTLE_MS = 100;
   const uploadQueue = [];
   let activeUploads = 0;
+  let activeLargeUploads = 0;
   let sessionDone = 0;
   let sessionFailed = 0;
   let sessionTotal = 0;
@@ -2630,30 +3248,126 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
   const inFlightBytes = new Map();
   let nextUploadUid = 1;
   let hideProgTimer = null;
+  let lastProgressRenderAt = 0;
+  let progressThrottleTimer = null;
+  let progressRafId = null;
+  let lastSpeedSampleAt = 0;
+  let lastSpeedSampleBytes = 0;
+  let smoothedSpeedBps = 0;
 
-  function renderUploadProgress() {
+  function formatSpeed(bps) {
+    if (!Number.isFinite(bps) || bps <= 0) return '';
+    const mbps = bps / (1024 * 1024);
+    if (mbps >= 0.1) return mbps.toFixed(1) + ' MB/s';
+    const kbps = bps / 1024;
+    if (kbps >= 1) return Math.round(kbps) + ' KB/s';
+    return '';
+  }
+
+  function paintUploadProgressNow() {
+    lastProgressRenderAt = Date.now();
     let inFlight = 0;
     inFlightBytes.forEach((bytes) => {
       inFlight += bytes;
     });
+    const transferredBytes = completedBytes + inFlight;
     const pct = sessionTotalBytes > 0
-      ? Math.min(100, Math.round(((completedBytes + inFlight) / sessionTotalBytes) * 100))
+      ? Math.min(100, Math.round((transferredBytes / sessionTotalBytes) * 100))
       : 0;
+
+    if (activeUploads > 0 && lastSpeedSampleAt > 0) {
+      const dtMs = lastProgressRenderAt - lastSpeedSampleAt;
+      if (dtMs >= 200) {
+        const deltaBytes = transferredBytes - lastSpeedSampleBytes;
+        if (deltaBytes > 0) {
+          const instantBps = (deltaBytes * 1000) / dtMs;
+          smoothedSpeedBps = smoothedSpeedBps > 0
+            ? (smoothedSpeedBps * 0.65 + instantBps * 0.35)
+            : instantBps;
+        }
+        lastSpeedSampleAt = lastProgressRenderAt;
+        lastSpeedSampleBytes = transferredBytes;
+      }
+    } else if (activeUploads > 0 && lastSpeedSampleAt === 0) {
+      lastSpeedSampleAt = lastProgressRenderAt;
+      lastSpeedSampleBytes = transferredBytes;
+    } else if (activeUploads === 0 && uploadQueue.length === 0) {
+      smoothedSpeedBps = 0;
+      lastSpeedSampleAt = 0;
+      lastSpeedSampleBytes = 0;
+    }
+
     countText.textContent = sessionDone + ' / ' + sessionTotal + ' selesai';
     pctText.textContent = pct + '%';
-    progFill.style.width = pct + '%';
+    if (speedText) {
+      speedText.textContent = activeUploads > 0 ? formatSpeed(smoothedSpeedBps) : '';
+    }
+    progFill.style.transform = 'scaleX(' + (pct / 100) + ')';
+  }
+
+  function renderUploadProgress(force) {
+    if (force) {
+      if (progressThrottleTimer) {
+        clearTimeout(progressThrottleTimer);
+        progressThrottleTimer = null;
+      }
+      if (progressRafId !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(progressRafId);
+        progressRafId = null;
+      }
+      paintUploadProgressNow();
+      return;
+    }
+
+    const now = Date.now();
+    const elapsed = now - lastProgressRenderAt;
+    const scheduleRaf = () => {
+      if (progressRafId !== null) return;
+      if (typeof requestAnimationFrame === 'function') {
+        progressRafId = requestAnimationFrame(() => {
+          progressRafId = null;
+          paintUploadProgressNow();
+        });
+      } else {
+        paintUploadProgressNow();
+      }
+    };
+
+    if (elapsed >= PROGRESS_THROTTLE_MS) {
+      if (progressThrottleTimer) {
+        clearTimeout(progressThrottleTimer);
+        progressThrottleTimer = null;
+      }
+      scheduleRaf();
+    } else if (!progressThrottleTimer) {
+      progressThrottleTimer = setTimeout(() => {
+        progressThrottleTimer = null;
+        scheduleRaf();
+      }, Math.max(16, PROGRESS_THROTTLE_MS - elapsed));
+    }
   }
 
   function pumpQueue() {
-    while (activeUploads < MAX_CONCURRENT_UPLOADS && uploadQueue.length > 0) {
+    while (uploadQueue.length > 0) {
+      if (activeLargeUploads > 0) break;
+      const nextItem = uploadQueue[0];
+      const nextIsLarge = nextItem.size >= LARGE_FILE_EXCLUSIVE_BYTES;
+      if (nextIsLarge) {
+        if (activeUploads > 0) break;
+      } else if (activeUploads >= MAX_CONCURRENT_UPLOADS) {
+        break;
+      }
+
       const item = uploadQueue.shift();
+      const isLarge = item.size >= LARGE_FILE_EXCLUSIVE_BYTES;
       activeUploads += 1;
+      if (isLarge) activeLargeUploads += 1;
       inFlightBytes.set(item.uid, 0);
       (async () => {
         try {
           await uploadWithRetry(item.file, item.batchId, item.batchTotal, (loaded) => {
             inFlightBytes.set(item.uid, Math.min(Math.max(0, loaded), item.size));
-            renderUploadProgress();
+            renderUploadProgress(false);
           });
           inFlightBytes.delete(item.uid);
           completedBytes += item.size;
@@ -2664,7 +3378,8 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
           sessionFailed += 1;
         } finally {
           activeUploads -= 1;
-          renderUploadProgress();
+          if (isLarge) activeLargeUploads = Math.max(0, activeLargeUploads - 1);
+          renderUploadProgress(true);
           if (uploadQueue.length > 0) {
             pumpQueue();
           } else if (activeUploads === 0) {
@@ -2704,6 +3419,9 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
       sessionTotal = 0;
       completedBytes = 0;
       sessionTotalBytes = 0;
+      smoothedSpeedBps = 0;
+      lastSpeedSampleAt = Date.now();
+      lastSpeedSampleBytes = 0;
       inFlightBytes.clear();
     }
 
@@ -2726,7 +3444,7 @@ pub const MOBILE_WEB_UI_HTML: &str = r##"<!DOCTYPE html>
     sessionTotalBytes += addedBytes;
 
     progWrap.classList.add('active');
-    renderUploadProgress();
+    renderUploadProgress(true);
     pumpQueue();
   });
 
@@ -2872,6 +3590,7 @@ mod tests {
     use super::*;
     use std::io::{Cursor, Read};
     use std::net::Ipv6Addr;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn validates_constant_time_token_comparison() {
@@ -3006,11 +3725,163 @@ mod tests {
         assert!(MOBILE_WEB_UI_HTML.contains("execCommand('copy')"));
         assert!(MOBILE_WEB_UI_HTML.contains("X-Casa-Batch-Id"));
         assert!(MOBILE_WEB_UI_HTML.contains("X-Casa-Batch-Total"));
+        assert!(MOBILE_WEB_UI_HTML.contains("/api/upload-raw"));
+        assert!(MOBILE_WEB_UI_HTML.contains("X-Casa-File-Name"));
+        assert!(MOBILE_WEB_UI_HTML.contains("scaleX("));
+        assert!(MOBILE_WEB_UI_HTML.contains("LARGE_FILE_EXCLUSIVE_BYTES"));
         assert!(MOBILE_WEB_UI_HTML.contains("uploadQueue"));
         assert!(MOBILE_WEB_UI_HTML.contains("inFlightBytes"));
         assert!(MOBILE_WEB_UI_HTML.contains("renderUploadProgress"));
         assert!(MOBILE_WEB_UI_HTML.contains("pumpQueue"));
         assert!(!MOBILE_WEB_UI_HTML.contains("innerHTML"));
+    }
+
+    #[test]
+    fn crc32_slice4_matches_ieee_vector_and_bytewise_reference() {
+        fn crc32_bytewise(crc: u32, data: &[u8]) -> u32 {
+            let mut c = !crc;
+            for &b in data {
+                c = CRC32_TABLES[0][((c ^ (b as u32)) & 0xFF) as usize] ^ (c >> 8);
+            }
+            !c
+        }
+
+        assert_eq!(crc32_update(0, b"123456789"), 0xCBF4_3926);
+        for len in [0usize, 1, 2, 3, 4, 5, 7, 15, 16, 17, 63, 257, 4099] {
+            let data: Vec<u8> = (0..len).map(|i| ((i * 73 + 19) & 0xFF) as u8).collect();
+            assert_eq!(
+                crc32_update(0, &data),
+                crc32_bytewise(0, &data),
+                "slice-by-4 CRC32 mismatch at len={len}"
+            );
+            // Incremental multi-chunk equivalence
+            if len > 5 {
+                let split = len / 3;
+                let partial = crc32_update(0, &data[..split]);
+                assert_eq!(crc32_update(partial, &data[split..]), crc32_bytewise(0, &data));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn raw_upload_endpoint_streams_file_enforces_auth_and_decodes_filename() {
+        assert_eq!(
+            percent_decode_utf8("Video%20Liburan%20%231.mp4"),
+            "Video Liburan #1.mp4"
+        );
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "casa_raw_upload_test_{}",
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let (ws_broadcast, _) = broadcast::channel::<String>(8);
+        let token = "fedcba9876543210fedcba9876543210".to_string();
+        let runtime = Arc::new(ServerRuntime {
+            session_id: 9998,
+            token: token.clone(),
+            port,
+            stopped: AtomicBool::new(false),
+            selected_ip: Mutex::new("127.0.0.1".to_string()),
+            candidate_interfaces: Mutex::new(vec![NetworkInterfaceOption {
+                ip: "127.0.0.1".to_string(),
+                label: "Loopback".to_string(),
+                is_hotspot: false,
+            }]),
+            network_category: Mutex::new("Private".to_string()),
+            download_dir: temp_dir.clone(),
+            auto_copy_clipboard: AtomicUsize::new(0),
+            connected_clients: AtomicUsize::new(0),
+            active_transfers: AtomicUsize::new(0),
+            last_activity_epoch: AtomicU64::new(100),
+            shared_items: RwLock::new(Vec::new()),
+            shared_by_id: RwLock::new(HashMap::new()),
+            batch_folders: tokio::sync::Mutex::new(HashMap::new()),
+            ws_broadcast,
+            shutdown_tx: Mutex::new(Some(shutdown_tx)),
+            serve_task: Mutex::new(None),
+            watchdog_task: Mutex::new(None),
+            app_handle: None,
+        });
+
+        let router = build_connect_hp_router(Arc::clone(&runtime));
+        let server_task = tokio::spawn(async move {
+            let _ = axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .tcp_nodelay(true)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await;
+        });
+
+        // 1. Unauthenticated /api/upload-raw -> rejected 401 before body
+        {
+            let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            let req = format!(
+                "POST /api/upload-raw HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Type: application/octet-stream\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntest"
+            );
+            stream.write_all(req.as_bytes()).await.unwrap();
+            let mut buf = Vec::new();
+            let _ = stream.read_to_end(&mut buf).await;
+            let resp = String::from_utf8_lossy(&buf);
+            assert!(resp.starts_with("HTTP/1.1 401"), "expected 401, got: {}", &resp[..resp.len().min(100)]);
+        }
+
+        // 2. Authenticated /api/upload-raw with >4GiB declared Content-Length -> rejected 413 upfront
+        {
+            let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            let too_big = MAX_UPLOAD_FILE_BYTES + 1;
+            let req = format!(
+                "POST /api/upload-raw HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nX-Casa-Token: {token}\r\nX-Casa-File-Name: huge.bin\r\nContent-Type: application/octet-stream\r\nContent-Length: {too_big}\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(req.as_bytes()).await.unwrap();
+            let mut buf = Vec::new();
+            let _ = stream.read_to_end(&mut buf).await;
+            let resp = String::from_utf8_lossy(&buf);
+            assert!(resp.starts_with("HTTP/1.1 413"), "expected 413, got: {}", &resp[..resp.len().min(100)]);
+        }
+
+        // 3. Authenticated /api/upload-raw streams >256KiB payload cleanly & URL-decodes filename
+        let payload: Vec<u8> = (0..(320 * 1024)).map(|i| ((i * 31 + 7) & 0xFF) as u8).collect();
+        {
+            let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            let req_head = format!(
+                "POST /api/upload-raw HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nX-Casa-Token: {token}\r\nX-Casa-File-Name: Clip%20Final%2001.mp4\r\nX-Casa-Batch-Id: b-raw-test1\r\nX-Casa-Batch-Total: 1\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                payload.len()
+            );
+            stream.write_all(req_head.as_bytes()).await.unwrap();
+            stream.write_all(&payload).await.unwrap();
+            let mut buf = Vec::new();
+            let _ = stream.read_to_end(&mut buf).await;
+            let resp = String::from_utf8_lossy(&buf);
+            assert!(resp.starts_with("HTTP/1.1 200"), "expected 200, got: {}", &resp[..resp.len().min(180)]);
+            assert!(resp.contains("Clip Final 01.mp4"));
+        }
+
+        let saved_file = temp_dir.join("Clip Final 01.mp4");
+        assert!(saved_file.exists(), "Raw uploaded file must exist on disk");
+        assert_eq!(std::fs::read(&saved_file).unwrap(), payload);
+        let leftover_parts: Vec<_> = std::fs::read_dir(&temp_dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".part"))
+            .collect();
+        assert!(leftover_parts.is_empty(), "No .part temp files should remain");
+
+        if let Ok(mut tx) = runtime.shutdown_tx.lock() {
+            if let Some(s) = tx.take() {
+                let _ = s.send(());
+            }
+        }
+        let _ = server_task.await;
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

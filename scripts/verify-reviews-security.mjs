@@ -311,6 +311,32 @@ async function run() {
     'v2.5.0 Guardrails: Calendar sanitization/50-cap/Zero-Churn + Core Audio all-endpoint 12% ducking, self 100%, PlaySoundW & RPC_E_CHANGED_MODE'
   );
 
+  // v2.5.0 Settings Window WebView2 Environment Parity & Async Lifecycle Guardrail
+  const tauriConf = JSON.parse(readRepo('src-tauri/tauri.conf.json'));
+  const mainWinConf = (tauriConf.app?.windows || []).find((w) => w.label === 'main');
+  const settingsWindowTs = readRepo('src/utils/settingsWindow.ts');
+  const casaIslandTsx = readRepo('src/components/CasaIsland.tsx');
+  check(
+    typeof mainWinConf?.additionalBrowserArgs === 'string' &&
+      mainWinConf.additionalBrowserArgs.includes(
+        '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection'
+      ) &&
+      mainWinConf.additionalBrowserArgs.includes('--autoplay-policy=no-user-gesture-required') &&
+      !('dataDirectory' in (mainWinConf || {})) &&
+      /async\s+fn\s+open_settings_window\s*\(/.test(libRs) &&
+      libRs.includes('additional_browser_args') &&
+      libRs.includes('SW_RESTORE') &&
+      libRs.includes('BringWindowToTop') &&
+      libRs.includes('SetForegroundWindow') &&
+      libRs.includes('open_settings_window,') &&
+      settingsWindowTs.includes("invoke('open_settings_window'") &&
+      settingsWindowTs.includes('additionalBrowserArgs: SHARED_WEBVIEW_BROWSER_ARGS') &&
+      settingsWindowTs.includes(mainWinConf.additionalBrowserArgs) &&
+      casaIslandTsx.includes("target.closest('[data-settings-btn=\"true\"]')") &&
+      casaIslandTsx.includes("target.closest('[data-update-popup=\"true\"]')"),
+    'v2.5.0 Settings Guardrail: async fn open_settings_window inherits main additionalBrowserArgs (shared WebView2 env), Win32 SW_RESTORE/foreground & idle_peek exemption'
+  );
+
   console.log(`\n  REVIEWS SECURITY & HARDENING TESTS: ${passed} passed, 0 failed\n`);
 }
 

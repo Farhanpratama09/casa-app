@@ -3308,6 +3308,8 @@ export const CasaIsland: React.FC<CasaIslandProps> = ({
                       const target = e.target as HTMLElement;
                       if (
                         target.closest('[data-collapse-btn="true"]') ||
+                        target.closest('[data-settings-btn="true"]') ||
+                        target.closest('[data-update-popup="true"]') ||
                         target.closest('[data-satellite-pod="true"]') ||
                         target.closest('[data-focus-peek-card="true"]')
                       ) {

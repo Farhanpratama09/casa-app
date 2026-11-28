@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow, WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { emit } from '@tauri-apps/api/event';
 
@@ -5,6 +6,11 @@ export type SettingsSectionTarget = 'appearance' | 'behavior' | 'audio' | 'ibada
 
 export const SETTINGS_DEEP_LINK_STORAGE_KEY = 'casa_settings_deep_link_v1';
 export const SETTINGS_NAVIGATE_EVENT = 'casa://settings-navigate';
+
+// Must stay 1:1 with `app.windows[main].additionalBrowserArgs` in `src-tauri/tauri.conf.json`
+// so Windows WebView2 shares the same environment & User Data Folder (localStorage + IndexedDB).
+const SHARED_WEBVIEW_BROWSER_ARGS =
+  '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required';
 
 const VALID_SECTIONS = new Set<SettingsSectionTarget>([
   'appearance',
@@ -98,12 +104,21 @@ export async function openDesktopSettingsWindow(section?: SettingsSectionTarget)
     return;
   }
 
+  const validSection = section && isValidSettingsSection(section) ? section : undefined;
+
   pendingSettingsOpen = (async () => {
     try {
+      try {
+        await invoke('open_settings_window', { section: validSection ?? null });
+        return;
+      } catch (rustErr) {
+        console.warn('[CASA] open_settings_window IPC failed, falling back to JS WebviewWindow:', rustErr);
+      }
+
       const existing = await WebviewWindow.getByLabel('settings');
       if (existing) {
-        if (section && isValidSettingsSection(section)) {
-          await emit(SETTINGS_NAVIGATE_EVENT, { section }).catch(() => {});
+        if (validSection) {
+          await emit(SETTINGS_NAVIGATE_EVENT, { section: validSection }).catch(() => {});
         }
         await existing.unminimize().catch(() => {});
         await existing.show();
@@ -111,10 +126,13 @@ export async function openDesktopSettingsWindow(section?: SettingsSectionTarget)
         return;
       }
 
-      const targetUrl =
-        section && isValidSettingsSection(section) ? `/?section=${encodeURIComponent(section)}` : '/';
+      const targetUrl = validSection
+        ? `index.html?section=${encodeURIComponent(validSection)}`
+        : 'index.html';
 
-      const settingsWin = new WebviewWindow('settings', {
+      const fallbackOptions: ConstructorParameters<typeof WebviewWindow>[1] & {
+        additionalBrowserArgs?: string;
+      } = {
         url: targetUrl,
         title: 'CASA Settings',
         width: 760,
@@ -127,8 +145,11 @@ export async function openDesktopSettingsWindow(section?: SettingsSectionTarget)
         alwaysOnTop: false,
         skipTaskbar: false,
         shadow: true,
+        additionalBrowserArgs: SHARED_WEBVIEW_BROWSER_ARGS,
         backgroundColor: [0, 0, 0, 255],
-      });
+      };
+
+      const settingsWin = new WebviewWindow('settings', fallbackOptions);
 
       await new Promise<void>((resolve) => {
         let settled = false;
@@ -141,9 +162,9 @@ export async function openDesktopSettingsWindow(section?: SettingsSectionTarget)
         void settingsWin.once('tauri://created', () => {
           void settingsWin.show().catch(() => {});
           void settingsWin.setFocus().catch(() => {});
-          if (section && isValidSettingsSection(section)) {
+          if (validSection) {
             setTimeout(() => {
-              void emit(SETTINGS_NAVIGATE_EVENT, { section }).catch(() => {});
+              void emit(SETTINGS_NAVIGATE_EVENT, { section: validSection }).catch(() => {});
             }, 180);
           }
           finish();

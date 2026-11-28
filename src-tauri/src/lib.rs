@@ -281,22 +281,115 @@ async fn install_app_update(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn focus_island_window(window: tauri::WebviewWindow) -> Result<(), String> {
     let _ = window.set_focus();
+    bring_window_to_foreground(&window, false);
+    Ok(())
+}
 
+fn bring_window_to_foreground(window: &tauri::WebviewWindow, restore_if_minimized: bool) {
     #[cfg(windows)]
     {
         use windows_sys::Win32::Foundation::HWND;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            BringWindowToTop, SetForegroundWindow,
+            BringWindowToTop, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
         };
 
         if let Ok(hwnd) = window.hwnd() {
             let hwnd_raw = hwnd.0 as HWND;
             unsafe {
+                if restore_if_minimized && IsIconic(hwnd_raw) != 0 {
+                    ShowWindow(hwnd_raw, SW_RESTORE);
+                }
                 BringWindowToTop(hwnd_raw);
                 SetForegroundWindow(hwnd_raw);
             }
         }
     }
+    #[cfg(not(windows))]
+    {
+        let _ = (window, restore_if_minimized);
+    }
+}
+
+fn normalize_settings_section(section: Option<&str>) -> Option<&'static str> {
+    match section.map(str::trim) {
+        Some("appearance") => Some("appearance"),
+        Some("behavior") => Some("behavior"),
+        Some("audio") => Some("audio"),
+        Some("ibadah") => Some("ibadah"),
+        Some("system") => Some("system"),
+        _ => None,
+    }
+}
+
+/// Opens or focuses the dedicated non-transparent CASA Settings desktop window (`settings`, 760x520).
+/// Must remain `async fn` so WebView2 window creation never deadlocks the Windows message loop.
+/// Inherits `additional_browser_args` directly from the `main` window config so both windows
+/// share the same WebView2 environment and User Data Folder (`localStorage` + `IndexedDB`).
+#[tauri::command]
+async fn open_settings_window(
+    app: tauri::AppHandle,
+    section: Option<String>,
+) -> Result<(), String> {
+    let valid_section = normalize_settings_section(section.as_deref());
+
+    if let Some(existing) = app.get_webview_window("settings") {
+        if let Some(sec) = valid_section {
+            let _ = app.emit(
+                "casa://settings-navigate",
+                serde_json::json!({ "section": sec }),
+            );
+        }
+        let _ = existing.unminimize();
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        bring_window_to_foreground(&existing, true);
+        return Ok(());
+    }
+
+    let target_path = match valid_section {
+        Some(sec) => format!("index.html?section={sec}"),
+        None => "index.html".to_string(),
+    };
+
+    let main_browser_args = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == "main")
+        .and_then(|w| w.additional_browser_args.clone());
+
+    let mut builder = tauri::WebviewWindowBuilder::new(
+        &app,
+        "settings",
+        tauri::WebviewUrl::App(target_path.into()),
+    )
+    .title("CASA Settings")
+    .inner_size(760.0, 520.0)
+    .resizable(false)
+    .decorations(false)
+    .transparent(false)
+    .center()
+    .focused(true)
+    .always_on_top(false)
+    .skip_taskbar(false)
+    .shadow(true)
+    .background_color(tauri::webview::Color(0, 0, 0, 255));
+
+    #[cfg(windows)]
+    if let Some(args) = main_browser_args.as_deref() {
+        builder = builder.additional_browser_args(args);
+    }
+    #[cfg(not(windows))]
+    let _ = main_browser_args;
+
+    let created = builder
+        .build()
+        .map_err(|e| format!("Gagal membuat jendela Settings: {e}"))?;
+
+    let _ = created.show();
+    let _ = created.set_focus();
+    bring_window_to_foreground(&created, true);
 
     Ok(())
 }
@@ -530,6 +623,7 @@ pub fn run() {
             toggle_gaming_mode,
             quit_app,
             focus_island_window,
+            open_settings_window,
             adjust_window_size,
             media::media_play_pause,
             media::media_next_track,
